@@ -19,6 +19,8 @@ export function TradingViewChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedPair, setSelectedPair] = useState(initialPair || "XAU/USD");
   const [timeframe, setTimeframe] = useState(initialTimeframe || "1H");
+  const [chartKey, setChartKey] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   // Sync with parent if initial values change
   useEffect(() => {
@@ -36,6 +38,7 @@ export function TradingViewChart({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    setLoading(true);
     containerRef.current.innerHTML = "";
 
     const widgetDiv = document.createElement("div");
@@ -55,6 +58,12 @@ export function TradingViewChart({
     script.type = "text/javascript";
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
     script.async = true;
+    script.onload = () => {
+      setLoading(false);
+    };
+    script.onerror = () => {
+      setLoading(false);
+    };
     script.innerHTML = JSON.stringify({
       autosize: true,
       symbol: `OANDA:${selectedPair.replace("/", "")}`,
@@ -66,16 +75,36 @@ export function TradingViewChart({
       allow_symbol_change: false,
       calendar: false,
       support_host: "https://www.tradingview.com",
+      hide_side_toolbar: false,
+      withdateranges: true,
     });
 
     widgetDiv.appendChild(script);
 
+    // Set a timeout to hide loading even if script doesn't fire onload
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+
     return () => {
+      clearTimeout(timeout);
       if (containerRef.current) {
         containerRef.current.innerHTML = "";
       }
     };
-  }, [selectedPair, timeframe]);
+  }, [selectedPair, timeframe, chartKey]);
+
+  const handleTimeframeChange = (tf: string) => {
+    setTimeframe(tf);
+    setChartKey(prev => prev + 1); // Force re-render
+    if (onTimeframeChange) onTimeframeChange(tf);
+  };
+
+  const handlePairChange = (pair: string) => {
+    setSelectedPair(pair);
+    setChartKey(prev => prev + 1); // Force re-render
+    if (onPairChange) onPairChange(pair);
+  };
 
   return (
     <div style={{
@@ -94,10 +123,7 @@ export function TradingViewChart({
       }}>
         <select
           value={selectedPair}
-          onChange={(e) => {
-            setSelectedPair(e.target.value);
-            if (onPairChange) onPairChange(e.target.value);
-          }}
+          onChange={(e) => handlePairChange(e.target.value)}
           style={{ padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "14px", fontWeight: "600" }}
         >
           {PAIRS.map((p) => <option key={p} value={p}>{p}</option>)}
@@ -107,10 +133,7 @@ export function TradingViewChart({
           {TIMEFRAMES.map((tf) => (
             <button
               key={tf}
-              onClick={() => {
-                setTimeframe(tf);
-                if (onTimeframeChange) onTimeframeChange(tf);
-              }}
+              onClick={() => handleTimeframeChange(tf)}
               style={{
                 padding: "6px 12px",
                 borderRadius: "6px",
@@ -129,7 +152,43 @@ export function TradingViewChart({
         </div>
       </div>
 
-      <div ref={containerRef} style={{ width: "100%", height: "400px" }} />
+      <div ref={containerRef} style={{ width: "100%", height: "400px", position: "relative" }}>
+        {loading && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "#f9fafb",
+          }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{
+                width: "40px",
+                height: "40px",
+                border: "4px solid #e5e7eb",
+                borderTop: "4px solid #1c69e3",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+                margin: "0 auto 12px",
+              }} />
+              <p style={{ color: "#6b7280", fontSize: "14px" }}>
+                Loading {selectedPair} {timeframe} chart...
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
