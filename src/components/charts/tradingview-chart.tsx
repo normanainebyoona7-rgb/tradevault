@@ -19,6 +19,28 @@ export function TradingViewChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedPair, setSelectedPair] = useState(initialPair || "XAU/USD");
   const [timeframe, setTimeframe] = useState(initialTimeframe || "1H");
+  const [chartHeight, setChartHeight] = useState(500);
+
+  useEffect(() => {
+    // Get the width of the container to determine height
+    const updateHeight = () => {
+      if (containerRef.current) {
+        const width = containerRef.current.offsetWidth;
+        // Set height based on width (responsive aspect ratio)
+        if (width < 400) {
+          setChartHeight(300);
+        } else if (width < 600) {
+          setChartHeight(400);
+        } else {
+          setChartHeight(500);
+        }
+      }
+    };
+
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -30,7 +52,7 @@ export function TradingViewChart({
     const widgetDiv = document.createElement("div");
     widgetDiv.className = "tradingview-widget-container";
     widgetDiv.style.width = "100%";
-    widgetDiv.style.height = "600px";
+    widgetDiv.style.height = `${chartHeight}px`;
 
     const innerDiv = document.createElement("div");
     innerDiv.className = "tradingview-widget-container__widget";
@@ -83,6 +105,8 @@ export function TradingViewChart({
       allow_symbol_change: false,
       calendar: false,
       support_host: "https://www.tradingview.com",
+      width: "100%",
+      height: chartHeight,
     });
 
     widgetDiv.appendChild(script);
@@ -92,7 +116,7 @@ export function TradingViewChart({
         containerRef.current.innerHTML = "";
       }
     };
-  }, [selectedPair, timeframe]);
+  }, [selectedPair, timeframe, chartHeight]);
 
   const handleTimeframeChange = (tf: string) => {
     setTimeframe(tf);
@@ -110,6 +134,7 @@ export function TradingViewChart({
       border: "1px solid #e5e7eb",
       borderRadius: "12px",
       overflow: "hidden",
+      width: "100%",
     }}>
       <div style={{
         display: "flex",
@@ -150,7 +175,14 @@ export function TradingViewChart({
         </div>
       </div>
 
-      <div ref={containerRef} style={{ width: "100%", minHeight: "600px" }} />
+      <div 
+        ref={containerRef} 
+        style={{ 
+          width: "100%", 
+          height: `${chartHeight}px`,
+          minHeight: "300px",
+        }} 
+      />
     </div>
   );
 }
