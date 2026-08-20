@@ -13,6 +13,7 @@ export default function AdminPage() {
   const [isLocked, setIsLocked] = useState(true);
   const [adminPassword, setAdminPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
 
   const [signals, setSignals] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
@@ -44,6 +45,15 @@ export default function AdminPage() {
     password: "",
     tier: "free",
   });
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -307,7 +317,7 @@ export default function AdminPage() {
 
   if (isLocked) {
     return (
-      <div style={{ maxWidth: "400px", margin: "0 auto", padding: "60px 24px", textAlign: "center" }}>
+      <div style={{ maxWidth: "400px", margin: "0 auto", padding: isMobile ? "40px 16px" : "60px 24px", textAlign: "center" }}>
         <p style={{ fontSize: "48px" }}>🔐</p>
         <h1 style={{ fontSize: "24px", fontWeight: "700", marginBottom: "16px" }}>Admin Login</h1>
         {passwordError && <p style={{ color: "#dc2626", marginBottom: "12px" }}>{passwordError}</p>}
@@ -326,13 +336,21 @@ export default function AdminPage() {
     );
   }
 
-  const tabStyle = { padding: "10px 20px", borderRadius: "8px", fontWeight: "600", cursor: "pointer", border: "none", fontSize: "14px" };
+  const tabStyle = { 
+    padding: isMobile ? "8px 12px" : "10px 20px", 
+    borderRadius: "8px", 
+    fontWeight: "600", 
+    cursor: "pointer", 
+    border: "none", 
+    fontSize: isMobile ? "12px" : "14px",
+    whiteSpace: "nowrap" as const,
+  };
 
   return (
-    <div style={{ maxWidth: "1000px", margin: "0 auto", padding: "24px" }}>
-      <h1 style={{ fontSize: "28px", fontWeight: "700", marginBottom: "24px" }}>⚙️ Admin Panel</h1>
+    <div style={{ maxWidth: "1000px", margin: "0 auto", padding: isMobile ? "12px" : "24px" }}>
+      <h1 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", marginBottom: isMobile ? "16px" : "24px" }}>⚙️ Admin Panel</h1>
 
-      <div style={{ display: "flex", gap: "12px", marginBottom: "24px", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: isMobile ? "6px" : "12px", marginBottom: isMobile ? "16px" : "24px", flexWrap: "wrap" }}>
         <button onClick={() => setActiveTab("signals")} style={{ ...tabStyle, background: activeTab === "signals" ? "#1c69e3" : "#e5e7eb", color: activeTab === "signals" ? "#fff" : "#111827" }}>
           📊 Signals ({signals.length})
         </button>
@@ -346,75 +364,76 @@ export default function AdminPage() {
 
       {activeTab === "signals" && (
         <div>
-          <button onClick={() => setShowAddSignal(true)} style={{ marginBottom: "16px", padding: "10px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>
+          <button onClick={() => setShowAddSignal(true)} style={{ marginBottom: "16px", padding: isMobile ? "8px 16px" : "10px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: isMobile ? "12px" : "14px" }}>
             + Add Signal (24h expiry)
           </button>
 
           {loadingSignals && <p style={{ color: "#6b7280" }}>Loading signals...</p>}
 
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Pair</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Direction</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Entry</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Expiry</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Type</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {signals.map((signal: any) => (
-                  <tr key={signal._id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                    <td style={{ padding: "12px", fontWeight: "600" }}>{signal.pair}</td>
-                    <td style={{ padding: "12px", color: signal.direction === "long" ? "#16a34a" : "#dc2626" }}>{signal.direction?.toUpperCase()}</td>
-                    <td style={{ padding: "12px" }}>{signal.entry}</td>
-                    <td style={{ padding: "12px", fontSize: "12px", color: signal.expiresAt && new Date(signal.expiresAt).getTime() < Date.now() ? "#dc2626" : "#6b7280" }}>
-                      {getTimeRemaining(signal.expiresAt)}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      {signal.isAutoGenerated ? (
-                        <span style={{ padding: "4px 8px", background: "#f3e8ff", color: "#7c3aed", borderRadius: "4px", fontSize: "12px" }}>Auto</span>
-                      ) : (
-                        <span style={{ padding: "4px 8px", background: "#dbeafe", color: "#1c69e3", borderRadius: "4px", fontSize: "12px" }}>Manual</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <button onClick={() => toggleSignal(signal._id)} style={{ padding: "6px 12px", background: signal.isActive ? "#16a34a" : "#6b7280", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>
-                          {signal.isActive ? "Active" : "Inactive"}
-                        </button>
-                        <button onClick={() => deleteSignal(signal._id)} style={{ padding: "6px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? "500px" : "auto" }}>
+                <thead>
+                  <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Pair</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Direction</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Entry</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Expiry</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Type</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Actions</th>
                   </tr>
-                ))}
-                {signals.length === 0 && !loadingSignals && (
-                  <tr>
-                    <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#6b7280" }}>No signals yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {signals.map((signal: any) => (
+                    <tr key={signal._id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: "12px", fontWeight: "600", fontSize: isMobile ? "12px" : "14px" }}>{signal.pair}</td>
+                      <td style={{ padding: "12px", color: signal.direction === "long" ? "#16a34a" : "#dc2626", fontSize: isMobile ? "12px" : "14px" }}>{signal.direction?.toUpperCase()}</td>
+                      <td style={{ padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>{signal.entry}</td>
+                      <td style={{ padding: "12px", fontSize: isMobile ? "11px" : "12px", color: signal.expiresAt && new Date(signal.expiresAt).getTime() < Date.now() ? "#dc2626" : "#6b7280" }}>
+                        {getTimeRemaining(signal.expiresAt)}
+                      </td>
+                      <td style={{ padding: "12px" }}>
+                        {signal.isAutoGenerated ? (
+                          <span style={{ padding: "4px 8px", background: "#f3e8ff", color: "#7c3aed", borderRadius: "4px", fontSize: "12px" }}>Auto</span>
+                        ) : (
+                          <span style={{ padding: "4px 8px", background: "#dbeafe", color: "#1c69e3", borderRadius: "4px", fontSize: "12px" }}>Manual</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "12px" }}>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                          <button onClick={() => toggleSignal(signal._id)} style={{ padding: "6px 10px", background: signal.isActive ? "#16a34a" : "#6b7280", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>
+                            {signal.isActive ? "Active" : "Inactive"}
+                          </button>
+                          <button onClick={() => deleteSignal(signal._id)} style={{ padding: "6px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {signals.length === 0 && !loadingSignals && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#6b7280" }}>No signals yet.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
       {activeTab === "auto" && (
-        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "24px" }}>
-          <h2 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "16px" }}>🤖 Auto Signal Analysis</h2>
+        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: isMobile ? "16px" : "24px" }}>
+          <h2 style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: "700", marginBottom: "16px" }}>🤖 Auto Signal Analysis</h2>
 
           <div style={{ marginBottom: "20px" }}>
             <TradingViewChart onPairChange={setAutoPair} />
           </div>
 
-          {/* Screenshot Upload */}
-          <div style={{ marginBottom: "20px", padding: "16px", background: "#f9fafb", borderRadius: "8px", border: "1px solid #e5e7eb" }}>
+          <div style={{ marginBottom: "20px", padding: isMobile ? "12px" : "16px", background: "#f9fafb", borderRadius: "8px", border: "1px solid #e5e7eb" }}>
             <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "8px" }}>
-              📸 Upload Chart Screenshot (AI reads price)
+              📸 Upload Chart Screenshot
             </label>
             
             <input
@@ -427,18 +446,18 @@ export default function AdminPage() {
             
             {screenshotPreview ? (
               <div>
-                <img src={screenshotPreview} alt="Chart" style={{ maxHeight: "200px", margin: "0 auto 12px", display: "block", borderRadius: "8px" }} />
-                <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+                <img src={screenshotPreview} alt="Chart" style={{ maxHeight: isMobile ? "150px" : "200px", margin: "0 auto 12px", display: "block", borderRadius: "8px" }} />
+                <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
                   <button
                     onClick={handleScreenshotAnalysis}
                     disabled={autoLoading}
-                    style={{ padding: "10px 20px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}
+                    style={{ padding: "10px 20px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: isMobile ? "12px" : "14px" }}
                   >
-                    {autoLoading ? "Analyzing..." : "🔍 Analyze Screenshot"}
+                    {autoLoading ? "Analyzing..." : "🔍 Analyze"}
                   </button>
                   <button
                     onClick={() => { setScreenshot(null); setScreenshotPreview(null); }}
-                    style={{ padding: "10px 20px", background: "#e5e7eb", color: "#111827", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}
+                    style={{ padding: "10px 20px", background: "#e5e7eb", color: "#111827", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: isMobile ? "12px" : "14px" }}
                   >
                     Remove
                   </button>
@@ -447,7 +466,7 @@ export default function AdminPage() {
             ) : (
               <button
                 onClick={() => screenshotInputRef.current?.click()}
-                style={{ width: "100%", padding: "20px", border: "2px dashed #d1d5db", borderRadius: "8px", background: "#fff", cursor: "pointer", fontSize: "14px", color: "#6b7280" }}
+                style={{ width: "100%", padding: isMobile ? "16px" : "20px", border: "2px dashed #d1d5db", borderRadius: "8px", background: "#fff", cursor: "pointer", fontSize: isMobile ? "12px" : "14px", color: "#6b7280" }}
               >
                 📸 Click to upload chart screenshot
               </button>
@@ -460,7 +479,7 @@ export default function AdminPage() {
             <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
             <div>
               <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "6px" }}>Current Price</label>
               <input type="number" value={autoPrice} onChange={(e) => setAutoPrice(e.target.value)} placeholder="e.g., 2400.50" style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px" }} />
@@ -473,7 +492,7 @@ export default function AdminPage() {
           </div>
 
           {autoResult && (
-            <div style={{ marginTop: "16px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe" }}>
+            <div style={{ marginTop: "16px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
               <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>✅ Signal Generated! (Expires in 24h)</p>
               <p>Direction: <strong>{autoResult.direction?.toUpperCase()}</strong></p>
               <p>Entry: <strong>{autoResult.entryPrice || autoResult.entryZone}</strong></p>
@@ -491,62 +510,64 @@ export default function AdminPage() {
 
       {activeTab === "users" && (
         <div>
-          <button onClick={() => setShowAddUser(true)} style={{ marginBottom: "16px", padding: "10px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>
+          <button onClick={() => setShowAddUser(true)} style={{ marginBottom: "16px", padding: isMobile ? "8px 16px" : "10px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: isMobile ? "12px" : "14px" }}>
             + Add User
           </button>
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                  <th style={{ textAlign: "left", padding: "12px" }}>User</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Tier</th>
-                  <th style={{ textAlign: "left", padding: "12px" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user: any) => (
-                  <tr key={user._id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                    <td style={{ padding: "12px" }}>
-                      <p style={{ fontWeight: "600" }}>{user.name || "Unknown"}</p>
-                      <p style={{ fontSize: "12px", color: "#6b7280" }}>{user.email}</p>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <span style={{ padding: "4px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: "600", background: user.tier === "vvip" ? "#f3e8ff" : user.tier === "vip" ? "#dbeafe" : "#e5e7eb", color: user.tier === "vvip" ? "#7c3aed" : user.tier === "vip" ? "#1c69e3" : "#111827" }}>
-                        {(user.tier || "free").toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{ padding: "12px" }}>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <button onClick={() => activateUser(user._id, "vip")} style={{ padding: "6px 12px", background: "#1c69e3", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>VIP</button>
-                        <button onClick={() => activateUser(user._id, "vvip")} style={{ padding: "6px 12px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>VVIP</button>
-                        <button onClick={() => activateUser(user._id, "free")} style={{ padding: "6px 12px", background: "#6b7280", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>Free</button>
-                        <button onClick={() => deleteUser(user._id)} style={{ padding: "6px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "12px" }}>Delete</button>
-                      </div>
-                    </td>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? "400px" : "auto" }}>
+                <thead>
+                  <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>User</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Tier</th>
+                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {users.map((user: any) => (
+                    <tr key={user._id} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: "12px" }}>
+                        <p style={{ fontWeight: "600", fontSize: isMobile ? "12px" : "14px" }}>{user.name || "Unknown"}</p>
+                        <p style={{ fontSize: isMobile ? "11px" : "12px", color: "#6b7280" }}>{user.email}</p>
+                      </td>
+                      <td style={{ padding: "12px" }}>
+                        <span style={{ padding: "4px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: "600", background: user.tier === "vvip" ? "#f3e8ff" : user.tier === "vip" ? "#dbeafe" : "#e5e7eb", color: user.tier === "vvip" ? "#7c3aed" : user.tier === "vip" ? "#1c69e3" : "#111827" }}>
+                          {(user.tier || "free").toUpperCase()}
+                        </span>
+                      </td>
+                      <td style={{ padding: "12px" }}>
+                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                          <button onClick={() => activateUser(user._id, "vip")} style={{ padding: "6px 10px", background: "#1c69e3", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>VIP</button>
+                          <button onClick={() => activateUser(user._id, "vvip")} style={{ padding: "6px 10px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>VVIP</button>
+                          <button onClick={() => activateUser(user._id, "free")} style={{ padding: "6px 10px", background: "#6b7280", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Free</button>
+                          <button onClick={() => deleteUser(user._id)} style={{ padding: "6px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
       {showAddSignal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
-          <div style={{ background: "#fff", borderRadius: "12px", padding: "24px", maxWidth: "400px", width: "100%" }}>
-            <h3 style={{ fontWeight: "700", marginBottom: "16px" }}>Add New Signal</h3>
-            <select value={newSignal.pair} onChange={(e) => setNewSignal({ ...newSignal, pair: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }}>
+          <div style={{ background: "#fff", borderRadius: "12px", padding: isMobile ? "16px" : "24px", maxWidth: "400px", width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ fontWeight: "700", marginBottom: "16px", fontSize: isMobile ? "16px" : "18px" }}>Add New Signal</h3>
+            <select value={newSignal.pair} onChange={(e) => setNewSignal({ ...newSignal, pair: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }}>
               {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"].map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
-            <select value={newSignal.direction} onChange={(e) => setNewSignal({ ...newSignal, direction: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }}>
+            <select value={newSignal.direction} onChange={(e) => setNewSignal({ ...newSignal, direction: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }}>
               <option value="long">Long (Buy)</option>
               <option value="short">Short (Sell)</option>
             </select>
-            <input type="text" placeholder="Entry Price" value={newSignal.entry} onChange={(e) => setNewSignal({ ...newSignal, entry: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <input type="text" placeholder="Stop Loss" value={newSignal.stopLoss} onChange={(e) => setNewSignal({ ...newSignal, stopLoss: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <input type="text" placeholder="TP1" value={newSignal.takeProfit1} onChange={(e) => setNewSignal({ ...newSignal, takeProfit1: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <input type="text" placeholder="TP2" value={newSignal.takeProfit2} onChange={(e) => setNewSignal({ ...newSignal, takeProfit2: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <input type="text" placeholder="TP3" value={newSignal.takeProfit3} onChange={(e) => setNewSignal({ ...newSignal, takeProfit3: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px" }} />
+            <input type="text" placeholder="Entry Price" value={newSignal.entry} onChange={(e) => setNewSignal({ ...newSignal, entry: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <input type="text" placeholder="Stop Loss" value={newSignal.stopLoss} onChange={(e) => setNewSignal({ ...newSignal, stopLoss: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <input type="text" placeholder="TP1" value={newSignal.takeProfit1} onChange={(e) => setNewSignal({ ...newSignal, takeProfit1: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <input type="text" placeholder="TP2" value={newSignal.takeProfit2} onChange={(e) => setNewSignal({ ...newSignal, takeProfit2: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <input type="text" placeholder="TP3" value={newSignal.takeProfit3} onChange={(e) => setNewSignal({ ...newSignal, takeProfit3: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }} />
             <div style={{ display: "flex", gap: "12px" }}>
               <button onClick={handleAddSignal} style={{ flex: 1, padding: "10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>Add Signal</button>
               <button onClick={() => setShowAddSignal(false)} style={{ flex: 1, padding: "10px", background: "#e5e7eb", color: "#111827", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>Cancel</button>
@@ -557,12 +578,12 @@ export default function AdminPage() {
 
       {showAddUser && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
-          <div style={{ background: "#fff", borderRadius: "12px", padding: "24px", maxWidth: "400px", width: "100%" }}>
-            <h3 style={{ fontWeight: "700", marginBottom: "16px" }}>Add New User</h3>
-            <input type="text" placeholder="Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <input type="email" placeholder="Email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <input type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }} />
-            <select value={newUser.tier} onChange={(e) => setNewUser({ ...newUser, tier: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px" }}>
+          <div style={{ background: "#fff", borderRadius: "12px", padding: isMobile ? "16px" : "24px", maxWidth: "400px", width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ fontWeight: "700", marginBottom: "16px", fontSize: isMobile ? "16px" : "18px" }}>Add New User</h3>
+            <input type="text" placeholder="Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <input type="email" placeholder="Email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <input type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
+            <select value={newUser.tier} onChange={(e) => setNewUser({ ...newUser, tier: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }}>
               <option value="free">Free (5 days)</option>
               <option value="vip">VIP (30 days)</option>
               <option value="vvip">VVIP (30 days)</option>
