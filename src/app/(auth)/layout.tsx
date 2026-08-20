@@ -45,17 +45,6 @@ export default function AuthLayout({
         </div>
       </main>
       <MobileNav />
-
-      <style jsx>{+""+
-        @media (max-width: 768px) {
-          .auth-main {
-            padding-left: 12px !important;
-            padding-right: 12px !important;
-            padding-top: 60px !important;
-            padding-bottom: 80px !important;
-          }
-        }
-      +""+}</style>
     </div>
   );
 }
