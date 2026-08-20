@@ -161,7 +161,7 @@ export default function LoginPage() {
             />
           </div>
 
-          <div style={{ marginBottom: "24px" }}>
+          <div style={{ marginBottom: "8px" }}>
             <label style={{
               display: "block", fontSize: "14px", fontWeight: "600",
               marginBottom: "6px", color: isDark ? "#f1f5f9" : "#111827",
@@ -183,6 +183,26 @@ export default function LoginPage() {
                 outline: "none",
               }}
             />
+          </div>
+
+          {/* Forgot Password Link */}
+          <div style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginBottom: "20px",
+          }}>
+            <Link
+              href="/forgot-password"
+              style={{
+                color: "#1c69e3",
+                fontSize: "13px",
+                fontWeight: "600",
+                textDecoration: "none",
+                cursor: "pointer",
+              }}
+            >
+              Forgot Password?
+            </Link>
           </div>
 
           <button
