@@ -3,18 +3,35 @@
 import { useEffect, useRef, useState } from "react";
 
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD"];
-const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
 
 export function TradingViewChart({
   onPairChange,
   onTimeframeChange,
+  initialPair,
+  initialTimeframe,
 }: {
   onPairChange?: (pair: string) => void;
   onTimeframeChange?: (tf: string) => void;
+  initialPair?: string;
+  initialTimeframe?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [selectedPair, setSelectedPair] = useState("XAU/USD");
-  const [timeframe, setTimeframe] = useState("1H");
+  const [selectedPair, setSelectedPair] = useState(initialPair || "XAU/USD");
+  const [timeframe, setTimeframe] = useState(initialTimeframe || "1H");
+
+  // Sync with parent if initial values change
+  useEffect(() => {
+    if (initialPair && initialPair !== selectedPair) {
+      setSelectedPair(initialPair);
+    }
+  }, [initialPair]);
+
+  useEffect(() => {
+    if (initialTimeframe && initialTimeframe !== timeframe) {
+      setTimeframe(initialTimeframe);
+    }
+  }, [initialTimeframe]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -103,6 +120,7 @@ export function TradingViewChart({
                 fontSize: "12px",
                 fontWeight: timeframe === tf ? "700" : "500",
                 cursor: "pointer",
+                transition: "all 0.2s ease",
               }}
             >
               {tf}
