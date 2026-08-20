@@ -19,28 +19,14 @@ export function TradingViewChart({
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedPair, setSelectedPair] = useState(initialPair || "XAU/USD");
   const [timeframe, setTimeframe] = useState(initialTimeframe || "1H");
-  const [chartKey, setChartKey] = useState(0);
-  const [loading, setLoading] = useState(true);
-
-  // Sync with parent if initial values change
-  useEffect(() => {
-    if (initialPair && initialPair !== selectedPair) {
-      setSelectedPair(initialPair);
-    }
-  }, [initialPair]);
-
-  useEffect(() => {
-    if (initialTimeframe && initialTimeframe !== timeframe) {
-      setTimeframe(initialTimeframe);
-    }
-  }, [initialTimeframe]);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    setLoading(true);
+    // Clear previous widget
     containerRef.current.innerHTML = "";
 
+    // Create widget container
     const widgetDiv = document.createElement("div");
     widgetDiv.className = "tradingview-widget-container";
     widgetDiv.style.width = "100%";
@@ -54,20 +40,42 @@ export function TradingViewChart({
     widgetDiv.appendChild(innerDiv);
     containerRef.current.appendChild(widgetDiv);
 
+    // Create script with proper symbol format
     const script = document.createElement("script");
     script.type = "text/javascript";
     script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
     script.async = true;
-    script.onload = () => {
-      setLoading(false);
+
+    // Map timeframes to TradingView intervals
+    const intervalMap: { [key: string]: string } = {
+      "1m": "1",
+      "5m": "5",
+      "15m": "15",
+      "30m": "30",
+      "1H": "60",
+      "4H": "240",
+      "1D": "D",
+      "1W": "W",
     };
-    script.onerror = () => {
-      setLoading(false);
+
+    // Map pairs to TradingView symbols
+    const symbolMap: { [key: string]: string } = {
+      "EUR/USD": "FX:EURUSD",
+      "GBP/USD": "FX:GBPUSD",
+      "USD/JPY": "FX:USDJPY",
+      "XAU/USD": "OANDA:XAUUSD",
+      "XAG/USD": "OANDA:XAGUSD",
+      "BTC/USD": "BINANCE:BTCUSDT",
+      "ETH/USD": "BINANCE:ETHUSDT",
     };
+
+    const symbol = symbolMap[selectedPair] || `FX:${selectedPair.replace("/", "")}`;
+    const interval = intervalMap[timeframe] || "60";
+
     script.innerHTML = JSON.stringify({
       autosize: true,
-      symbol: `OANDA:${selectedPair.replace("/", "")}`,
-      interval: timeframe,
+      symbol: symbol,
+      interval: interval,
       timezone: "Etc/UTC",
       theme: "light",
       style: "1",
@@ -75,34 +83,24 @@ export function TradingViewChart({
       allow_symbol_change: false,
       calendar: false,
       support_host: "https://www.tradingview.com",
-      hide_side_toolbar: false,
-      withdateranges: true,
     });
 
     widgetDiv.appendChild(script);
 
-    // Set a timeout to hide loading even if script doesn't fire onload
-    const timeout = setTimeout(() => {
-      setLoading(false);
-    }, 5000);
-
     return () => {
-      clearTimeout(timeout);
       if (containerRef.current) {
         containerRef.current.innerHTML = "";
       }
     };
-  }, [selectedPair, timeframe, chartKey]);
+  }, [selectedPair, timeframe]);
 
   const handleTimeframeChange = (tf: string) => {
     setTimeframe(tf);
-    setChartKey(prev => prev + 1); // Force re-render
     if (onTimeframeChange) onTimeframeChange(tf);
   };
 
   const handlePairChange = (pair: string) => {
     setSelectedPair(pair);
-    setChartKey(prev => prev + 1); // Force re-render
     if (onPairChange) onPairChange(pair);
   };
 
@@ -152,43 +150,7 @@ export function TradingViewChart({
         </div>
       </div>
 
-      <div ref={containerRef} style={{ width: "100%", height: "400px", position: "relative" }}>
-        {loading && (
-          <div style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "#f9fafb",
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{
-                width: "40px",
-                height: "40px",
-                border: "4px solid #e5e7eb",
-                borderTop: "4px solid #1c69e3",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-                margin: "0 auto 12px",
-              }} />
-              <p style={{ color: "#6b7280", fontSize: "14px" }}>
-                Loading {selectedPair} {timeframe} chart...
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <style jsx>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
+      <div ref={containerRef} style={{ width: "100%", minHeight: "400px" }} />
     </div>
   );
 }
