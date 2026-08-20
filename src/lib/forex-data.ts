@@ -1,6 +1,8 @@
 // src/lib/forex-data.ts
 
-import yahooFinance from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
+
+const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
 export interface SignalLevels {
   pair: string;
@@ -189,17 +191,24 @@ export async function getRealHistoricalData(pair: string): Promise<number[]> {
       interval: "1d" as const,
     };
 
-    const result = await yahooFinance.historical(symbol, queryOptions);
-    const prices = result.map((item) => Number(item.close));
-
-    if (prices.length > 30) {
-      return prices;
+    const result = await yahooFinance.chart(symbol, queryOptions);
+    
+    if (result.quotes && result.quotes.length > 0) {
+      const prices = result.quotes
+        .filter((item) => item.close !== null && item.close !== undefined)
+        .map((item) => Number(item.close));
+      
+      if (prices.length > 30) {
+        console.log(`Got ${prices.length} real prices for ${pair}`);
+        return prices;
+      }
     }
   } catch (error) {
     console.error(`Yahoo Finance failed for ${pair}:`, error);
   }
 
-  // Fallback
+  // Fallback only if Yahoo Finance completely fails
+  console.log(`Using fallback prices for ${pair}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
