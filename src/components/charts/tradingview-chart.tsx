@@ -30,7 +30,7 @@ export function TradingViewChart({
     const widgetDiv = document.createElement("div");
     widgetDiv.className = "tradingview-widget-container";
     widgetDiv.style.width = "100%";
-    widgetDiv.style.height = "400px";
+    widgetDiv.style.height = "600px";
 
     const innerDiv = document.createElement("div");
     innerDiv.className = "tradingview-widget-container__widget";
@@ -150,7 +150,7 @@ export function TradingViewChart({
         </div>
       </div>
 
-      <div ref={containerRef} style={{ width: "100%", minHeight: "400px" }} />
+      <div ref={containerRef} style={{ width: "100%", minHeight: "600px" }} />
     </div>
   );
 }
