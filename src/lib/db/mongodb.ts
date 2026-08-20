@@ -2,10 +2,7 @@
 
 import mongoose from "mongoose";
 
-// Hard fallback if env not loaded
-const MONGODB_URI: string =
-  process.env.MONGODB_URI ||
-  "mongodb+srv://normanainebyoona7_db_user:norman2026@cluster0.67ca9su.mongodb.net/tradevault?retryWrites=true&w=majority&appName=Cluster0";
+const MONGODB_URI: string = process.env.MONGODB_URI || "";
 
 interface MongooseCache {
   conn: typeof mongoose | null;
@@ -19,13 +16,18 @@ if (!cached) {
 }
 
 export async function dbConnect() {
+  if (!MONGODB_URI) {
+    console.error("MONGODB_URI is not defined in environment variables");
+    throw new Error("MONGODB_URI is not defined");
+  }
+
   if (cached.conn) {
-    console.log("✅ Using cached MongoDB connection");
+    console.log("Using cached MongoDB connection");
     return cached.conn;
   }
 
   if (!cached.promise) {
-    console.log("🔄 Connecting to MongoDB...");
+    console.log("Connecting to MongoDB...");
 
     cached.promise = mongoose
       .connect(MONGODB_URI, {
@@ -33,11 +35,11 @@ export async function dbConnect() {
         serverSelectionTimeoutMS: 15000,
       })
       .then((mongoose) => {
-        console.log("✅ MongoDB connected successfully");
+        console.log("MongoDB connected successfully");
         return mongoose;
       })
       .catch((error) => {
-        console.error("❌ MongoDB connection failed:", error.message);
+        console.error("MongoDB connection failed:", error.message);
         cached.promise = null;
         throw error;
       });
