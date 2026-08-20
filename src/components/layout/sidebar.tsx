@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "./theme-toggle";
 import { useState, useEffect } from "react";
+import { LogOut } from "lucide-react";
 
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: "📊" },
@@ -36,16 +37,25 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Close sidebar on route change (mobile)
+  // Close sidebar on route change (mobile only)
   useEffect(() => {
-    if (isMobile) {
+    if (isMobile && isOpen) {
       onClose();
     }
-  }, [pathname, isMobile]);
+  }, [pathname]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/logout", { method: "POST" });
+      window.location.href = "/login";
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
 
   return (
     <>
-      {/* Overlay for mobile */}
+      {/* Overlay for mobile - clicking outside closes sidebar */}
       {isOpen && isMobile && (
         <div
           style={{
@@ -56,6 +66,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             bottom: 0,
             background: "rgba(0, 0, 0, 0.5)",
             zIndex: 39,
+            cursor: "pointer",
           }}
           onClick={onClose}
         />
@@ -64,7 +75,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       <aside
         style={{
           position: "fixed",
-          left: isOpen ? 0 : "-240px",
+          left: isOpen ? "0" : "-240px",
           top: "64px",
           bottom: 0,
           width: "240px",
@@ -77,7 +88,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           transition: "left 0.3s ease-in-out",
           boxShadow: isOpen ? "2px 0 8px rgba(0,0,0,0.1)" : "none",
         }}
-        className="sidebar-desktop"
       >
         <nav style={{ flex: 1, padding: "16px 12px" }}>
           {navigation.map((item) => {
@@ -107,6 +117,31 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
               </Link>
             );
           })}
+
+          {/* Logout Button */}
+          <button
+            onClick={handleLogout}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              width: "100%",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              marginTop: "8px",
+              marginBottom: "4px",
+              border: "1px solid #fecaca",
+              background: "#fef2f2",
+              color: "#dc2626",
+              fontWeight: "600",
+              fontSize: "14px",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            <LogOut size={18} />
+            Logout
+          </button>
         </nav>
 
         {/* Theme Toggle */}
