@@ -12,6 +12,7 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userName, setUserName] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,6 +25,12 @@ export function Header({ onMenuClick }: HeaderProps) {
       })
       .catch(() => {});
 
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setUserMenuOpen(false);
@@ -31,7 +38,10 @@ export function Header({ onMenuClick }: HeaderProps) {
     };
 
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    return () => {
+      window.removeEventListener("mousedown", handleClickOutside);
+      window.removeEventListener('resize', checkMobile);
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -50,88 +60,104 @@ export function Header({ onMenuClick }: HeaderProps) {
         top: 0,
         left: 0,
         right: 0,
-        height: "64px",
+        height: isMobile ? "56px" : "64px",
         background: "#ffffff",
         borderBottom: "1px solid #e5e7eb",
         zIndex: 50,
         display: "flex",
         alignItems: "center",
-        padding: "0 16px",
-        gap: "12px",
+        padding: isMobile ? "0 8px" : "0 16px",
+        gap: isMobile ? "6px" : "12px",
       }}
     >
+      {/* Menu Toggle Button */}
       <button
         onClick={onMenuClick}
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          width: "40px",
-          height: "40px",
+          width: isMobile ? "36px" : "40px",
+          height: isMobile ? "36px" : "40px",
           borderRadius: "8px",
           border: "1px solid #e5e7eb",
           background: "transparent",
           cursor: "pointer",
           color: "#6b7280",
           transition: "all 0.2s ease",
+          flexShrink: 0,
         }}
         aria-label="Toggle sidebar"
       >
-        <Menu size={20} />
+        <Menu size={isMobile ? 18 : 20} />
       </button>
 
+      {/* Logo */}
       <Link
         href="/"
         style={{
           textDecoration: "none",
           color: "inherit",
-          fontSize: "18px",
+          fontSize: isMobile ? "14px" : "18px",
           fontWeight: "700",
           display: "flex",
           alignItems: "center",
-          gap: "8px",
+          gap: isMobile ? "4px" : "8px",
+          flexShrink: 0,
         }}
       >
         <img 
           src="/logo.png" 
           alt="TradeVault" 
-          style={{ width: "28px", height: "28px", borderRadius: "6px" }}
+          style={{ 
+            width: isMobile ? "24px" : "28px", 
+            height: isMobile ? "24px" : "28px", 
+            borderRadius: "6px" 
+          }}
         />
-        TradeVault
+        {!isMobile && "TradeVault"}
       </Link>
 
+      {/* Spacer */}
       <div style={{ flex: 1 }} />
 
+      {/* Home Button - Hide text on very small screens */}
       <Link
         href="/"
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "6px",
-          padding: "8px 12px",
+          gap: isMobile ? "0" : "6px",
+          padding: isMobile ? "6px" : "8px 12px",
           borderRadius: "8px",
           textDecoration: "none",
           color: "#6b7280",
-          fontSize: "14px",
+          fontSize: isMobile ? "0" : "14px",
           fontWeight: "500",
           transition: "all 0.2s ease",
+          flexShrink: 0,
         }}
+        aria-label="Home"
       >
-        <Home size={16} />
-        Home
+        <Home size={isMobile ? 16 : 16} />
+        {!isMobile && "Home"}
       </Link>
 
-      <ThemeToggle />
+      {/* Theme Toggle */}
+      <div style={{ flexShrink: 0 }}>
+        <ThemeToggle />
+      </div>
 
-      <div style={{ position: "relative" }} ref={menuRef}>
+      {/* User Menu */}
+      <div style={{ position: "relative", flexShrink: 0 }} ref={menuRef}>
         <button
           onClick={() => setUserMenuOpen(!userMenuOpen)}
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            width: "40px",
-            height: "40px",
+            width: isMobile ? "32px" : "40px",
+            height: isMobile ? "32px" : "40px",
             borderRadius: "50%",
             border: "1px solid #e5e7eb",
             background: "#f9fafb",
@@ -141,16 +167,17 @@ export function Header({ onMenuClick }: HeaderProps) {
           }}
           aria-label="User menu"
         >
-          <User size={18} />
+          <User size={isMobile ? 16 : 18} />
         </button>
 
+        {/* Dropdown Menu */}
         {userMenuOpen && (
           <div
             style={{
               position: "absolute",
               right: 0,
-              top: "48px",
-              width: "200px",
+              top: isMobile ? "40px" : "48px",
+              width: isMobile ? "180px" : "200px",
               background: "#ffffff",
               border: "1px solid #e5e7eb",
               borderRadius: "8px",
