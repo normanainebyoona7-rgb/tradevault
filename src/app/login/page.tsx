@@ -64,6 +64,23 @@ export default function LoginPage() {
         maxWidth: "420px",
         boxShadow: "0 20px 40px rgba(0,0,0,0.1)",
       }}>
+        {/* Back to Homepage */}
+        <div style={{ marginBottom: "16px" }}>
+          <Link href="/" style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            color: isDark ? "#94a3b8" : "#6b7280",
+            fontSize: "14px",
+            fontWeight: "500",
+            textDecoration: "none",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+          }}>
+            ← Back to Homepage
+          </Link>
+        </div>
+
         <div style={{ textAlign: "center", marginBottom: "24px" }}>
           <img
             src="/logo.png"
