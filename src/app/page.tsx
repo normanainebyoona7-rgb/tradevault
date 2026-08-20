@@ -6,6 +6,7 @@ import Link from "next/link";
 export default function LandingPage() {
   const [isDark, setIsDark] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("tradevault_theme");
@@ -15,6 +16,13 @@ export default function LandingPage() {
       document.body.style.color = "#f1f5f9";
     }
     setTimeout(() => setIsVisible(true), 100);
+
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
   const toggleTheme = () => {
@@ -38,36 +46,47 @@ export default function LandingPage() {
         background: isDark ? "rgba(15,23,42,0.95)" : "rgba(255,255,255,0.95)",
         backdropFilter: "blur(10px)",
         borderBottom: "1px solid #e5e7eb",
-        height: "64px",
+        height: isMobile ? "56px" : "64px",
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "0 20px",
+        padding: isMobile ? "0 10px" : "0 20px",
       }}>
         <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: "8px" }}>
           <img
             src="/logo.png"
             alt="TradeVault"
             style={{
-              width: "36px", height: "36px", borderRadius: "8px",
-              objectFit: "cover", animation: "float 3s ease-in-out infinite",
+              width: isMobile ? "28px" : "36px",
+              height: isMobile ? "28px" : "36px",
+              borderRadius: "8px",
+              objectFit: "cover",
             }}
           />
-          <span style={{ fontSize: "20px", fontWeight: "800", color: isDark ? "#fff" : "#111827" }}>
+          <span style={{ fontSize: isMobile ? "16px" : "20px", fontWeight: "800", color: isDark ? "#fff" : "#111827" }}>
             Trade<span style={{ color: "#1c69e3" }}>Vault</span>
           </span>
         </Link>
 
-        <div style={{ display: "flex", gap: "14px", alignItems: "center" }}>
-          <button onClick={toggleTheme} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px" }}>
+        <div style={{ display: "flex", gap: isMobile ? "8px" : "14px", alignItems: "center" }}>
+          <button onClick={toggleTheme} style={{ background: "none", border: "none", cursor: "pointer", fontSize: isMobile ? "16px" : "20px" }}>
             {isDark ? "☀️" : "🌙"}
           </button>
-          <Link href="/login" style={{ textDecoration: "none", color: isDark ? "#cbd5e1" : "#6b7280", fontSize: "14px" }}>
+          <Link href="/login" style={{
+            textDecoration: "none",
+            color: isDark ? "#cbd5e1" : "#6b7280",
+            fontSize: isMobile ? "12px" : "14px",
+            whiteSpace: "nowrap",
+          }}>
             Login
           </Link>
           <Link href="/register" style={{
             textDecoration: "none",
             background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-            color: "#fff", padding: "10px 20px", borderRadius: "8px",
-            fontSize: "14px", fontWeight: "600",
+            color: "#fff",
+            padding: isMobile ? "8px 12px" : "10px 20px",
+            borderRadius: "8px",
+            fontSize: isMobile ? "12px" : "14px",
+            fontWeight: "600",
+            whiteSpace: "nowrap",
           }}>
             Get Started
           </Link>
@@ -76,23 +95,24 @@ export default function LandingPage() {
 
       {/* Hero */}
       <section style={{
-        padding: "120px 20px 80px", textAlign: "center",
+        padding: isMobile ? "80px 16px 60px" : "120px 20px 80px",
+        textAlign: "center",
         background: isDark ? "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)" : "linear-gradient(180deg, #eff6ff 0%, #ffffff 100%)",
       }}>
         <div style={{
           display: "inline-block", background: isDark ? "#1e293b" : "#dbeafe",
-          color: "#1c69e3", padding: "6px 16px", borderRadius: "999px",
-          fontSize: "14px", fontWeight: "600", marginBottom: "16px",
-          opacity: isVisible ? 1 : 0, transform: isVisible ? "translateY(0)" : "translateY(20px)",
-          transition: "all 0.6s ease-out",
+          color: "#1c69e3", padding: isMobile ? "4px 12px" : "6px 16px",
+          borderRadius: "999px",
+          fontSize: isMobile ? "12px" : "14px", fontWeight: "600", marginBottom: "16px",
         }}>
           ⚡ Free Position Size Calculator Included
         </div>
 
         <h1 style={{
-          fontSize: "42px", fontWeight: "800", marginBottom: "16px",
+          fontSize: isMobile ? "28px" : "42px",
+          fontWeight: "800", marginBottom: "16px",
           color: isDark ? "#fff" : "#111827",
-          opacity: isVisible ? 1 : 0, transition: "all 0.8s ease-out 0.2s",
+          lineHeight: "1.2",
         }}>
           The Smartest{" "}
           <span style={{
@@ -104,23 +124,27 @@ export default function LandingPage() {
         </h1>
 
         <p style={{
-          fontSize: "18px", color: isDark ? "#cbd5e1" : "#6b7280",
+          fontSize: isMobile ? "14px" : "18px",
+          color: isDark ? "#cbd5e1" : "#6b7280",
           maxWidth: "600px", margin: "0 auto 32px",
-          opacity: isVisible ? 1 : 0, transition: "all 0.8s ease-out 0.4s",
+          padding: isMobile ? "0 10px" : "0",
         }}>
           Track your trades, analyze performance, and calculate position sizes.
           All in one beautiful dashboard built for serious traders.
         </p>
 
         <div style={{
-          display: "flex", gap: "14px", justifyContent: "center", flexWrap: "wrap",
-          opacity: isVisible ? 1 : 0, transition: "all 0.8s ease-out 0.6s",
+          display: "flex", gap: isMobile ? "10px" : "14px",
+          justifyContent: "center", flexWrap: "wrap",
         }}>
           <Link href="/register" style={{
             textDecoration: "none",
             background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-            color: "#fff", padding: "16px 32px", borderRadius: "8px",
-            fontSize: "16px", fontWeight: "700",
+            color: "#fff",
+            padding: isMobile ? "12px 20px" : "16px 32px",
+            borderRadius: "8px",
+            fontSize: isMobile ? "14px" : "16px",
+            fontWeight: "700",
             boxShadow: "0 10px 25px rgba(28,105,227,0.4)",
           }}>
             🚀 Start Journaling Free
@@ -129,8 +153,10 @@ export default function LandingPage() {
             textDecoration: "none",
             background: isDark ? "#1e293b" : "#ffffff",
             color: isDark ? "#f1f5f9" : "#111827",
-            padding: "16px 32px", borderRadius: "8px",
-            fontSize: "16px", fontWeight: "700",
+            padding: isMobile ? "12px 20px" : "16px 32px",
+            borderRadius: "8px",
+            fontSize: isMobile ? "14px" : "16px",
+            fontWeight: "700",
             border: "1px solid #d1d5db",
           }}>
             🧮 Try Calculator
@@ -139,17 +165,19 @@ export default function LandingPage() {
       </section>
 
       {/* Features */}
-      <section style={{ padding: "60px 20px" }}>
-        <h2 style={{ fontSize: "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
+      <section style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
+        <h2 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
           Everything You Need to Trade Smarter
         </h2>
-        <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "40px" }}>
+        <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "40px", fontSize: isMobile ? "14px" : "16px" }}>
           Powerful tools designed by traders, for traders.
         </p>
 
         <div style={{
-          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-          gap: "20px", maxWidth: "1200px", margin: "0 auto",
+          display: "grid",
+          gridTemplateColumns: isMobile ? "repeat(auto-fit, minmax(150px, 1fr))" : "repeat(auto-fit, minmax(250px, 1fr))",
+          gap: isMobile ? "12px" : "20px",
+          maxWidth: "1200px", margin: "0 auto",
         }}>
           {[
             { icon: "🧮", title: "Position Size Calculator", desc: "Calculate optimal position sizes with 40+ forex pairs." },
@@ -162,29 +190,24 @@ export default function LandingPage() {
             <div key={i} style={{
               background: isDark ? "#1e293b" : "#ffffff",
               border: "1px solid #e5e7eb", borderRadius: "12px",
-              padding: "24px", textAlign: "center",
+              padding: isMobile ? "16px" : "24px",
+              textAlign: "center",
               transition: "all 0.3s ease", cursor: "pointer",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-6px)";
-              e.currentTarget.style.boxShadow = "0 15px 30px rgba(0,0,0,0.15)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "none";
             }}>
               <div style={{
-                width: "48px", height: "48px", borderRadius: "12px",
+                width: isMobile ? "40px" : "48px",
+                height: isMobile ? "40px" : "48px",
+                borderRadius: "12px",
                 background: "linear-gradient(135deg, #1c69e3, #783ff5)",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                margin: "0 auto 16px", fontSize: "24px",
+                margin: "0 auto 16px", fontSize: isMobile ? "20px" : "24px",
               }}>
                 {feature.icon}
               </div>
-              <h3 style={{ fontSize: "18px", fontWeight: "700", color: isDark ? "#fff" : "#111827", marginBottom: "8px" }}>
+              <h3 style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: "700", color: isDark ? "#fff" : "#111827", marginBottom: "8px" }}>
                 {feature.title}
               </h3>
-              <p style={{ color: "#6b7280", fontSize: "14px" }}>{feature.desc}</p>
+              <p style={{ color: "#6b7280", fontSize: isMobile ? "12px" : "14px" }}>{feature.desc}</p>
             </div>
           ))}
         </div>
@@ -192,14 +215,15 @@ export default function LandingPage() {
 
       {/* Stats */}
       <section style={{
-        padding: "60px 20px",
+        padding: isMobile ? "40px 16px" : "60px 20px",
         background: "linear-gradient(-45deg, #1c69e3, #783ff5, #448bff, #00b9a2)",
         backgroundSize: "400% 400%",
-        animation: "gradientShift 10s ease infinite",
       }}>
         <div style={{
-          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "20px", maxWidth: "1200px", margin: "0 auto", textAlign: "center",
+          display: "grid",
+          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: isMobile ? "16px" : "20px",
+          maxWidth: "1200px", margin: "0 auto", textAlign: "center",
         }}>
           {[
             { value: "10,000+", label: "Active Traders" },
@@ -208,25 +232,27 @@ export default function LandingPage() {
             { value: "4.9★", label: "User Rating" },
           ].map((stat, i) => (
             <div key={i}>
-              <p style={{ fontSize: "32px", fontWeight: "800", color: "#fff" }}>{stat.value}</p>
-              <p style={{ color: "rgba(255,255,255,0.8)" }}>{stat.label}</p>
+              <p style={{ fontSize: isMobile ? "24px" : "32px", fontWeight: "800", color: "#fff" }}>{stat.value}</p>
+              <p style={{ color: "rgba(255,255,255,0.8)", fontSize: isMobile ? "12px" : "16px" }}>{stat.label}</p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Pricing */}
-      <section style={{ padding: "60px 20px" }}>
-        <h2 style={{ fontSize: "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
+      <section style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
+        <h2 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
           Simple Pricing
         </h2>
-        <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "40px" }}>
+        <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "40px", fontSize: isMobile ? "12px" : "16px" }}>
           Pay via Airtel: 0701179229 | MTN: 0783362906
         </p>
 
         <div style={{
-          display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: "20px", maxWidth: "1200px", margin: "0 auto",
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: isMobile ? "16px" : "20px",
+          maxWidth: "1200px", margin: "0 auto",
         }}>
           <div style={{
             background: isDark ? "#1e293b" : "#ffffff",
@@ -290,22 +316,6 @@ export default function LandingPage() {
       }}>
         <p>© 2026 TradeVault. All rights reserved.</p>
       </footer>
-
-      <style jsx>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
-        }
-        @keyframes gradientShift {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
-        }
-      `}</style>
     </div>
   );
 }
