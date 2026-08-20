@@ -23,8 +23,6 @@ ${emoji} *TRADEVault FREE SIGNAL*
 🛑 *Stop Loss:* ${signal.stopLoss}
 
 ✅ *Take Profit 1:* ${signal.takeProfit1}
-✅ *Take Profit 2:* ${signal.takeProfit2}
-✅ *Take Profit 3:* ${signal.takeProfit3}
 
 ━━━━━━━━━━━━━━━━━
 
@@ -33,8 +31,8 @@ ${emoji} *TRADEVault FREE SIGNAL*
 
 ━━━━━━━━━━━━━━━━━
 
-🔒 *Want VIP signals with full analysis?*
-👉 Join TradeVault: ${WEBSITE_URL}
+🔒 *Want TP2 & TP3 with full analysis?*
+👉 Join TradeVault VIP: ${WEBSITE_URL}
 `;
 
     const response = await fetch(
