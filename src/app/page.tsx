@@ -7,6 +7,7 @@ export default function LandingPage() {
   const [isDark, setIsDark] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [freeSignals, setFreeSignals] = useState<any[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem("tradevault_theme");
@@ -22,6 +23,19 @@ export default function LandingPage() {
     };
     checkMobile();
     window.addEventListener('resize', checkMobile);
+
+    // Fetch free signals
+    fetch("/api/signals")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.signals) {
+          // Show only active signals, limit to 3
+          const activeSignals = data.signals.filter((s: any) => s.isActive !== false).slice(0, 3);
+          setFreeSignals(activeSignals);
+        }
+      })
+      .catch(() => {});
+
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
@@ -163,6 +177,97 @@ export default function LandingPage() {
           </Link>
         </div>
       </section>
+
+      {/* Free Signals */}
+      {freeSignals.length > 0 && (
+        <section style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
+          <h2 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
+            📡 Free Trading Signals
+          </h2>
+          <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "32px", fontSize: isMobile ? "14px" : "16px" }}>
+            Get a taste of our premium signals
+          </p>
+
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: isMobile ? "16px" : "20px",
+            maxWidth: "1000px", margin: "0 auto",
+          }}>
+            {freeSignals.map((signal: any, i: number) => (
+              <div key={signal._id || i} style={{
+                background: isDark ? "#1e293b" : "#ffffff",
+                border: "1px solid #e5e7eb",
+                borderRadius: "12px",
+                padding: "20px",
+                transition: "all 0.3s ease",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-4px)";
+                e.currentTarget.style.boxShadow = "0 12px 24px rgba(0,0,0,0.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "none";
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <span style={{ fontWeight: "700", fontSize: "16px", color: isDark ? "#fff" : "#111827" }}>
+                    {signal.pair}
+                  </span>
+                  <span style={{
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    background: signal.direction === "long" ? "#dcfce7" : "#fee2e2",
+                    color: signal.direction === "long" ? "#16a34a" : "#dc2626",
+                  }}>
+                    {signal.direction?.toUpperCase()}
+                  </span>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "16px" }}>
+                  <div style={{ padding: "8px", background: isDark ? "#0f172a" : "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "11px", color: "#6b7280" }}>Entry</p>
+                    <p style={{ fontWeight: "700", fontSize: "14px", color: isDark ? "#f1f5f9" : "#111827" }}>{signal.entry}</p>
+                  </div>
+                  <div style={{ padding: "8px", background: "#fef2f2", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "11px", color: "#6b7280" }}>Stop Loss</p>
+                    <p style={{ fontWeight: "700", fontSize: "14px", color: "#dc2626" }}>{signal.stopLoss}</p>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
+                  <div style={{ padding: "8px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "11px", color: "#6b7280" }}>TP1</p>
+                    <p style={{ fontWeight: "700", fontSize: "13px", color: "#16a34a" }}>{signal.takeProfit1}</p>
+                  </div>
+                  <div style={{ padding: "8px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "11px", color: "#6b7280" }}>TP2</p>
+                    <p style={{ fontWeight: "700", fontSize: "13px", color: "#16a34a" }}>{signal.takeProfit2}</p>
+                  </div>
+                  <div style={{ padding: "8px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "11px", color: "#6b7280" }}>TP3</p>
+                    <p style={{ fontWeight: "700", fontSize: "13px", color: "#16a34a" }}>{signal.takeProfit3}</p>
+                  </div>
+                </div>
+
+                <div style={{ textAlign: "center", paddingTop: "12px", borderTop: "1px solid #e5e7eb" }}>
+                  <Link href="/register" style={{
+                    color: "#1c69e3",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    textDecoration: "none",
+                  }}>
+                    Get Full Access →
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Features */}
       <section style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
