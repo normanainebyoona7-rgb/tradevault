@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { useTheme } from "@/components/providers/theme-provider";
+import { useState } from "react";
 
 export default function AuthLayout({
   children,
@@ -11,6 +12,7 @@ export default function AuthLayout({
   children: React.ReactNode;
 }) {
   const { theme } = useTheme();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div style={{
@@ -19,18 +21,22 @@ export default function AuthLayout({
       color: theme === "dark" ? "#f1f5f9" : "#111827",
       transition: "all 0.3s ease",
     }}>
-      <Header />
-      <Sidebar />
+      <Header onMenuClick={() => setSidebarOpen(!sidebarOpen)} />
+      <Sidebar 
+        isOpen={sidebarOpen} 
+        onClose={() => setSidebarOpen(false)} 
+      />
       <main
         style={{
           paddingTop: "70px",
-          paddingLeft: "260px",
+          paddingLeft: sidebarOpen ? "260px" : "20px",
           paddingRight: "20px",
           paddingBottom: "70px",
           minHeight: "100vh",
           width: "100%",
           maxWidth: "100%",
           overflowX: "hidden",
+          transition: "padding-left 0.3s ease-in-out",
         }}
         className="auth-main"
       >
@@ -40,7 +46,7 @@ export default function AuthLayout({
       </main>
       <MobileNav />
 
-      <style jsx>{`
+      <style jsx>{+""+
         @media (max-width: 768px) {
           .auth-main {
             padding-left: 12px !important;
@@ -49,7 +55,7 @@ export default function AuthLayout({
             padding-bottom: 80px !important;
           }
         }
-      `}</style>
+      +""+}</style>
     </div>
   );
 }
