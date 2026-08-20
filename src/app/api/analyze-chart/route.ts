@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { generateSignalLevels, getExnessSpread } from "@/lib/forex-data";
+import { generateSignalLevels, getExnessSpread, getLivePrice } from "@/lib/forex-data";
 
 const FALLBACK_PRICES: Record<string, number> = {
   "EUR/USD": 1.0850,
@@ -30,24 +30,27 @@ function generateProfessionalAnalysis(
 
 🔍 **WHY WE ARE BUYING:**
 
-1. **Trend Analysis:**
+1. **Live Price: ${signal.currentPrice}**
+   • Real-time market data from Yahoo Finance
+
+2. **Trend Analysis:**
    • Trend: ${signal.trendBias}
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
    • ${signal.ma20 > signal.ma50 ? "Bullish: MA20 above MA50" : "Bearish: MA20 below MA50"}
 
-2. **RSI (${signal.rsi}):**
+3. **RSI (${signal.rsi}):**
    • Status: ${rsiStatus}
    • ${signal.rsi < 70 ? "RSI below 70 = room to run upward" : "RSI overbought = caution"}
 
-3. **ATR (${signal.atr}):**
+4. **ATR (${signal.atr}):**
    • Volatility measure: ${signal.atr}
    • Stop loss sized at 1.5x ATR for optimal placement
 
-4. **Support Level: ${signal.supportLevel}**
+5. **Support Level: ${signal.supportLevel}**
    • Price is ${signal.currentPrice > signal.supportLevel ? "ABOVE support" : "AT support"}
    • Buyers historically defend this zone
 
-5. **Session: ${signal.session}**
+6. **Session: ${signal.session}**
    • ${signal.session === "LONDON" ? "London session = high liquidity" : signal.session === "NEW YORK" ? "NY session = USD volatility" : "Normal trading session"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -70,24 +73,27 @@ function generateProfessionalAnalysis(
 
 🔍 **WHY WE ARE SELLING:**
 
-1. **Trend Analysis:**
+1. **Live Price: ${signal.currentPrice}**
+   • Real-time market data from Yahoo Finance
+
+2. **Trend Analysis:**
    • Trend: ${signal.trendBias}
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
    • ${signal.ma20 < signal.ma50 ? "Bearish: MA20 below MA50" : "Bullish: MA20 above MA50"}
 
-2. **RSI (${signal.rsi}):**
+3. **RSI (${signal.rsi}):**
    • Status: ${rsiStatus}
    • ${signal.rsi > 30 ? "RSI above 30 = room to run downward" : "RSI oversold = caution"}
 
-3. **ATR (${signal.atr}):**
+4. **ATR (${signal.atr}):**
    • Volatility measure: ${signal.atr}
    • Stop loss sized at 1.5x ATR for optimal placement
 
-4. **Resistance Level: ${signal.resistanceLevel}**
+5. **Resistance Level: ${signal.resistanceLevel}**
    • Price is ${signal.currentPrice < signal.resistanceLevel ? "BELOW resistance" : "AT resistance"}
    • Sellers historically defend this zone
 
-5. **Session: ${signal.session}**
+6. **Session: ${signal.session}**
    • ${signal.session === "LONDON" ? "London session = high liquidity" : signal.session === "NEW YORK" ? "NY session = USD volatility" : "Normal trading session"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -121,12 +127,22 @@ export async function POST(request: Request) {
 
     let currentPrice: number;
 
+    // Try to get live price from Yahoo Finance
     if (userPrice && !isNaN(Number(userPrice)) && Number(userPrice) > 0) {
+      // Use user's manual price if provided
       currentPrice = Number(userPrice);
     } else {
-      currentPrice = FALLBACK_PRICES[pair] || 1.0;
+      // Fetch real live price
+      try {
+        currentPrice = await getLivePrice(pair);
+        console.log(`Live price for ${pair}: ${currentPrice}`);
+      } catch (error) {
+        console.error(`Failed to get live price for ${pair}, using fallback:`, error);
+        currentPrice = FALLBACK_PRICES[pair] || 1.0;
+      }
     }
 
+    // Generate signal with real market data
     const signal = await generateSignalLevels(pair, currentPrice);
     const spread = getExnessSpread(pair);
 
@@ -161,6 +177,7 @@ export async function POST(request: Request) {
         rsi: signal.rsi,
         atr: signal.atr,
         session: signal.session,
+        dataSource: "Yahoo Finance Live Data",
       },
     });
   } catch (error) {
