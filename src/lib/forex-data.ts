@@ -21,6 +21,7 @@ export interface SignalLevels {
   riskReward2: string;
   riskReward3: string;
   confidence: string;
+  confidenceScore: number;
   timestamp: number;
   trendBias: string;
   supportLevel: number;
@@ -30,7 +31,16 @@ export interface SignalLevels {
   ma200: number;
   rsi: number;
   atr: number;
+  macd: number;
+  macdSignal: number;
+  macdHistogram: number;
+  bollingerUpper: number;
+  bollingerMiddle: number;
+  bollingerLower: number;
   session: string;
+  signalScore: number;
+  timeframe: string;
+  reasons: string[];
 }
 
 const FALLBACK_PRICES: Record<string, number> = {
@@ -83,10 +93,28 @@ export function getExnessSpread(pair: string): number {
   return EXNESS_SPREADS[pair] || 2;
 }
 
+// ===== TECHNICAL INDICATORS =====
+
 function calculateSMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
   const slice = prices.slice(-period);
   return slice.reduce((sum, p) => sum + p, 0) / slice.length;
+}
+
+function calculateEMA(prices: number[], period: number): number[] {
+  const ema: number[] = [];
+  const multiplier = 2 / (period + 1);
+  
+  // Start with SMA for first value
+  const sma = calculateSMA(prices.slice(0, period), period);
+  ema.push(sma);
+  
+  for (let i = period; i < prices.length; i++) {
+    const value = (prices[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
+    ema.push(value);
+  }
+  
+  return ema;
 }
 
 function calculateRSI(prices: number[], period: number = 14): number {
@@ -117,6 +145,51 @@ function calculateATR(prices: number[], period: number = 14): number {
   }
 
   return totalRange / period;
+}
+
+function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
+  if (prices.length < 26) {
+    return { macd: 0, signal: 0, histogram: 0 };
+  }
+  
+  const ema12 = calculateEMA(prices, 12);
+  const ema26 = calculateEMA(prices, 26);
+  
+  const macdLine = ema12[ema12.length - 1] - ema26[ema26.length - 1];
+  
+  // Calculate signal line (9-day EMA of MACD)
+  const macdValues: number[] = [];
+  for (let i = 0; i < ema12.length; i++) {
+    macdValues.push(ema12[i] - ema26[i]);
+  }
+  
+  const signalEMA = calculateEMA(macdValues, 9);
+  const signalLine = signalEMA[signalEMA.length - 1];
+  
+  return {
+    macd: Number(macdLine.toFixed(5)),
+    signal: Number(signalLine.toFixed(5)),
+    histogram: Number((macdLine - signalLine).toFixed(5)),
+  };
+}
+
+function calculateBollingerBands(prices: number[], period: number = 20): { upper: number; middle: number; lower: number } {
+  if (prices.length < period) {
+    const middle = calculateSMA(prices, prices.length);
+    return { upper: middle, middle, lower: middle };
+  }
+  
+  const middle = calculateSMA(prices, period);
+  const slice = prices.slice(-period);
+  const squaredDiffs = slice.map(p => Math.pow(p - middle, 2));
+  const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / period;
+  const stdDev = Math.sqrt(variance);
+  
+  return {
+    upper: Number((middle + 2 * stdDev).toFixed(5)),
+    middle: Number(middle.toFixed(5)),
+    lower: Number((middle - 2 * stdDev).toFixed(5)),
+  };
 }
 
 function findSupportResistance(prices: number[]): { support: number; resistance: number } {
@@ -165,30 +238,133 @@ function determineDirection(
   support: number,
   resistance: number,
   rsi: number,
+  macdHistogram: number,
+  bollingerUpper: number,
+  bollingerLower: number,
 ): "long" | "short" {
-  // RSI filter - don't buy if overbought, don't sell if oversold
-  if (rsi > 70) return "short"; // Overbought = sell
-  if (rsi < 30) return "long"; // Oversold = buy
+  let longScore = 0;
+  let shortScore = 0;
 
-  if (trendBias === "STRONG UPTREND" || trendBias === "UPTREND") {
-    return "long";
-  }
-  if (trendBias === "STRONG DOWNTREND" || trendBias === "DOWNTREND") {
-    return "short";
-  }
+  // Trend analysis
+  if (trendBias === "STRONG UPTREND") longScore += 3;
+  else if (trendBias === "UPTREND") longScore += 2;
+  else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
+  else if (trendBias === "DOWNTREND") shortScore += 2;
 
-  const distanceToSupport = currentPrice - support;
-  const distanceToResistance = resistance - currentPrice;
-  return distanceToSupport < distanceToResistance ? "long" : "short";
+  // RSI filter
+  if (rsi < 30) longScore += 2; // Oversold = buy opportunity
+  if (rsi > 70) shortScore += 2; // Overbought = sell opportunity
+  if (rsi >= 30 && rsi <= 50) longScore += 1;
+  if (rsi >= 50 && rsi <= 70) shortScore += 1;
+
+  // MACD
+  if (macdHistogram > 0) longScore += 2;
+  if (macdHistogram < 0) shortScore += 2;
+
+  // Bollinger Bands
+  if (currentPrice <= bollingerLower) longScore += 2; // At lower band = buy
+  if (currentPrice >= bollingerUpper) shortScore += 2; // At upper band = sell
+
+  // Support/Resistance proximity
+  const distanceToSupport = Math.abs(currentPrice - support);
+  const distanceToResistance = Math.abs(resistance - currentPrice);
+  if (distanceToSupport < distanceToResistance) longScore += 1;
+  else shortScore += 1;
+
+  return longScore > shortScore ? "long" : "short";
 }
 
-export async function getRealHistoricalData(pair: string): Promise<number[]> {
+// ===== SIGNAL SCORING SYSTEM =====
+
+function calculateSignalScore(
+  trendBias: string,
+  rsi: number,
+  atr: number,
+  currentPrice: number,
+  macdHistogram: number,
+  session: string,
+  support: number,
+  resistance: number,
+): { score: number; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+
+  // 1. Trend Alignment (30 points max)
+  if (trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND") {
+    score += 30;
+    reasons.push("Strong trend alignment (+30)");
+  } else if (trendBias === "UPTREND" || trendBias === "DOWNTREND") {
+    score += 20;
+    reasons.push("Moderate trend alignment (+20)");
+  } else {
+    score += 10;
+    reasons.push("Neutral trend (+10)");
+  }
+
+  // 2. RSI Filter (20 points max)
+  if (rsi > 30 && rsi < 70) {
+    score += 20;
+    reasons.push("RSI in optimal range (+20)");
+  } else if (rsi > 20 && rsi < 80) {
+    score += 10;
+    reasons.push("RSI acceptable (+10)");
+  } else {
+    score += 0;
+    reasons.push("RSI extreme - caution (+0)");
+  }
+
+  // 3. MACD Confirmation (20 points max)
+  if (Math.abs(macdHistogram) > 0) {
+    score += 20;
+    reasons.push("MACD confirms momentum (+20)");
+  } else {
+    score += 0;
+    reasons.push("MACD no momentum (+0)");
+  }
+
+  // 4. Session Timing (10 points max)
+  if (session === "LONDON" || session === "NEW YORK") {
+    score += 10;
+    reasons.push("High liquidity session (+10)");
+  } else {
+    score += 5;
+    reasons.push("Normal session (+5)");
+  }
+
+  // 5. Support/Resistance Proximity (10 points max)
+  const distanceToSR = Math.min(
+    Math.abs(currentPrice - support),
+    Math.abs(resistance - currentPrice)
+  );
+  if (distanceToSR < atr * 2) {
+    score += 10;
+    reasons.push("Near key S/R level (+10)");
+  } else {
+    score += 0;
+    reasons.push("Far from S/R (+0)");
+  }
+
+  // 6. Volatility Check (10 points max)
+  if (atr > 0 && atr < currentPrice * 0.01) {
+    score += 10;
+    reasons.push("Healthy volatility (+10)");
+  } else {
+    score += 0;
+    reasons.push("Extreme volatility (+0)");
+  }
+
+  return { score, reasons };
+}
+
+// ===== DATA FETCHING =====
+
+export async function getRealHistoricalData(pair: string, interval: string = "1d"): Promise<number[]> {
   try {
     const symbol = toYahooSymbol(pair);
     const queryOptions = {
       period1: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000),
       period2: new Date(),
-      interval: "1d" as const,
+      interval: interval as any,
     };
 
     const result = await yahooFinance.chart(symbol, queryOptions);
@@ -199,7 +375,6 @@ export async function getRealHistoricalData(pair: string): Promise<number[]> {
         .map((item) => Number(item.close));
       
       if (prices.length > 30) {
-        console.log(`Got ${prices.length} real prices for ${pair}`);
         return prices;
       }
     }
@@ -207,8 +382,6 @@ export async function getRealHistoricalData(pair: string): Promise<number[]> {
     console.error(`Yahoo Finance failed for ${pair}:`, error);
   }
 
-  // Fallback only if Yahoo Finance completely fails
-  console.log(`Using fallback prices for ${pair}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
@@ -229,9 +402,12 @@ export function getPipValue(pair: string, contractSize: number): number {
   return calculatePipSize(pair) * contractSize;
 }
 
+// ===== MAIN SIGNAL GENERATION =====
+
 export async function generateSignalLevels(
   pair: string,
   currentPrice: number,
+  timeframe: string = "1H",
 ): Promise<SignalLevels> {
   const pipSize = calculatePipSize(pair);
   const spread = getExnessSpread(pair);
@@ -247,14 +423,16 @@ export async function generateSignalLevels(
   // Real data
   const priceHistory = await getRealHistoricalData(pair);
 
-  // Indicators
+  // Calculate all indicators
   const ma20 = calculateSMA(priceHistory, 20);
   const ma50 = calculateSMA(priceHistory, 50);
   const ma200 = calculateSMA(priceHistory, 200);
   const rsi = calculateRSI(priceHistory);
   const atr = calculateATR(priceHistory);
+  const macdData = calculateMACD(priceHistory);
+  const bollinger = calculateBollingerBands(priceHistory);
 
-  // S/R
+  // Support/Resistance
   const { support, resistance } = findSupportResistance(priceHistory);
 
   // Trend
@@ -263,8 +441,29 @@ export async function generateSignalLevels(
   // Session
   const session = getCurrentSession();
 
-  // Direction with RSI filter
-  const direction = determineDirection(trendBias, currentPrice, support, resistance, rsi);
+  // Direction with all indicators
+  const direction = determineDirection(
+    trendBias,
+    currentPrice,
+    support,
+    resistance,
+    rsi,
+    macdData.histogram,
+    bollinger.upper,
+    bollinger.lower,
+  );
+
+  // Signal scoring
+  const { score, reasons } = calculateSignalScore(
+    trendBias,
+    rsi,
+    atr,
+    currentPrice,
+    macdData.histogram,
+    session,
+    support,
+    resistance,
+  );
 
   // Dynamic stop loss based on ATR
   const atrBasedStop = Math.max(atr * 1.5, pipSize * 10);
@@ -296,12 +495,8 @@ export async function generateSignalLevels(
     tp3 = entry - tp3Pips * pipSize;
   }
 
-  const confidence =
-    trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND"
-      ? "HIGH"
-      : trendBias === "NEUTRAL"
-        ? "LOW"
-        : "MEDIUM";
+  // Confidence based on score
+  const confidence = score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
 
   return {
     pair,
@@ -320,6 +515,7 @@ export async function generateSignalLevels(
     riskReward2: (tp2Pips / stopLossPips).toFixed(1),
     riskReward3: (tp3Pips / stopLossPips).toFixed(1),
     confidence,
+    confidenceScore: score,
     timestamp: Date.now(),
     trendBias,
     supportLevel: Number(support.toFixed(decimals)),
@@ -329,7 +525,16 @@ export async function generateSignalLevels(
     ma200: Number(ma200.toFixed(decimals)),
     rsi: Number(rsi.toFixed(2)),
     atr: Number(atr.toFixed(decimals)),
+    macd: macdData.macd,
+    macdSignal: macdData.signal,
+    macdHistogram: macdData.histogram,
+    bollingerUpper: bollinger.upper,
+    bollingerMiddle: bollinger.middle,
+    bollingerLower: bollinger.lower,
     session,
+    signalScore: score,
+    timeframe,
+    reasons,
   };
 }
 
