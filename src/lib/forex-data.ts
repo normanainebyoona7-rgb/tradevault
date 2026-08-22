@@ -1,6 +1,9 @@
 // src/lib/forex-data.ts
 
 import YahooFinance from "yahoo-finance2";
+import { detectPatterns, CandlestickPattern } from "./patterns";
+import { backtestStrategy, BacktestResult } from "./backtest";
+import { analyzeMultipleTimeframes, getMultiTimeframeConsensus } from "./multi-timeframe";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -41,6 +44,10 @@ export interface SignalLevels {
   signalScore: number;
   timeframe: string;
   reasons: string[];
+  patterns: CandlestickPattern[];
+  backtest: BacktestResult;
+  multiTimeframeConsensus: string;
+  multiTimeframeStrength: number;
 }
 
 const FALLBACK_PRICES: Record<string, number> = {
@@ -105,7 +112,6 @@ function calculateEMA(prices: number[], period: number): number[] {
   const ema: number[] = [];
   const multiplier = 2 / (period + 1);
   
-  // Start with SMA for first value
   const sma = calculateSMA(prices.slice(0, period), period);
   ema.push(sma);
   
@@ -157,7 +163,6 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   
   const macdLine = ema12[ema12.length - 1] - ema26[ema26.length - 1];
   
-  // Calculate signal line (9-day EMA of MACD)
   const macdValues: number[] = [];
   for (let i = 0; i < ema12.length; i++) {
     macdValues.push(ema12[i] - ema26[i]);
@@ -245,27 +250,22 @@ function determineDirection(
   let longScore = 0;
   let shortScore = 0;
 
-  // Trend analysis
   if (trendBias === "STRONG UPTREND") longScore += 3;
   else if (trendBias === "UPTREND") longScore += 2;
   else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
   else if (trendBias === "DOWNTREND") shortScore += 2;
 
-  // RSI filter
-  if (rsi < 30) longScore += 2; // Oversold = buy opportunity
-  if (rsi > 70) shortScore += 2; // Overbought = sell opportunity
+  if (rsi < 30) longScore += 2;
+  if (rsi > 70) shortScore += 2;
   if (rsi >= 30 && rsi <= 50) longScore += 1;
   if (rsi >= 50 && rsi <= 70) shortScore += 1;
 
-  // MACD
   if (macdHistogram > 0) longScore += 2;
   if (macdHistogram < 0) shortScore += 2;
 
-  // Bollinger Bands
-  if (currentPrice <= bollingerLower) longScore += 2; // At lower band = buy
-  if (currentPrice >= bollingerUpper) shortScore += 2; // At upper band = sell
+  if (currentPrice <= bollingerLower) longScore += 2;
+  if (currentPrice >= bollingerUpper) shortScore += 2;
 
-  // Support/Resistance proximity
   const distanceToSupport = Math.abs(currentPrice - support);
   const distanceToResistance = Math.abs(resistance - currentPrice);
   if (distanceToSupport < distanceToResistance) longScore += 1;
@@ -289,7 +289,6 @@ function calculateSignalScore(
   let score = 0;
   const reasons: string[] = [];
 
-  // 1. Trend Alignment (30 points max)
   if (trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND") {
     score += 30;
     reasons.push("Strong trend alignment (+30)");
@@ -301,7 +300,6 @@ function calculateSignalScore(
     reasons.push("Neutral trend (+10)");
   }
 
-  // 2. RSI Filter (20 points max)
   if (rsi > 30 && rsi < 70) {
     score += 20;
     reasons.push("RSI in optimal range (+20)");
@@ -309,20 +307,16 @@ function calculateSignalScore(
     score += 10;
     reasons.push("RSI acceptable (+10)");
   } else {
-    score += 0;
     reasons.push("RSI extreme - caution (+0)");
   }
 
-  // 3. MACD Confirmation (20 points max)
   if (Math.abs(macdHistogram) > 0) {
     score += 20;
     reasons.push("MACD confirms momentum (+20)");
   } else {
-    score += 0;
     reasons.push("MACD no momentum (+0)");
   }
 
-  // 4. Session Timing (10 points max)
   if (session === "LONDON" || session === "NEW YORK") {
     score += 10;
     reasons.push("High liquidity session (+10)");
@@ -331,7 +325,6 @@ function calculateSignalScore(
     reasons.push("Normal session (+5)");
   }
 
-  // 5. Support/Resistance Proximity (10 points max)
   const distanceToSR = Math.min(
     Math.abs(currentPrice - support),
     Math.abs(resistance - currentPrice)
@@ -340,16 +333,13 @@ function calculateSignalScore(
     score += 10;
     reasons.push("Near key S/R level (+10)");
   } else {
-    score += 0;
     reasons.push("Far from S/R (+0)");
   }
 
-  // 6. Volatility Check (10 points max)
   if (atr > 0 && atr < currentPrice * 0.01) {
     score += 10;
     reasons.push("Healthy volatility (+10)");
   } else {
-    score += 0;
     reasons.push("Extreme volatility (+0)");
   }
 
@@ -473,6 +463,24 @@ export async function generateSignalLevels(
   const tp2Pips = Math.round(stopLossPips * 2.5);
   const tp3Pips = Math.round(stopLossPips * 4);
 
+  // Pattern detection
+  const highs = priceHistory.map((p) => p + atr * 0.5);
+  const lows = priceHistory.map((p) => p - atr * 0.5);
+  const patterns = detectPatterns(priceHistory, highs, lows);
+
+  // Backtesting
+  const backtest = backtestStrategy(
+    priceHistory,
+    direction,
+    stopLossPips,
+    tp1Pips,
+    pipSize,
+  );
+
+  // Multi-timeframe analysis
+  const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
+  const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
+
   const spreadAmount = spread * pipSize;
 
   let entry: number;
@@ -535,6 +543,10 @@ export async function generateSignalLevels(
     signalScore: score,
     timeframe,
     reasons,
+    patterns,
+    backtest,
+    multiTimeframeConsensus: mtfConsensus.consensus,
+    multiTimeframeStrength: mtfConsensus.strength,
   };
 }
 
