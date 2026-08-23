@@ -533,8 +533,9 @@ export async function generateSignalLevels(
 
   const spreadAmount = spread * pipSize;
 
-  // Entry at LIVE market price (like before)
-  const entry = direction === "long" ? currentPrice + spreadAmount : currentPrice - spreadAmount;
+  // Entry based on order type (limit/stop orders)
+  const orderEntry = orderRecommendation.entryPrice;
+  const entry = direction === "long" ? orderEntry + spreadAmount : orderEntry - spreadAmount;
 
   const slDistance = stopLossPips * pipSize;
   
