@@ -17,7 +17,7 @@ export default function AdminPage() {
 
   const [signals, setSignals] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "signals" | "auto">("signals");
+  const [activeTab, setActiveTab] = useState<"users" | "signals" | "auto" | "analytics">("signals");
   const [showAddSignal, setShowAddSignal] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [autoPair, setAutoPair] = useState("XAU/USD");
@@ -25,6 +25,8 @@ export default function AdminPage() {
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoResult, setAutoResult] = useState<any>(null);
   const [loadingSignals, setLoadingSignals] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
   const screenshotInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +78,7 @@ export default function AdminPage() {
     if (isAdmin && !isLocked) {
       loadSignals();
       loadUsers();
+      loadAnalytics();
     }
   }, [isAdmin, isLocked]);
 
@@ -103,6 +106,21 @@ export default function AdminPage() {
       }
     } catch (error) {
       console.error("Failed to load users:", error);
+    }
+  };
+
+  const loadAnalytics = async () => {
+    setLoadingAnalytics(true);
+    try {
+      const response = await fetch("/api/admin/analytics");
+      const data = await response.json();
+      if (response.ok) {
+        setAnalyticsData(data);
+      }
+    } catch (error) {
+      console.error("Failed to load analytics:", error);
+    } finally {
+      setLoadingAnalytics(false);
     }
   };
 
@@ -360,6 +378,9 @@ export default function AdminPage() {
         <button onClick={() => setActiveTab("users")} style={{ ...tabStyle, background: activeTab === "users" ? "#1c69e3" : "#e5e7eb", color: activeTab === "users" ? "#fff" : "#111827" }}>
           👥 Users ({users.length})
         </button>
+        <button onClick={() => setActiveTab("analytics")} style={{ ...tabStyle, background: activeTab === "analytics" ? "#1c69e3" : "#e5e7eb", color: activeTab === "analytics" ? "#fff" : "#111827" }}>
+          📈 Analytics
+        </button>
       </div>
 
       {activeTab === "signals" && (
@@ -503,6 +524,11 @@ export default function AdminPage() {
               <p>RSI: <strong>{autoResult.rsi || "N/A"}</strong></p>
               <p>ATR: <strong>{autoResult.atr || "N/A"}</strong></p>
               <p>Trend: <strong>{autoResult.trendBias || "N/A"}</strong></p>
+              <p>MACD: <strong>{autoResult.macd || "N/A"}</strong></p>
+              <p>Bollinger Upper: <strong>{autoResult.bollingerUpper || "N/A"}</strong></p>
+              <p>Bollinger Lower: <strong>{autoResult.bollingerLower || "N/A"}</strong></p>
+              <p>Score: <strong>{autoResult.signalScore || "N/A"}/100</strong></p>
+              <p>Multi-TF: <strong>{autoResult.multiTimeframeConsensus || "N/A"}</strong></p>
             </div>
           )}
         </div>
@@ -549,6 +575,114 @@ export default function AdminPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === "analytics" && (
+        <div>
+          {loadingAnalytics && <p style={{ color: "#6b7280" }}>Loading analytics...</p>}
+          
+          {analyticsData && (
+            <>
+              {/* Platform Stats */}
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "20px" }}>
+                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
+                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Users</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats.totalUsers}</p>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
+                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Trades</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats.totalTrades}</p>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
+                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Signals</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats.totalSignals}</p>
+                </div>
+                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
+                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Platform P&L</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800", color: analyticsData.platformStats.totalPnL >= 0 ? "#16a34a" : "#dc2626" }}>
+                    {analyticsData.platformStats.totalPnL >= 0 ? "+" : ""}${analyticsData.platformStats.totalPnL}
+                  </p>
+                </div>
+              </div>
+
+              {/* User Performance Table */}
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden", marginBottom: "20px" }}>
+                <h3 style={{ padding: "16px", fontWeight: "700", fontSize: "16px", borderBottom: "1px solid #e5e7eb" }}>
+                  👥 User Performance
+                </h3>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? "600px" : "auto" }}>
+                    <thead>
+                      <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>User</th>
+                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Tier</th>
+                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Trades</th>
+                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Win Rate</th>
+                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>P&L</th>
+                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Profit Factor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analyticsData.userPerformance.map((user: any) => (
+                        <tr key={user.userId} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                          <td style={{ padding: "10px", fontSize: "13px" }}>
+                            <p style={{ fontWeight: "600" }}>{user.name}</p>
+                            <p style={{ fontSize: "11px", color: "#6b7280" }}>{user.email}</p>
+                          </td>
+                          <td style={{ padding: "10px" }}>
+                            <span style={{ padding: "4px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", background: user.tier === "vvip" ? "#f3e8ff" : user.tier === "vip" ? "#dbeafe" : "#e5e7eb", color: user.tier === "vvip" ? "#7c3aed" : user.tier === "vip" ? "#1c69e3" : "#111827" }}>
+                              {user.tier.toUpperCase()}
+                            </span>
+                          </td>
+                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>{user.totalTrades}</td>
+                          <td style={{ padding: "10px", fontSize: "13px", color: user.winRate >= 50 ? "#16a34a" : "#dc2626", fontWeight: "700" }}>
+                            {user.winRate}%
+                          </td>
+                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "700", color: user.totalPnL >= 0 ? "#16a34a" : "#dc2626" }}>
+                            {user.totalPnL >= 0 ? "+" : ""}${user.totalPnL}
+                          </td>
+                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>
+                            {user.profitFactor.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                      {analyticsData.userPerformance.length === 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#6b7280" }}>No user data yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Signal Metrics */}
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px" }}>
+                <h3 style={{ fontWeight: "700", fontSize: "16px", marginBottom: "16px" }}>
+                  📊 Signal Generation Metrics
+                </h3>
+                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "12px" }}>
+                  <div style={{ padding: "12px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Total</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800" }}>{analyticsData.signalMetrics.totalSignals}</p>
+                  </div>
+                  <div style={{ padding: "12px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Active</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#16a34a" }}>{analyticsData.signalMetrics.activeSignals}</p>
+                  </div>
+                  <div style={{ padding: "12px", background: "#f3e8ff", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Auto</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#7c3aed" }}>{analyticsData.signalMetrics.autoGenerated}</p>
+                  </div>
+                  <div style={{ padding: "12px", background: "#dbeafe", borderRadius: "8px", textAlign: "center" }}>
+                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Manual</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#1c69e3" }}>{analyticsData.signalMetrics.manualSignals}</p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 

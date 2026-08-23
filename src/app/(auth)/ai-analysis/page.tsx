@@ -5,7 +5,6 @@ import { TradingViewChart } from "@/components/charts/tradingview-chart";
 
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY"];
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
-const ADMIN_EMAIL = "normanainebyoona7@gmail.com";
 
 export default function AIAnalysisPage() {
   const [image, setImage] = useState<string | null>(null);
@@ -17,22 +16,10 @@ export default function AIAnalysisPage() {
   const [error, setError] = useState("");
   const [signal, setSignal] = useState<any>(null);
   const [analysis, setAnalysis] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Check if admin
-    fetch("/api/session")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.user && data.user.email === ADMIN_EMAIL) {
-          setIsAdmin(true);
-        }
-      })
-      .catch(() => {});
-
-    // Check mobile
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
     window.addEventListener('resize', checkMobile);
@@ -112,7 +99,7 @@ export default function AIAnalysisPage() {
         Upload screenshot or enter price manually for AI-powered signals.
       </p>
 
-      {/* TradingView Chart with Timeframe */}
+      {/* TradingView Chart */}
       <div style={{ marginBottom: "20px" }}>
         <TradingViewChart
           onPairChange={setCurrentPair}
@@ -254,39 +241,29 @@ export default function AIAnalysisPage() {
             📊 Signal — {currentPair} ({currentTimeframe})
           </h2>
 
-          {/* Signal Score Display */}
+          {/* Confidence Score */}
           <div style={{
             display: "flex",
             alignItems: "center",
             gap: "8px",
             marginBottom: "16px",
             padding: "10px",
-            background: signal.signalScore >= 70 ? "#f0fdf4" : signal.signalScore >= 50 ? "#fefce8" : "#fef2f2",
+            background: signal.confidence === "HIGH" ? "#f0fdf4" : signal.confidence === "MEDIUM" ? "#fefce8" : "#fef2f2",
             borderRadius: "8px",
           }}>
             <span style={{ fontSize: "14px", fontWeight: "700", color: "#111827" }}>
-              Confidence Score:
+              Confidence:
             </span>
             <span style={{
               fontSize: "18px",
               fontWeight: "800",
-              color: signal.signalScore >= 70 ? "#16a34a" : signal.signalScore >= 50 ? "#ca8a04" : "#dc2626",
-            }}>
-              {signal.signalScore}/100
-            </span>
-            <span style={{
-              padding: "4px 10px",
-              borderRadius: "6px",
-              fontSize: "12px",
-              fontWeight: "700",
-              background: signal.confidence === "HIGH" ? "#dcfce7" : signal.confidence === "MEDIUM" ? "#fef9c3" : "#fee2e2",
               color: signal.confidence === "HIGH" ? "#16a34a" : signal.confidence === "MEDIUM" ? "#ca8a04" : "#dc2626",
             }}>
               {signal.confidence}
             </span>
           </div>
 
-          {/* Main Signal Cards */}
+          {/* Signal Cards */}
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))",
@@ -312,7 +289,7 @@ export default function AIAnalysisPage() {
             </div>
           </div>
 
-          {/* TP2 and TP3 - Only show if available */}
+          {/* TP2 and TP3 */}
           {(signal.takeProfit2Price || signal.takeProfit2) && (
             <div style={{
               display: "grid",
@@ -331,7 +308,7 @@ export default function AIAnalysisPage() {
             </div>
           )}
 
-          {/* Multi-Timeframe Consensus - Simple display */}
+          {/* Multi-Timeframe Consensus - Simple */}
           {signal.multiTimeframeConsensus && (
             <div style={{
               marginTop: "16px",
@@ -344,83 +321,6 @@ export default function AIAnalysisPage() {
               <p style={{ fontSize: "16px", fontWeight: "700", color: "#1c69e3" }}>
                 {signal.multiTimeframeConsensus?.toUpperCase()} ({signal.multiTimeframeStrength}% alignment)
               </p>
-            </div>
-          )}
-
-          {/* Admin Only - Technical Details */}
-          {isAdmin && (
-            <div style={{
-              marginTop: "16px",
-              padding: "16px",
-              background: "#faf5ff",
-              borderRadius: "8px",
-              border: "1px solid #e9d5ff",
-            }}>
-              <h3 style={{ fontSize: "14px", fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>
-                🔧 Admin Technical Analysis
-              </h3>
-              
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                <div><strong>RSI:</strong> {signal.rsi}</div>
-                <div><strong>ATR:</strong> {signal.atr}</div>
-                <div><strong>MA20:</strong> {signal.ma20}</div>
-                <div><strong>MA50:</strong> {signal.ma50}</div>
-                <div><strong>MA200:</strong> {signal.ma200}</div>
-                <div><strong>MACD:</strong> {signal.macd}</div>
-                <div><strong>MACD Signal:</strong> {signal.macdSignal}</div>
-                <div><strong>MACD Histogram:</strong> {signal.macdHistogram}</div>
-                <div><strong>Bollinger Upper:</strong> {signal.bollingerUpper}</div>
-                <div><strong>Bollinger Lower:</strong> {signal.bollingerLower}</div>
-                <div><strong>Support:</strong> {signal.supportLevel}</div>
-                <div><strong>Resistance:</strong> {signal.resistanceLevel}</div>
-                <div><strong>Session:</strong> {signal.session}</div>
-                <div><strong>Trend:</strong> {signal.trendBias}</div>
-              </div>
-
-              {/* Signal Reasons */}
-              {signal.reasons && signal.reasons.length > 0 && (
-                <div style={{ marginTop: "12px" }}>
-                  <h4 style={{ fontSize: "13px", fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>
-                    Signal Reasons:
-                  </h4>
-                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
-                    {signal.reasons.map((reason: string, i: number) => (
-                      <li key={i} style={{ padding: "4px 0" }}>• {reason}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Candlestick Patterns */}
-              {signal.patterns && signal.patterns.length > 0 && (
-                <div style={{ marginTop: "12px" }}>
-                  <h4 style={{ fontSize: "13px", fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>
-                    Detected Patterns:
-                  </h4>
-                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
-                    {signal.patterns.map((pattern: any, i: number) => (
-                      <li key={i} style={{ padding: "4px 0" }}>
-                        • {pattern.name} ({pattern.type}, Strength: {pattern.strength}/10)
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Backtest Results */}
-              {signal.backtest && (
-                <div style={{ marginTop: "12px" }}>
-                  <h4 style={{ fontSize: "13px", fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>
-                    Backtest Results:
-                  </h4>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px" }}>
-                    <div>Win Rate: <strong>{signal.backtest.winRate}%</strong></div>
-                    <div>Profit Factor: <strong>{signal.backtest.profitFactor}</strong></div>
-                    <div>Total Trades: <strong>{signal.backtest.totalTrades}</strong></div>
-                    <div>Max Drawdown: <strong>${signal.backtest.maxDrawdown}</strong></div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
