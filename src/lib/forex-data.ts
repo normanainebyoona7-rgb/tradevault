@@ -375,71 +375,6 @@ function calculateSignalScore(
   return { score, reasons, confluences };
 }
 
-// ===== LIVE PRICE APIS (Primary sources that work on Vercel) =====
-
-async function getPriceFromBinance(pair: string): Promise<number | null> {
-  try {
-    const symbolMap: Record<string, string> = {
-      "BTC/USD": "BTCUSDT",
-      "ETH/USD": "ETHUSDT",
-    };
-    
-    if (!symbolMap[pair]) return null;
-    
-    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbolMap[pair]}`);
-    const data = await response.json();
-    
-    if (data.price) {
-      console.log(`Binance live price for ${pair}: ${data.price}`);
-      return Number(data.price);
-    }
-  } catch (error) {
-    console.error(`Binance failed for ${pair}:`, error);
-  }
-  return null;
-}
-
-async function getPriceFromExchangeRateAPI(pair: string): Promise<number | null> {
-  try {
-    const [base, quote] = pair.split("/");
-    
-    if (base === "XAU" || base === "XAG" || base === "BTC" || base === "ETH") return null;
-    
-    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${base}`);
-    const data = await response.json();
-    
-    if (data.rates && data.rates[quote]) {
-      console.log(`ExchangeRate live price for ${pair}: ${data.rates[quote]}`);
-      return Number(data.rates[quote]);
-    }
-  } catch (error) {
-    console.error(`ExchangeRate API failed for ${pair}:`, error);
-  }
-  return null;
-}
-
-async function getGoldSilverPrice(pair: string): Promise<number | null> {
-  try {
-    if (pair === "XAU/USD") {
-      const response = await fetch('https://api.metals.live/v1/spot/gold');
-      const data = await response.json();
-      if (Array.isArray(data) && data.length > 0 && data[0].price) {
-        return Number(data[0].price);
-      }
-    }
-    if (pair === "XAG/USD") {
-      const response = await fetch('https://api.metals.live/v1/spot/silver');
-      const data = await response.json();
-      if (Array.isArray(data) && data.length > 0 && data[0].price) {
-        return Number(data[0].price);
-      }
-    }
-  } catch (error) {
-    console.error(`Metals API failed for ${pair}:`, error);
-  }
-  return null;
-}
-
 // ===== DATA FETCHING =====
 
 export async function getRealHistoricalData(pair: string, interval: string = "1d"): Promise<number[]> {
@@ -467,19 +402,6 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
     console.error(`Yahoo Finance failed for ${pair}:`, error);
   }
 
-  const livePrice = await getLivePrice(pair);
-  if (livePrice) {
-    console.log(`Generating historical data around live price for ${pair}: ${livePrice}`);
-    const prices: number[] = [];
-    const volatility = livePrice * 0.002;
-    for (let i = 200; i >= 0; i--) {
-      const randomWalk = (Math.random() - 0.5) * volatility;
-      prices.push(livePrice + randomWalk - (i * volatility / 100));
-    }
-    return prices;
-  }
-
-  console.log(`Using hardcoded fallback for ${pair}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
@@ -492,19 +414,6 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
 }
 
 export async function getLivePrice(pair: string): Promise<number> {
-  // Priority 1: Binance for crypto
-  const binancePrice = await getPriceFromBinance(pair);
-  if (binancePrice) return binancePrice;
-  
-  // Priority 2: ExchangeRate API for forex
-  const exchangeRatePrice = await getPriceFromExchangeRateAPI(pair);
-  if (exchangeRatePrice) return exchangeRatePrice;
-  
-  // Priority 3: Gold/Silver API
-  const metalsPrice = await getGoldSilverPrice(pair);
-  if (metalsPrice) return metalsPrice;
-  
-  // Priority 4: Yahoo Finance (backup)
   try {
     const symbol = toYahooSymbol(pair);
     const result = await yahooFinance.chart(symbol, {
@@ -624,8 +533,8 @@ export async function generateSignalLevels(
 
   const spreadAmount = spread * pipSize;
 
-  const orderEntry = orderRecommendation.entryPrice;
-  const entry = direction === "long" ? orderEntry + spreadAmount : orderEntry - spreadAmount;
+  // Entry at LIVE market price (like before)
+  const entry = direction === "long" ? currentPrice + spreadAmount : currentPrice - spreadAmount;
 
   const slDistance = stopLossPips * pipSize;
   
@@ -636,28 +545,14 @@ export async function generateSignalLevels(
 
   if (direction === "long") {
     stopLossPrice = entry - slDistance;
-    
-    const distanceToResistance = resistance - entry;
-    const tp1Distance = Math.min(distanceToResistance, slDistance * 1.5);
-    tp1Price = entry + tp1Distance;
-    
-    const tp2Distance = Math.min(distanceToResistance * 1.5, slDistance * 2.5);
-    tp2Price = entry + tp2Distance;
-    
-    const tp3Distance = Math.max(distanceToResistance * 2, slDistance * 4);
-    tp3Price = entry + tp3Distance;
+    tp1Price = entry + slDistance * 1.5;
+    tp2Price = entry + slDistance * 2.5;
+    tp3Price = entry + slDistance * 4;
   } else {
     stopLossPrice = entry + slDistance;
-    
-    const distanceToSupport = entry - support;
-    const tp1Distance = Math.min(distanceToSupport, slDistance * 1.5);
-    tp1Price = entry - tp1Distance;
-    
-    const tp2Distance = Math.min(distanceToSupport * 1.5, slDistance * 2.5);
-    tp2Price = entry - tp2Distance;
-    
-    const tp3Distance = Math.max(distanceToSupport * 2, slDistance * 4);
-    tp3Price = entry - tp3Distance;
+    tp1Price = entry - slDistance * 1.5;
+    tp2Price = entry - slDistance * 2.5;
+    tp3Price = entry - slDistance * 4;
   }
 
   const rewardPips1 = Math.round(Math.abs(tp1Price - entry) / pipSize);
