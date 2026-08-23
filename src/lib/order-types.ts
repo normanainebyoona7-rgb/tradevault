@@ -20,116 +20,135 @@ export function determineOrderType(
   trendBias: string,
   atr: number,
 ): OrderRecommendation {
-  const reasons: string[] = [];
+  
+  const atrThreshold = atr * 1.5;
   
   if (direction === "long") {
-    // Check if price is near support (good for buy limit)
     const distanceToSupport = currentPrice - supportLevel;
-    const atrThreshold = atr * 1.5;
+    const distanceToResistance = resistanceLevel - currentPrice;
+    const distanceToBollingerLower = currentPrice - bollingerLower;
     
-    if (rsi < 30) {
-      // Oversold - aggressive buy at market
+    // 1. PRICE AT OR NEAR SUPPORT → BUY LIMIT (best risk/reward)
+    if (distanceToSupport < atrThreshold) {
       return {
-        orderType: "MARKET_BUY",
-        entryPrice: currentPrice,
-        reason: "RSI oversold (<30). Immediate bullish reversal expected. Enter at market.",
+        orderType: "BUY_LIMIT",
+        entryPrice: supportLevel,
+        reason: `Price near support (${supportLevel}). Buy limit at support for optimal entry with best risk/reward.`,
         confidence: 85,
       };
-    } else if (currentPrice <= bollingerLower) {
-      // At lower Bollinger band - buy limit at support
+    }
+    
+    // 2. PRICE AT LOWER BOLLINGER BAND → BUY LIMIT
+    if (distanceToBollingerLower < atrThreshold) {
       return {
         orderType: "BUY_LIMIT",
-        entryPrice: supportLevel,
-        reason: "Price at lower Bollinger band. Buy limit at support level for better entry.",
+        entryPrice: bollingerLower,
+        reason: `Price at lower Bollinger band (${bollingerLower}). Buy limit at band for mean reversion.`,
         confidence: 80,
       };
-    } else if (distanceToSupport < atrThreshold && trendBias.includes("UPTREND")) {
-      // Near support in uptrend - buy limit
-      return {
-        orderType: "BUY_LIMIT",
-        entryPrice: supportLevel,
-        reason: "Price near support in uptrend. Buy limit at support for optimal entry.",
-        confidence: 75,
-      };
-    } else if (trendBias === "STRONG UPTREND" && rsi < 50) {
-      // Strong uptrend, RSI not overbought - buy market
+    }
+    
+    // 3. STRONG UPTREND + RSI NOT OVERBOUGHT → MARKET BUY (momentum)
+    if (trendBias === "STRONG UPTREND" && rsi > 40 && rsi < 60) {
       return {
         orderType: "MARKET_BUY",
         entryPrice: currentPrice,
-        reason: "Strong uptrend with RSI below 50. Enter immediately to catch momentum.",
-        confidence: 70,
+        reason: `Strong uptrend with RSI at ${rsi}. Enter immediately to ride momentum.`,
+        confidence: 75,
       };
-    } else if (currentPrice > resistanceLevel && trendBias.includes("UPTREND")) {
-      // Breakout above resistance - buy stop
+    }
+    
+    // 4. BREAKOUT ABOVE RESISTANCE → BUY STOP
+    if (distanceToResistance < atrThreshold && trendBias.includes("UPTREND")) {
       return {
         orderType: "BUY_STOP",
         entryPrice: resistanceLevel + atr * 0.2,
-        reason: "Price breaking above resistance. Buy stop above resistance to confirm breakout.",
-        confidence: 65,
-      };
-    } else {
-      // Default - buy limit at support
-      return {
-        orderType: "BUY_LIMIT",
-        entryPrice: supportLevel,
-        reason: "Buy limit at support level for best risk/reward ratio.",
-        confidence: 60,
-      };
-    }
-  } else {
-    // Short direction
-    const distanceToResistance = resistanceLevel - currentPrice;
-    const atrThreshold = atr * 1.5;
-    
-    if (rsi > 70) {
-      // Overbought - aggressive sell at market
-      return {
-        orderType: "MARKET_SELL",
-        entryPrice: currentPrice,
-        reason: "RSI overbought (>70). Immediate bearish reversal expected. Enter at market.",
-        confidence: 85,
-      };
-    } else if (currentPrice >= bollingerUpper) {
-      // At upper Bollinger band - sell limit at resistance
-      return {
-        orderType: "SELL_LIMIT",
-        entryPrice: resistanceLevel,
-        reason: "Price at upper Bollinger band. Sell limit at resistance level for better entry.",
-        confidence: 80,
-      };
-    } else if (distanceToResistance < atrThreshold && trendBias.includes("DOWNTREND")) {
-      // Near resistance in downtrend - sell limit
-      return {
-        orderType: "SELL_LIMIT",
-        entryPrice: resistanceLevel,
-        reason: "Price near resistance in downtrend. Sell limit at resistance for optimal entry.",
-        confidence: 75,
-      };
-    } else if (trendBias === "STRONG DOWNTREND" && rsi > 50) {
-      // Strong downtrend, RSI not oversold - sell market
-      return {
-        orderType: "MARKET_SELL",
-        entryPrice: currentPrice,
-        reason: "Strong downtrend with RSI above 50. Enter immediately to catch momentum.",
+        reason: `Price approaching resistance (${resistanceLevel}). Buy stop above resistance to catch breakout.`,
         confidence: 70,
       };
-    } else if (currentPrice < supportLevel && trendBias.includes("DOWNTREND")) {
-      // Breakdown below support - sell stop
+    }
+    
+    // 5. RSI OVERSOLD → MARKET BUY (reversal)
+    if (rsi < 30) {
+      return {
+        orderType: "MARKET_BUY",
+        entryPrice: currentPrice,
+        reason: `RSI oversold at ${rsi}. Strong bullish reversal expected. Enter at market.`,
+        confidence: 65,
+      };
+    }
+    
+    // 6. DEFAULT → BUY LIMIT at support
+    return {
+      orderType: "BUY_LIMIT",
+      entryPrice: supportLevel,
+      reason: `Buy limit at support (${supportLevel}) for best risk/reward ratio.`,
+      confidence: 60,
+    };
+    
+  } else {
+    // SHORT direction
+    const distanceToResistance = resistanceLevel - currentPrice;
+    const distanceToSupport = currentPrice - supportLevel;
+    const distanceToBollingerUpper = bollingerUpper - currentPrice;
+    
+    // 1. PRICE AT OR NEAR RESISTANCE → SELL LIMIT (best risk/reward)
+    if (distanceToResistance < atrThreshold) {
+      return {
+        orderType: "SELL_LIMIT",
+        entryPrice: resistanceLevel,
+        reason: `Price near resistance (${resistanceLevel}). Sell limit at resistance for optimal entry.`,
+        confidence: 85,
+      };
+    }
+    
+    // 2. PRICE AT UPPER BOLLINGER BAND → SELL LIMIT
+    if (distanceToBollingerUpper < atrThreshold) {
+      return {
+        orderType: "SELL_LIMIT",
+        entryPrice: bollingerUpper,
+        reason: `Price at upper Bollinger band (${bollingerUpper}). Sell limit at band for mean reversion.`,
+        confidence: 80,
+      };
+    }
+    
+    // 3. STRONG DOWNTREND + RSI NOT OVERSOLD → MARKET SELL (momentum)
+    if (trendBias === "STRONG DOWNTREND" && rsi > 40 && rsi < 60) {
+      return {
+        orderType: "MARKET_SELL",
+        entryPrice: currentPrice,
+        reason: `Strong downtrend with RSI at ${rsi}. Enter immediately to ride momentum.`,
+        confidence: 75,
+      };
+    }
+    
+    // 4. BREAKDOWN BELOW SUPPORT → SELL STOP
+    if (distanceToSupport < atrThreshold && trendBias.includes("DOWNTREND")) {
       return {
         orderType: "SELL_STOP",
         entryPrice: supportLevel - atr * 0.2,
-        reason: "Price breaking below support. Sell stop below support to confirm breakdown.",
-        confidence: 65,
-      };
-    } else {
-      // Default - sell limit at resistance
-      return {
-        orderType: "SELL_LIMIT",
-        entryPrice: resistanceLevel,
-        reason: "Sell limit at resistance level for best risk/reward ratio.",
-        confidence: 60,
+        reason: `Price approaching support (${supportLevel}). Sell stop below support to catch breakdown.`,
+        confidence: 70,
       };
     }
+    
+    // 5. RSI OVERBOUGHT → MARKET SELL (reversal)
+    if (rsi > 70) {
+      return {
+        orderType: "MARKET_SELL",
+        entryPrice: currentPrice,
+        reason: `RSI overbought at ${rsi}. Strong bearish reversal expected. Enter at market.`,
+        confidence: 65,
+      };
+    }
+    
+    // 6. DEFAULT → SELL LIMIT at resistance
+    return {
+      orderType: "SELL_LIMIT",
+      entryPrice: resistanceLevel,
+      reason: `Sell limit at resistance (${resistanceLevel}) for best risk/reward ratio.`,
+      confidence: 60,
+    };
   }
 }
 
