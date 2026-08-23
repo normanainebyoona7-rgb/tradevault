@@ -375,42 +375,42 @@ function calculateSignalScore(
   return { score, reasons, confluences };
 }
 
-// ===== DATA FETCHING =====
+// ===== LIVE PRICE APIS (Primary sources that work on Vercel) =====
 
-async function getPriceFromCoinGecko(pair: string): Promise<number | null> {
+async function getPriceFromBinance(pair: string): Promise<number | null> {
   try {
-    const coinMap: Record<string, string> = {
-      "BTC/USD": "bitcoin",
-      "ETH/USD": "ethereum",
+    const symbolMap: Record<string, string> = {
+      "BTC/USD": "BTCUSDT",
+      "ETH/USD": "ETHUSDT",
     };
     
-    if (!coinMap[pair]) return null;
+    if (!symbolMap[pair]) return null;
     
-    const response = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${coinMap[pair]}&vs_currencies=usd`
-    );
+    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbolMap[pair]}`);
     const data = await response.json();
     
-    if (data[coinMap[pair]] && data[coinMap[pair]].usd) {
-      return data[coinMap[pair]].usd;
+    if (data.price) {
+      console.log(`Binance live price for ${pair}: ${data.price}`);
+      return Number(data.price);
     }
   } catch (error) {
-    console.error(`CoinGecko failed for ${pair}:`, error);
+    console.error(`Binance failed for ${pair}:`, error);
   }
   return null;
 }
 
-async function getPriceFromExchangeRate(pair: string): Promise<number | null> {
+async function getPriceFromExchangeRateAPI(pair: string): Promise<number | null> {
   try {
     const [base, quote] = pair.split("/");
     
-    if (base === "XAU" || base === "XAG") return null;
+    if (base === "XAU" || base === "XAG" || base === "BTC" || base === "ETH") return null;
     
-    const response = await fetch(`https://open.er-api.com/v6/latest/${base}`);
+    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${base}`);
     const data = await response.json();
     
     if (data.rates && data.rates[quote]) {
-      return data.rates[quote];
+      console.log(`ExchangeRate live price for ${pair}: ${data.rates[quote]}`);
+      return Number(data.rates[quote]);
     }
   } catch (error) {
     console.error(`ExchangeRate API failed for ${pair}:`, error);
@@ -418,15 +418,29 @@ async function getPriceFromExchangeRate(pair: string): Promise<number | null> {
   return null;
 }
 
-async function getLivePriceFromAlternative(pair: string): Promise<number | null> {
-  const coinGeckoPrice = await getPriceFromCoinGecko(pair);
-  if (coinGeckoPrice) return coinGeckoPrice;
-  
-  const exchangeRatePrice = await getPriceFromExchangeRate(pair);
-  if (exchangeRatePrice) return exchangeRatePrice;
-  
+async function getGoldSilverPrice(pair: string): Promise<number | null> {
+  try {
+    if (pair === "XAU/USD") {
+      const response = await fetch('https://api.metals.live/v1/spot/gold');
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].price) {
+        return Number(data[0].price);
+      }
+    }
+    if (pair === "XAG/USD") {
+      const response = await fetch('https://api.metals.live/v1/spot/silver');
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].price) {
+        return Number(data[0].price);
+      }
+    }
+  } catch (error) {
+    console.error(`Metals API failed for ${pair}:`, error);
+  }
   return null;
 }
+
+// ===== DATA FETCHING =====
 
 export async function getRealHistoricalData(pair: string, interval: string = "1d"): Promise<number[]> {
   try {
@@ -453,9 +467,9 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
     console.error(`Yahoo Finance failed for ${pair}:`, error);
   }
 
-  const livePrice = await getLivePriceFromAlternative(pair);
+  const livePrice = await getLivePrice(pair);
   if (livePrice) {
-    console.log(`Got live price from alternative for ${pair}: ${livePrice}`);
+    console.log(`Generating historical data around live price for ${pair}: ${livePrice}`);
     const prices: number[] = [];
     const volatility = livePrice * 0.002;
     for (let i = 200; i >= 0; i--) {
@@ -478,6 +492,19 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
 }
 
 export async function getLivePrice(pair: string): Promise<number> {
+  // Priority 1: Binance for crypto
+  const binancePrice = await getPriceFromBinance(pair);
+  if (binancePrice) return binancePrice;
+  
+  // Priority 2: ExchangeRate API for forex
+  const exchangeRatePrice = await getPriceFromExchangeRateAPI(pair);
+  if (exchangeRatePrice) return exchangeRatePrice;
+  
+  // Priority 3: Gold/Silver API
+  const metalsPrice = await getGoldSilverPrice(pair);
+  if (metalsPrice) return metalsPrice;
+  
+  // Priority 4: Yahoo Finance (backup)
   try {
     const symbol = toYahooSymbol(pair);
     const result = await yahooFinance.chart(symbol, {
@@ -492,7 +519,7 @@ export async function getLivePrice(pair: string): Promise<number> {
         .map((q) => Number(q.close));
       
       if (prices.length > 0) {
-        console.log(`Live price from Yahoo for ${pair}: ${prices[prices.length - 1]}`);
+        console.log(`Yahoo live price for ${pair}: ${prices[prices.length - 1]}`);
         return prices[prices.length - 1];
       }
     }
@@ -500,13 +527,7 @@ export async function getLivePrice(pair: string): Promise<number> {
     console.error(`Yahoo live price failed for ${pair}:`, error);
   }
   
-  const altPrice = await getLivePriceFromAlternative(pair);
-  if (altPrice) {
-    console.log(`Live price from alternative for ${pair}: ${altPrice}`);
-    return altPrice;
-  }
-  
-  console.log(`Using fallback price for ${pair}`);
+  console.log(`Using fallback for ${pair}`);
   return FALLBACK_PRICES[pair] || 1.0;
 }
 
