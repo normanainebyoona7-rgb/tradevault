@@ -165,7 +165,7 @@ export default function AdminPage() {
         const signalToSave = {
           pair: autoPair,
           direction: data.signal.direction,
-          entry: String(data.signal.entryPrice || data.signal.entryZone || ""),
+          entry: String(data.signal.entryPrice || data.signal.entry || ""),
           stopLoss: String(data.signal.stopLossPrice || data.signal.stopLoss || ""),
           takeProfit1: String(data.signal.takeProfit1Price || data.signal.takeProfit1 || ""),
           takeProfit2: String(data.signal.takeProfit2Price || data.signal.takeProfit2 || ""),
@@ -207,7 +207,7 @@ export default function AdminPage() {
         const signalToSave = {
           pair: autoPair,
           direction: data.signal.direction,
-          entry: String(data.signal.entryPrice || data.signal.entryZone || ""),
+          entry: String(data.signal.entryPrice || data.signal.entry || ""),
           stopLoss: String(data.signal.stopLossPrice || data.signal.stopLoss || ""),
           takeProfit1: String(data.signal.takeProfit1Price || data.signal.takeProfit1 || ""),
           takeProfit2: String(data.signal.takeProfit2Price || data.signal.takeProfit2 || ""),
@@ -514,21 +514,86 @@ export default function AdminPage() {
 
           {autoResult && (
             <div style={{ marginTop: "16px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
-              <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>✅ Signal Generated! (Expires in 24h)</p>
-              <p>Direction: <strong>{autoResult.direction?.toUpperCase()}</strong></p>
-              <p>Entry: <strong>{autoResult.entryPrice || autoResult.entryZone}</strong></p>
-              <p>SL: <strong>{autoResult.stopLossPrice || autoResult.stopLoss}</strong></p>
-              <p>TP1: <strong>{autoResult.takeProfit1Price || autoResult.takeProfit1}</strong></p>
-              <p>TP2: <strong>{autoResult.takeProfit2Price || autoResult.takeProfit2}</strong></p>
-              <p>TP3: <strong>{autoResult.takeProfit3Price || autoResult.takeProfit3}</strong></p>
-              <p>RSI: <strong>{autoResult.rsi || "N/A"}</strong></p>
-              <p>ATR: <strong>{autoResult.atr || "N/A"}</strong></p>
-              <p>Trend: <strong>{autoResult.trendBias || "N/A"}</strong></p>
-              <p>MACD: <strong>{autoResult.macd || "N/A"}</strong></p>
-              <p>Bollinger Upper: <strong>{autoResult.bollingerUpper || "N/A"}</strong></p>
-              <p>Bollinger Lower: <strong>{autoResult.bollingerLower || "N/A"}</strong></p>
-              <p>Score: <strong>{autoResult.signalScore || "N/A"}/100</strong></p>
-              <p>Multi-TF: <strong>{autoResult.multiTimeframeConsensus || "N/A"}</strong></p>
+              <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>✅ Signal Generated! (Expires in 24h)</p>
+              
+              {/* Order Type Box */}
+              <div style={{
+                padding: "12px",
+                borderRadius: "8px",
+                marginBottom: "12px",
+                textAlign: "center",
+                background: autoResult.orderType?.includes("BUY") ? "#dcfce7" : "#fee2e2",
+                border: `2px solid ${autoResult.orderType?.includes("BUY") ? "#16a34a" : "#dc2626"}`,
+              }}>
+                <p style={{ fontSize: "11px", fontWeight: "600", color: "#6b7280" }}>📋 ORDER TYPE</p>
+                <p style={{ fontSize: "18px", fontWeight: "800", color: autoResult.orderType?.includes("BUY") ? "#16a34a" : "#dc2626" }}>
+                  {autoResult.orderType?.replace(/_/g, " ")}
+                </p>
+                <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
+                  {autoResult.orderTypeDescription}
+                </p>
+              </div>
+
+              {/* Basic Info */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "12px" }}>
+                <p>Direction: <strong>{autoResult.direction?.toUpperCase()}</strong></p>
+                <p>Current Price: <strong>{autoResult.currentPrice}</strong></p>
+                <p>Entry: <strong>{autoResult.entryPrice || autoResult.entry}</strong></p>
+                <p>SL: <strong>{autoResult.stopLossPrice || autoResult.stopLoss}</strong></p>
+                <p>TP1: <strong>{autoResult.takeProfit1Price || autoResult.takeProfit1}</strong></p>
+                <p>TP2: <strong>{autoResult.takeProfit2Price || autoResult.takeProfit2}</strong></p>
+                <p>TP3: <strong>{autoResult.takeProfit3Price || autoResult.takeProfit3}</strong></p>
+                <p>Score: <strong>{autoResult.signalScore || autoResult.confidenceScore}/100</strong></p>
+              </div>
+
+              {/* Confluences */}
+              {autoResult.confluences && autoResult.confluences.length > 0 && (
+                <div style={{ marginBottom: "12px", padding: "12px", background: "#faf5ff", borderRadius: "8px", border: "1px solid #e9d5ff" }}>
+                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>🔗 CONFLUENCES:</p>
+                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                    {autoResult.confluences.map((c: string, i: number) => (
+                      <li key={i} style={{ padding: "3px 0" }}>{c}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Technical Indicators */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px", color: "#6b7280" }}>
+                <p>RSI: <strong>{autoResult.rsi || "N/A"}</strong></p>
+                <p>ATR: <strong>{autoResult.atr || "N/A"}</strong></p>
+                <p>Trend: <strong>{autoResult.trendBias || "N/A"}</strong></p>
+                <p>MACD: <strong>{autoResult.macd || "N/A"}</strong></p>
+                <p>MACD Signal: <strong>{autoResult.macdSignal || "N/A"}</strong></p>
+                <p>MACD Hist: <strong>{autoResult.macdHistogram || "N/A"}</strong></p>
+                <p>Bollinger Upper: <strong>{autoResult.bollingerUpper || "N/A"}</strong></p>
+                <p>Bollinger Lower: <strong>{autoResult.bollingerLower || "N/A"}</strong></p>
+                <p>Support: <strong>{autoResult.supportLevel || "N/A"}</strong></p>
+                <p>Resistance: <strong>{autoResult.resistanceLevel || "N/A"}</strong></p>
+                <p>MA20: <strong>{autoResult.ma20 || "N/A"}</strong></p>
+                <p>MA50: <strong>{autoResult.ma50 || "N/A"}</strong></p>
+                <p>Session: <strong>{autoResult.session || "N/A"}</strong></p>
+                <p>Multi-TF: <strong>{autoResult.multiTimeframeConsensus || "N/A"} ({autoResult.multiTimeframeStrength}%)</strong></p>
+              </div>
+
+              {/* Session Analysis */}
+              {autoResult.sessionAnalysis && (
+                <div style={{ marginTop: "12px", padding: "10px", background: "#fefce8", borderRadius: "8px", border: "1px solid #fde68a" }}>
+                  <p style={{ fontSize: "12px", color: "#854d0e" }}>📅 {autoResult.sessionAnalysis}</p>
+                </div>
+              )}
+
+              {/* Patterns */}
+              {autoResult.patterns && autoResult.patterns.length > 0 && (
+                <div style={{ marginTop: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                  <p style={{ fontWeight: "700", color: "#16a34a", marginBottom: "6px", fontSize: "12px" }}>📊 PATTERNS:</p>
+                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                    {autoResult.patterns.map((p: any, i: number) => (
+                      <li key={i} style={{ padding: "2px 0" }}>• {p.name} ({p.type}, Strength: {p.strength}/10)</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -584,7 +649,6 @@ export default function AdminPage() {
           
           {analyticsData && (
             <>
-              {/* Platform Stats */}
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "20px" }}>
                 <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
                   <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Users</p>
@@ -606,7 +670,6 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {/* User Performance Table */}
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden", marginBottom: "20px" }}>
                 <h3 style={{ padding: "16px", fontWeight: "700", fontSize: "16px", borderBottom: "1px solid #e5e7eb" }}>
                   👥 User Performance
@@ -647,17 +710,11 @@ export default function AdminPage() {
                           </td>
                         </tr>
                       ))}
-                      {analyticsData.userPerformance.length === 0 && (
-                        <tr>
-                          <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#6b7280" }}>No user data yet.</td>
-                        </tr>
-                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* Signal Metrics */}
               <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px" }}>
                 <h3 style={{ fontWeight: "700", fontSize: "16px", marginBottom: "16px" }}>
                   📊 Signal Generation Metrics
