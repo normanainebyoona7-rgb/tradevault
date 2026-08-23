@@ -8,6 +8,7 @@ export async function sendTelegramSignal(signal: any) {
   try {
     const direction = signal.direction?.toUpperCase() || "LONG";
     const emoji = direction === "LONG" ? "📈" : "📉";
+    const orderType = signal.orderType?.replace(/_/g, " ") || "MARKET";
     
     const message = `
 ${emoji} *TRADEVault FREE SIGNAL*
@@ -16,6 +17,7 @@ ${emoji} *TRADEVault FREE SIGNAL*
 
 📊 *Pair:* ${signal.pair}
 🎯 *Direction:* ${direction}
+📋 *Order Type:* ${orderType}
 
 ━━━━━━━━━━━━━━━━━
 
