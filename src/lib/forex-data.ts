@@ -4,6 +4,7 @@ import YahooFinance from "yahoo-finance2";
 import { detectPatterns, CandlestickPattern } from "./patterns";
 import { backtestStrategy, BacktestResult } from "./backtest";
 import { analyzeMultipleTimeframes, getMultiTimeframeConsensus } from "./multi-timeframe";
+import { determineOrderType, OrderType, getOrderTypeDescription, OrderRecommendation } from "./order-types";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -11,6 +12,9 @@ export interface SignalLevels {
   pair: string;
   currentPrice: number;
   direction: "long" | "short";
+  orderType: OrderType;
+  orderTypeDescription: string;
+  orderRecommendation: OrderRecommendation;
   entry: number;
   stopLoss: number;
   takeProfit1: number;
@@ -41,6 +45,7 @@ export interface SignalLevels {
   bollingerMiddle: number;
   bollingerLower: number;
   session: string;
+  sessionAnalysis: string;
   signalScore: number;
   timeframe: string;
   reasons: string[];
@@ -48,6 +53,7 @@ export interface SignalLevels {
   backtest: BacktestResult;
   multiTimeframeConsensus: string;
   multiTimeframeStrength: number;
+  confluences: string[];
 }
 
 const FALLBACK_PRICES: Record<string, number> = {
@@ -237,6 +243,16 @@ function getCurrentSession(): string {
   return "OTHER";
 }
 
+function getSessionAnalysis(session: string, pair: string): string {
+  const sessionDetails: Record<string, string> = {
+    "LONDON": `London session active. High liquidity for ${pair}. Best time for EUR/GBP pairs. Expect strong directional moves.`,
+    "NEW YORK": `New York session active. USD volatility high. Best for ${pair} with dollar exposure. Major news releases expected.`,
+    "ASIAN": `Asian session active. Lower volatility. Good for range-bound strategies on ${pair}.`,
+    "OTHER": `Off-peak hours. Reduced liquidity for ${pair}. Use wider stops and smaller position sizes.`,
+  };
+  return sessionDetails[session] || sessionDetails["OTHER"];
+}
+
 function determineDirection(
   trendBias: string,
   currentPrice: number,
@@ -285,44 +301,55 @@ function calculateSignalScore(
   session: string,
   support: number,
   resistance: number,
-): { score: number; reasons: string[] } {
+): { score: number; reasons: string[]; confluences: string[] } {
   let score = 0;
   const reasons: string[] = [];
+  const confluences: string[] = [];
 
   if (trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND") {
     score += 30;
     reasons.push("Strong trend alignment (+30)");
+    confluences.push(`✅ Trend: ${trendBias}`);
   } else if (trendBias === "UPTREND" || trendBias === "DOWNTREND") {
     score += 20;
     reasons.push("Moderate trend alignment (+20)");
+    confluences.push(`✅ Trend: ${trendBias}`);
   } else {
     score += 10;
     reasons.push("Neutral trend (+10)");
+    confluences.push(`⚠️ Trend: ${trendBias}`);
   }
 
   if (rsi > 30 && rsi < 70) {
     score += 20;
     reasons.push("RSI in optimal range (+20)");
+    confluences.push(`✅ RSI: ${rsi} (optimal)`);
   } else if (rsi > 20 && rsi < 80) {
     score += 10;
     reasons.push("RSI acceptable (+10)");
+    confluences.push(`⚠️ RSI: ${rsi} (acceptable)`);
   } else {
     reasons.push("RSI extreme - caution (+0)");
+    confluences.push(`❌ RSI: ${rsi} (extreme)`);
   }
 
   if (Math.abs(macdHistogram) > 0) {
     score += 20;
     reasons.push("MACD confirms momentum (+20)");
+    confluences.push(`✅ MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"} momentum`);
   } else {
     reasons.push("MACD no momentum (+0)");
+    confluences.push(`❌ MACD: No momentum`);
   }
 
   if (session === "LONDON" || session === "NEW YORK") {
     score += 10;
     reasons.push("High liquidity session (+10)");
+    confluences.push(`✅ Session: ${session} (high liquidity)`);
   } else {
     score += 5;
     reasons.push("Normal session (+5)");
+    confluences.push(`⚠️ Session: ${session} (moderate liquidity)`);
   }
 
   const distanceToSR = Math.min(
@@ -332,18 +359,22 @@ function calculateSignalScore(
   if (distanceToSR < atr * 2) {
     score += 10;
     reasons.push("Near key S/R level (+10)");
+    confluences.push(`✅ Near key S/R level`);
   } else {
     reasons.push("Far from S/R (+0)");
+    confluences.push(`⚠️ Far from S/R levels`);
   }
 
   if (atr > 0 && atr < currentPrice * 0.01) {
     score += 10;
     reasons.push("Healthy volatility (+10)");
+    confluences.push(`✅ Volatility: Healthy (ATR ${atr})`);
   } else {
     reasons.push("Extreme volatility (+0)");
+    confluences.push(`⚠️ Volatility: Extreme (ATR ${atr})`);
   }
 
-  return { score, reasons };
+  return { score, reasons, confluences };
 }
 
 // ===== DATA FETCHING =====
@@ -430,6 +461,7 @@ export async function generateSignalLevels(
 
   // Session
   const session = getCurrentSession();
+  const sessionAnalysis = getSessionAnalysis(session, pair);
 
   // Direction with all indicators
   const direction = determineDirection(
@@ -444,7 +476,7 @@ export async function generateSignalLevels(
   );
 
   // Signal scoring
-  const { score, reasons } = calculateSignalScore(
+  const { score, reasons, confluences } = calculateSignalScore(
     trendBias,
     rsi,
     atr,
@@ -481,6 +513,19 @@ export async function generateSignalLevels(
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
+  // Determine Order Type
+  const orderRecommendation = determineOrderType(
+    direction,
+    currentPrice,
+    support,
+    resistance,
+    rsi,
+    bollinger.upper,
+    bollinger.lower,
+    trendBias,
+    atr,
+  );
+
   const spreadAmount = spread * pipSize;
 
   let entry: number;
@@ -489,14 +534,17 @@ export async function generateSignalLevels(
   let tp2: number;
   let tp3: number;
 
+  // Use order recommendation entry price if it's a limit/stop order
+  const orderEntry = orderRecommendation.entryPrice;
+
   if (direction === "long") {
-    entry = currentPrice + spreadAmount;
+    entry = orderEntry + spreadAmount;
     stopLoss = entry - stopLossPips * pipSize;
     tp1 = entry + tp1Pips * pipSize;
     tp2 = entry + tp2Pips * pipSize;
     tp3 = entry + tp3Pips * pipSize;
   } else {
-    entry = currentPrice - spreadAmount;
+    entry = orderEntry - spreadAmount;
     stopLoss = entry + stopLossPips * pipSize;
     tp1 = entry - tp1Pips * pipSize;
     tp2 = entry - tp2Pips * pipSize;
@@ -510,6 +558,9 @@ export async function generateSignalLevels(
     pair,
     currentPrice: Number(currentPrice.toFixed(decimals)),
     direction,
+    orderType: orderRecommendation.orderType,
+    orderTypeDescription: getOrderTypeDescription(orderRecommendation.orderType),
+    orderRecommendation,
     entry: Number(entry.toFixed(decimals)),
     stopLoss: Number(stopLoss.toFixed(decimals)),
     takeProfit1: Number(tp1.toFixed(decimals)),
@@ -540,6 +591,7 @@ export async function generateSignalLevels(
     bollingerMiddle: bollinger.middle,
     bollingerLower: bollinger.lower,
     session,
+    sessionAnalysis,
     signalScore: score,
     timeframe,
     reasons,
@@ -547,6 +599,7 @@ export async function generateSignalLevels(
     backtest,
     multiTimeframeConsensus: mtfConsensus.consensus,
     multiTimeframeStrength: mtfConsensus.strength,
+    confluences,
   };
 }
 
