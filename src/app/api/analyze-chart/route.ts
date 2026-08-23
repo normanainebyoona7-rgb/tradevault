@@ -2,17 +2,6 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { generateSignalLevels, getExnessSpread, getLivePrice } from "@/lib/forex-data";
 
-const FALLBACK_PRICES: Record<string, number> = {
-  "EUR/USD": 1.0850,
-  "GBP/USD": 1.2700,
-  "USD/JPY": 148.50,
-  "XAU/USD": 2400.00,
-  "XAG/USD": 28.50,
-  "BTC/USD": 67000.00,
-  "ETH/USD": 3200.00,
-  "GBP/JPY": 188.50,
-};
-
 function generateProfessionalAnalysis(
   pair: string,
   timeframe: string,
@@ -25,87 +14,67 @@ function generateProfessionalAnalysis(
     return `📊 **TradeVault AI Analysis — ${pair} (${timeframe})**
 
 📈 **Direction: BUY (LONG)**
+📋 **Order Type: ${signal.orderTypeDescription}**
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔍 **WHY WE ARE BUYING:**
+🔍 **ANALYSIS:**
 
 1. **Live Price: ${signal.currentPrice}**
-   • Real-time market data from Yahoo Finance
+   • Real-time market data
 
-2. **Trend Analysis:**
-   • Trend: ${signal.trendBias}
+2. **Trend: ${signal.trendBias}**
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
    • ${signal.ma20 > signal.ma50 ? "Bullish: MA20 above MA50" : "Bearish: MA20 below MA50"}
 
 3. **RSI (${signal.rsi}):**
    • Status: ${rsiStatus}
-   • ${signal.rsi < 70 ? "RSI below 70 = room to run upward" : "RSI overbought = caution"}
 
-4. **ATR (${signal.atr}):**
-   • Volatility measure: ${signal.atr}
-   • Stop loss sized at 1.5x ATR for optimal placement
-
-5. **Support Level: ${signal.supportLevel}**
-   • Price is ${signal.currentPrice > signal.supportLevel ? "ABOVE support" : "AT support"}
-   • Buyers historically defend this zone
-
-6. **Session: ${signal.session}**
-   • ${signal.session === "LONDON" ? "London session = high liquidity" : signal.session === "NEW YORK" ? "NY session = USD volatility" : "Normal trading session"}
+4. **Session: ${signal.session}**
+   • ${signal.sessionAnalysis}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🎯 **ENTRY (Immediate): ${signal.entry}**
+🎯 **ENTRY (${signal.orderType}): ${signal.entry}**
 🛑 **STOP LOSS: ${signal.stopLoss}** (${signal.riskPips} pips)
 ✅ **TP1: ${signal.takeProfit1}** (R:R 1:${signal.riskReward1})
 ✅ **TP2: ${signal.takeProfit2}** (R:R 1:${signal.riskReward2})
 ✅ **TP3: ${signal.takeProfit3}** (R:R 1:${signal.riskReward3})
 
-⚡ **CONFIDENCE: ${signal.confidence}**
-💰 **Risk 1-2% per trade**`;
+⚡ **CONFIDENCE: ${signal.confidence} (${signal.signalScore}/100)**`;
   }
 
   return `📊 **TradeVault AI Analysis — ${pair} (${timeframe})**
 
 📉 **Direction: SELL (SHORT)**
+📋 **Order Type: ${signal.orderTypeDescription}**
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔍 **WHY WE ARE SELLING:**
+🔍 **ANALYSIS:**
 
 1. **Live Price: ${signal.currentPrice}**
-   • Real-time market data from Yahoo Finance
+   • Real-time market data
 
-2. **Trend Analysis:**
-   • Trend: ${signal.trendBias}
+2. **Trend: ${signal.trendBias}**
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
    • ${signal.ma20 < signal.ma50 ? "Bearish: MA20 below MA50" : "Bullish: MA20 above MA50"}
 
 3. **RSI (${signal.rsi}):**
    • Status: ${rsiStatus}
-   • ${signal.rsi > 30 ? "RSI above 30 = room to run downward" : "RSI oversold = caution"}
 
-4. **ATR (${signal.atr}):**
-   • Volatility measure: ${signal.atr}
-   • Stop loss sized at 1.5x ATR for optimal placement
-
-5. **Resistance Level: ${signal.resistanceLevel}**
-   • Price is ${signal.currentPrice < signal.resistanceLevel ? "BELOW resistance" : "AT resistance"}
-   • Sellers historically defend this zone
-
-6. **Session: ${signal.session}**
-   • ${signal.session === "LONDON" ? "London session = high liquidity" : signal.session === "NEW YORK" ? "NY session = USD volatility" : "Normal trading session"}
+4. **Session: ${signal.session}**
+   • ${signal.sessionAnalysis}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🎯 **ENTRY (Immediate): ${signal.entry}**
+🎯 **ENTRY (${signal.orderType}): ${signal.entry}**
 🛑 **STOP LOSS: ${signal.stopLoss}** (${signal.riskPips} pips)
 ✅ **TP1: ${signal.takeProfit1}** (R:R 1:${signal.riskReward1})
 ✅ **TP2: ${signal.takeProfit2}** (R:R 1:${signal.riskReward2})
 ✅ **TP3: ${signal.takeProfit3}** (R:R 1:${signal.riskReward3})
 
-⚡ **CONFIDENCE: ${signal.confidence}**
-💰 **Risk 1-2% per trade**`;
+⚡ **CONFIDENCE: ${signal.confidence} (${signal.signalScore}/100)**`;
 }
 
 export async function POST(request: Request) {
@@ -127,23 +96,18 @@ export async function POST(request: Request) {
 
     let currentPrice: number;
 
-    // Try to get live price from Yahoo Finance
+    // Priority 1: User manually entered price
     if (userPrice && !isNaN(Number(userPrice)) && Number(userPrice) > 0) {
-      // Use user's manual price if provided
       currentPrice = Number(userPrice);
+      console.log(`Using user price for ${pair}: ${currentPrice}`);
     } else {
-      // Fetch real live price
-      try {
-        currentPrice = await getLivePrice(pair);
-        console.log(`Live price for ${pair}: ${currentPrice}`);
-      } catch (error) {
-        console.error(`Failed to get live price for ${pair}, using fallback:`, error);
-        currentPrice = FALLBACK_PRICES[pair] || 1.0;
-      }
+      // Priority 2: Fetch live price
+      currentPrice = await getLivePrice(pair);
+      console.log(`Live price for ${pair}: ${currentPrice}`);
     }
 
     // Generate signal with real market data
-    const signal = await generateSignalLevels(pair, currentPrice);
+    const signal = await generateSignalLevels(pair, currentPrice, timeframe);
     const spread = getExnessSpread(pair);
 
     const analysis = generateProfessionalAnalysis(pair, timeframe, signal, spread);
@@ -152,6 +116,9 @@ export async function POST(request: Request) {
       analysis,
       signal: {
         direction: signal.direction,
+        orderType: signal.orderType,
+        orderTypeDescription: signal.orderTypeDescription,
+        orderRecommendation: signal.orderRecommendation,
         entryZone: `${signal.entry}`,
         stopLoss: `${signal.stopLoss} (${signal.riskPips} pips)`,
         takeProfit1: `${signal.takeProfit1} (${signal.rewardPips1} pips)`,
@@ -159,6 +126,7 @@ export async function POST(request: Request) {
         takeProfit3: `${signal.takeProfit3} (${signal.rewardPips3} pips)`,
         riskReward: `1:${signal.riskReward1} to 1:${signal.riskReward3}`,
         confidence: signal.confidence,
+        confidenceScore: signal.signalScore,
         currentPrice: signal.currentPrice,
         entryPrice: signal.entry,
         stopLossPrice: signal.stopLoss,
@@ -176,8 +144,20 @@ export async function POST(request: Request) {
         ma200: signal.ma200,
         rsi: signal.rsi,
         atr: signal.atr,
+        macd: signal.macd,
+        macdSignal: signal.macdSignal,
+        macdHistogram: signal.macdHistogram,
+        bollingerUpper: signal.bollingerUpper,
+        bollingerLower: signal.bollingerLower,
         session: signal.session,
-        dataSource: "Yahoo Finance Live Data",
+        sessionAnalysis: signal.sessionAnalysis,
+        signalScore: signal.signalScore,
+        multiTimeframeConsensus: signal.multiTimeframeConsensus,
+        multiTimeframeStrength: signal.multiTimeframeStrength,
+        confluences: signal.confluences,
+        patterns: signal.patterns,
+        backtest: signal.backtest,
+        dataSource: "Live Market Data",
       },
     });
   } catch (error) {

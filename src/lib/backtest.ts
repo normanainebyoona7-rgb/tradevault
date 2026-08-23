@@ -22,12 +22,12 @@ export function backtestStrategy(
   takeProfitPips: number,
   pipSize: number,
 ): BacktestResult {
-  const trades = [];
+  const trades: { pnl: number; result: "win" | "loss" }[] = [];
   let inTrade = false;
   let entryPrice = 0;
   let stopLoss = 0;
   let takeProfit = 0;
-  let tradeDirection: "long" | "short" = direction;
+  const tradeDirection: "long" | "short" = direction;
 
   for (let i = 1; i < prices.length; i++) {
     if (!inTrade) {

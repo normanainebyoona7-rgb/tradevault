@@ -59,7 +59,6 @@ export async function analyzeMultipleTimeframes(pair: string): Promise<Timeframe
         if (trend === "UPTREND" && rsi < 70) direction = "long";
         else if (trend === "DOWNTREND" && rsi > 30) direction = "short";
         
-        // Find support/resistance from recent data
         const recent = prices.slice(-50);
         const support = Math.min(...recent);
         const resistance = Math.max(...recent);

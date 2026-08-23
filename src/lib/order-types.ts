@@ -1,6 +1,6 @@
 // src/lib/order-types.ts
 
-export type OrderType = "BUY_LIMIT" | "SELL_LIMIT" | "BUY_STOP" | "SELL_STOP" | "MARKET_BUY" | "MARKET_SELL";
+export type OrderType = "BUY_LIMIT" | "SELL_LIMIT" | "BUY_STOP" | "SELL_STOP";
 
 export interface OrderRecommendation {
   orderType: OrderType;
@@ -28,12 +28,12 @@ export function determineOrderType(
     const distanceToResistance = resistanceLevel - currentPrice;
     const distanceToBollingerLower = currentPrice - bollingerLower;
     
-    // 1. PRICE AT OR NEAR SUPPORT → BUY LIMIT (best risk/reward)
+    // 1. PRICE AT OR NEAR SUPPORT → BUY LIMIT
     if (distanceToSupport < atrThreshold) {
       return {
         orderType: "BUY_LIMIT",
-        entryPrice: supportLevel,
-        reason: `Price near support (${supportLevel}). Buy limit at support for optimal entry with best risk/reward.`,
+        entryPrice: Number(supportLevel.toFixed(5)),
+        reason: `Price near support. Buy limit at support (${supportLevel.toFixed(5)}) for optimal entry.`,
         confidence: 85,
       };
     }
@@ -42,47 +42,37 @@ export function determineOrderType(
     if (distanceToBollingerLower < atrThreshold) {
       return {
         orderType: "BUY_LIMIT",
-        entryPrice: bollingerLower,
-        reason: `Price at lower Bollinger band (${bollingerLower}). Buy limit at band for mean reversion.`,
+        entryPrice: Number(bollingerLower.toFixed(5)),
+        reason: `Price at lower Bollinger band. Buy limit at ${bollingerLower.toFixed(5)} for mean reversion.`,
         confidence: 80,
       };
     }
     
-    // 3. STRONG UPTREND + RSI NOT OVERBOUGHT → MARKET BUY (momentum)
-    if (trendBias === "STRONG UPTREND" && rsi > 40 && rsi < 60) {
+    // 3. BREAKOUT ABOVE RESISTANCE → BUY STOP
+    if (distanceToResistance < atrThreshold * 2 && (trendBias === "UPTREND" || trendBias === "STRONG UPTREND")) {
       return {
-        orderType: "MARKET_BUY",
-        entryPrice: currentPrice,
-        reason: `Strong uptrend with RSI at ${rsi}. Enter immediately to ride momentum.`,
+        orderType: "BUY_STOP",
+        entryPrice: Number((resistanceLevel + atr * 0.2).toFixed(5)),
+        reason: `Price approaching resistance. Buy stop above ${resistanceLevel.toFixed(5)} to catch breakout.`,
         confidence: 75,
       };
     }
     
-    // 4. BREAKOUT ABOVE RESISTANCE → BUY STOP
-    if (distanceToResistance < atrThreshold && trendBias.includes("UPTREND")) {
+    // 4. STRONG UPTREND PULLBACK → BUY LIMIT at support
+    if (trendBias === "STRONG UPTREND" && distanceToSupport < atrThreshold * 3) {
       return {
-        orderType: "BUY_STOP",
-        entryPrice: resistanceLevel + atr * 0.2,
-        reason: `Price approaching resistance (${resistanceLevel}). Buy stop above resistance to catch breakout.`,
+        orderType: "BUY_LIMIT",
+        entryPrice: Number(supportLevel.toFixed(5)),
+        reason: `Strong uptrend pullback. Buy limit at support (${supportLevel.toFixed(5)}) for continuation.`,
         confidence: 70,
       };
     }
     
-    // 5. RSI OVERSOLD → MARKET BUY (reversal)
-    if (rsi < 30) {
-      return {
-        orderType: "MARKET_BUY",
-        entryPrice: currentPrice,
-        reason: `RSI oversold at ${rsi}. Strong bullish reversal expected. Enter at market.`,
-        confidence: 65,
-      };
-    }
-    
-    // 6. DEFAULT → BUY LIMIT at support
+    // 5. DEFAULT → BUY LIMIT at support
     return {
       orderType: "BUY_LIMIT",
-      entryPrice: supportLevel,
-      reason: `Buy limit at support (${supportLevel}) for best risk/reward ratio.`,
+      entryPrice: Number(supportLevel.toFixed(5)),
+      reason: `Buy limit at support level (${supportLevel.toFixed(5)}) for best risk/reward.`,
       confidence: 60,
     };
     
@@ -92,12 +82,12 @@ export function determineOrderType(
     const distanceToSupport = currentPrice - supportLevel;
     const distanceToBollingerUpper = bollingerUpper - currentPrice;
     
-    // 1. PRICE AT OR NEAR RESISTANCE → SELL LIMIT (best risk/reward)
+    // 1. PRICE AT OR NEAR RESISTANCE → SELL LIMIT
     if (distanceToResistance < atrThreshold) {
       return {
         orderType: "SELL_LIMIT",
-        entryPrice: resistanceLevel,
-        reason: `Price near resistance (${resistanceLevel}). Sell limit at resistance for optimal entry.`,
+        entryPrice: Number(resistanceLevel.toFixed(5)),
+        reason: `Price near resistance. Sell limit at resistance (${resistanceLevel.toFixed(5)}) for optimal entry.`,
         confidence: 85,
       };
     }
@@ -106,47 +96,37 @@ export function determineOrderType(
     if (distanceToBollingerUpper < atrThreshold) {
       return {
         orderType: "SELL_LIMIT",
-        entryPrice: bollingerUpper,
-        reason: `Price at upper Bollinger band (${bollingerUpper}). Sell limit at band for mean reversion.`,
+        entryPrice: Number(bollingerUpper.toFixed(5)),
+        reason: `Price at upper Bollinger band. Sell limit at ${bollingerUpper.toFixed(5)} for mean reversion.`,
         confidence: 80,
       };
     }
     
-    // 3. STRONG DOWNTREND + RSI NOT OVERSOLD → MARKET SELL (momentum)
-    if (trendBias === "STRONG DOWNTREND" && rsi > 40 && rsi < 60) {
+    // 3. BREAKDOWN BELOW SUPPORT → SELL STOP
+    if (distanceToSupport < atrThreshold * 2 && (trendBias === "DOWNTREND" || trendBias === "STRONG DOWNTREND")) {
       return {
-        orderType: "MARKET_SELL",
-        entryPrice: currentPrice,
-        reason: `Strong downtrend with RSI at ${rsi}. Enter immediately to ride momentum.`,
+        orderType: "SELL_STOP",
+        entryPrice: Number((supportLevel - atr * 0.2).toFixed(5)),
+        reason: `Price approaching support. Sell stop below ${supportLevel.toFixed(5)} to catch breakdown.`,
         confidence: 75,
       };
     }
     
-    // 4. BREAKDOWN BELOW SUPPORT → SELL STOP
-    if (distanceToSupport < atrThreshold && trendBias.includes("DOWNTREND")) {
+    // 4. STRONG DOWNTREND PULLBACK → SELL LIMIT at resistance
+    if (trendBias === "STRONG DOWNTREND" && distanceToResistance < atrThreshold * 3) {
       return {
-        orderType: "SELL_STOP",
-        entryPrice: supportLevel - atr * 0.2,
-        reason: `Price approaching support (${supportLevel}). Sell stop below support to catch breakdown.`,
+        orderType: "SELL_LIMIT",
+        entryPrice: Number(resistanceLevel.toFixed(5)),
+        reason: `Strong downtrend pullback. Sell limit at resistance (${resistanceLevel.toFixed(5)}) for continuation.`,
         confidence: 70,
       };
     }
     
-    // 5. RSI OVERBOUGHT → MARKET SELL (reversal)
-    if (rsi > 70) {
-      return {
-        orderType: "MARKET_SELL",
-        entryPrice: currentPrice,
-        reason: `RSI overbought at ${rsi}. Strong bearish reversal expected. Enter at market.`,
-        confidence: 65,
-      };
-    }
-    
-    // 6. DEFAULT → SELL LIMIT at resistance
+    // 5. DEFAULT → SELL LIMIT at resistance
     return {
       orderType: "SELL_LIMIT",
-      entryPrice: resistanceLevel,
-      reason: `Sell limit at resistance (${resistanceLevel}) for best risk/reward ratio.`,
+      entryPrice: Number(resistanceLevel.toFixed(5)),
+      reason: `Sell limit at resistance level (${resistanceLevel.toFixed(5)}) for best risk/reward.`,
       confidence: 60,
     };
   }
@@ -158,8 +138,6 @@ export function getOrderTypeDescription(orderType: OrderType): string {
     "SELL_LIMIT": "Sell Limit - Place sell order above current price at resistance level",
     "BUY_STOP": "Buy Stop - Place buy order above current price to catch breakout",
     "SELL_STOP": "Sell Stop - Place sell order below current price to catch breakdown",
-    "MARKET_BUY": "Market Buy - Enter immediately at current market price",
-    "MARKET_SELL": "Market Sell - Enter immediately at current market price",
   };
   return descriptions[orderType] || "Unknown order type";
 }

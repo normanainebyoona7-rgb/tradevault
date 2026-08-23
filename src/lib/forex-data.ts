@@ -290,8 +290,6 @@ function determineDirection(
   return longScore > shortScore ? "long" : "short";
 }
 
-// ===== SIGNAL SCORING SYSTEM =====
-
 function calculateSignalScore(
   trendBias: string,
   rsi: number,
@@ -309,47 +307,47 @@ function calculateSignalScore(
   if (trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND") {
     score += 30;
     reasons.push("Strong trend alignment (+30)");
-    confluences.push(`✅ Trend: ${trendBias}`);
+    confluences.push(`Trend: ${trendBias}`);
   } else if (trendBias === "UPTREND" || trendBias === "DOWNTREND") {
     score += 20;
     reasons.push("Moderate trend alignment (+20)");
-    confluences.push(`✅ Trend: ${trendBias}`);
+    confluences.push(`Trend: ${trendBias}`);
   } else {
     score += 10;
     reasons.push("Neutral trend (+10)");
-    confluences.push(`⚠️ Trend: ${trendBias}`);
+    confluences.push(`Trend: ${trendBias}`);
   }
 
   if (rsi > 30 && rsi < 70) {
     score += 20;
     reasons.push("RSI in optimal range (+20)");
-    confluences.push(`✅ RSI: ${rsi} (optimal)`);
+    confluences.push(`RSI: ${rsi} (optimal)`);
   } else if (rsi > 20 && rsi < 80) {
     score += 10;
     reasons.push("RSI acceptable (+10)");
-    confluences.push(`⚠️ RSI: ${rsi} (acceptable)`);
+    confluences.push(`RSI: ${rsi} (acceptable)`);
   } else {
     reasons.push("RSI extreme - caution (+0)");
-    confluences.push(`❌ RSI: ${rsi} (extreme)`);
+    confluences.push(`RSI: ${rsi} (extreme)`);
   }
 
   if (Math.abs(macdHistogram) > 0) {
     score += 20;
     reasons.push("MACD confirms momentum (+20)");
-    confluences.push(`✅ MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"} momentum`);
+    confluences.push(`MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"} momentum`);
   } else {
     reasons.push("MACD no momentum (+0)");
-    confluences.push(`❌ MACD: No momentum`);
+    confluences.push(`MACD: No momentum`);
   }
 
   if (session === "LONDON" || session === "NEW YORK") {
     score += 10;
     reasons.push("High liquidity session (+10)");
-    confluences.push(`✅ Session: ${session} (high liquidity)`);
+    confluences.push(`Session: ${session} (high liquidity)`);
   } else {
     score += 5;
     reasons.push("Normal session (+5)");
-    confluences.push(`⚠️ Session: ${session} (moderate liquidity)`);
+    confluences.push(`Session: ${session} (moderate liquidity)`);
   }
 
   const distanceToSR = Math.min(
@@ -359,25 +357,76 @@ function calculateSignalScore(
   if (distanceToSR < atr * 2) {
     score += 10;
     reasons.push("Near key S/R level (+10)");
-    confluences.push(`✅ Near key S/R level`);
+    confluences.push(`Near key S/R level`);
   } else {
     reasons.push("Far from S/R (+0)");
-    confluences.push(`⚠️ Far from S/R levels`);
+    confluences.push(`Far from S/R levels`);
   }
 
   if (atr > 0 && atr < currentPrice * 0.01) {
     score += 10;
     reasons.push("Healthy volatility (+10)");
-    confluences.push(`✅ Volatility: Healthy (ATR ${atr})`);
+    confluences.push(`Volatility: Healthy (ATR ${atr})`);
   } else {
     reasons.push("Extreme volatility (+0)");
-    confluences.push(`⚠️ Volatility: Extreme (ATR ${atr})`);
+    confluences.push(`Volatility: Extreme (ATR ${atr})`);
   }
 
   return { score, reasons, confluences };
 }
 
 // ===== DATA FETCHING =====
+
+async function getPriceFromCoinGecko(pair: string): Promise<number | null> {
+  try {
+    const coinMap: Record<string, string> = {
+      "BTC/USD": "bitcoin",
+      "ETH/USD": "ethereum",
+    };
+    
+    if (!coinMap[pair]) return null;
+    
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${coinMap[pair]}&vs_currencies=usd`
+    );
+    const data = await response.json();
+    
+    if (data[coinMap[pair]] && data[coinMap[pair]].usd) {
+      return data[coinMap[pair]].usd;
+    }
+  } catch (error) {
+    console.error(`CoinGecko failed for ${pair}:`, error);
+  }
+  return null;
+}
+
+async function getPriceFromExchangeRate(pair: string): Promise<number | null> {
+  try {
+    const [base, quote] = pair.split("/");
+    
+    if (base === "XAU" || base === "XAG") return null;
+    
+    const response = await fetch(`https://open.er-api.com/v6/latest/${base}`);
+    const data = await response.json();
+    
+    if (data.rates && data.rates[quote]) {
+      return data.rates[quote];
+    }
+  } catch (error) {
+    console.error(`ExchangeRate API failed for ${pair}:`, error);
+  }
+  return null;
+}
+
+async function getLivePriceFromAlternative(pair: string): Promise<number | null> {
+  const coinGeckoPrice = await getPriceFromCoinGecko(pair);
+  if (coinGeckoPrice) return coinGeckoPrice;
+  
+  const exchangeRatePrice = await getPriceFromExchangeRate(pair);
+  if (exchangeRatePrice) return exchangeRatePrice;
+  
+  return null;
+}
 
 export async function getRealHistoricalData(pair: string, interval: string = "1d"): Promise<number[]> {
   try {
@@ -396,6 +445,7 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
         .map((item) => Number(item.close));
       
       if (prices.length > 30) {
+        console.log(`Got ${prices.length} real prices from Yahoo for ${pair}`);
         return prices;
       }
     }
@@ -403,6 +453,19 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
     console.error(`Yahoo Finance failed for ${pair}:`, error);
   }
 
+  const livePrice = await getLivePriceFromAlternative(pair);
+  if (livePrice) {
+    console.log(`Got live price from alternative for ${pair}: ${livePrice}`);
+    const prices: number[] = [];
+    const volatility = livePrice * 0.002;
+    for (let i = 200; i >= 0; i--) {
+      const randomWalk = (Math.random() - 0.5) * volatility;
+      prices.push(livePrice + randomWalk - (i * volatility / 100));
+    }
+    return prices;
+  }
+
+  console.log(`Using hardcoded fallback for ${pair}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
@@ -415,8 +478,36 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
 }
 
 export async function getLivePrice(pair: string): Promise<number> {
-  const prices = await getRealHistoricalData(pair);
-  return prices[prices.length - 1] || FALLBACK_PRICES[pair] || 1.0;
+  try {
+    const symbol = toYahooSymbol(pair);
+    const result = await yahooFinance.chart(symbol, {
+      period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+      period2: new Date(),
+      interval: "1d",
+    });
+    
+    if (result.quotes && result.quotes.length > 0) {
+      const prices = result.quotes
+        .filter((q) => q.close !== null && q.close !== undefined)
+        .map((q) => Number(q.close));
+      
+      if (prices.length > 0) {
+        console.log(`Live price from Yahoo for ${pair}: ${prices[prices.length - 1]}`);
+        return prices[prices.length - 1];
+      }
+    }
+  } catch (error) {
+    console.error(`Yahoo live price failed for ${pair}:`, error);
+  }
+  
+  const altPrice = await getLivePriceFromAlternative(pair);
+  if (altPrice) {
+    console.log(`Live price from alternative for ${pair}: ${altPrice}`);
+    return altPrice;
+  }
+  
+  console.log(`Using fallback price for ${pair}`);
+  return FALLBACK_PRICES[pair] || 1.0;
 }
 
 export function getPipValue(pair: string, contractSize: number): number {
@@ -441,10 +532,8 @@ export async function generateSignalLevels(
   if (pair.includes("BTC")) decimals = 2;
   if (pair.includes("ETH")) decimals = 2;
 
-  // Real data
   const priceHistory = await getRealHistoricalData(pair);
 
-  // Calculate all indicators
   const ma20 = calculateSMA(priceHistory, 20);
   const ma50 = calculateSMA(priceHistory, 50);
   const ma200 = calculateSMA(priceHistory, 200);
@@ -453,17 +542,13 @@ export async function generateSignalLevels(
   const macdData = calculateMACD(priceHistory);
   const bollinger = calculateBollingerBands(priceHistory);
 
-  // Support/Resistance
   const { support, resistance } = findSupportResistance(priceHistory);
 
-  // Trend
   const trendBias = determineTrend(ma20, ma50, ma200);
 
-  // Session
   const session = getCurrentSession();
   const sessionAnalysis = getSessionAnalysis(session, pair);
 
-  // Direction with all indicators
   const direction = determineDirection(
     trendBias,
     currentPrice,
@@ -475,7 +560,6 @@ export async function generateSignalLevels(
     bollinger.lower,
   );
 
-  // Signal scoring
   const { score, reasons, confluences } = calculateSignalScore(
     trendBias,
     rsi,
@@ -487,16 +571,13 @@ export async function generateSignalLevels(
     resistance,
   );
 
-  // Dynamic stop loss based on ATR
   const atrBasedStop = Math.max(atr * 1.5, pipSize * 10);
   const stopLossPips = pair.includes("XAU") ? 150 : pair.includes("BTC") ? 300 : Math.round(atrBasedStop / pipSize);
 
-  // Pattern detection
   const highs = priceHistory.map((p) => p + atr * 0.5);
   const lows = priceHistory.map((p) => p - atr * 0.5);
   const patterns = detectPatterns(priceHistory, highs, lows);
 
-  // Backtesting
   const backtest = backtestStrategy(
     priceHistory,
     direction,
@@ -505,11 +586,9 @@ export async function generateSignalLevels(
     pipSize,
   );
 
-  // Multi-timeframe analysis
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
-  // Determine Order Type
   const orderRecommendation = determineOrderType(
     direction,
     currentPrice,
@@ -524,11 +603,9 @@ export async function generateSignalLevels(
 
   const spreadAmount = spread * pipSize;
 
-  // Entry based on order type
   const orderEntry = orderRecommendation.entryPrice;
   const entry = direction === "long" ? orderEntry + spreadAmount : orderEntry - spreadAmount;
 
-  // Calculate SL and TP dynamically based on S/R levels
   const slDistance = stopLossPips * pipSize;
   
   let stopLossPrice: number;
@@ -537,7 +614,6 @@ export async function generateSignalLevels(
   let tp3Price: number;
 
   if (direction === "long") {
-    // Long: SL below entry, TPs at resistance levels
     stopLossPrice = entry - slDistance;
     
     const distanceToResistance = resistance - entry;
@@ -550,7 +626,6 @@ export async function generateSignalLevels(
     const tp3Distance = Math.max(distanceToResistance * 2, slDistance * 4);
     tp3Price = entry + tp3Distance;
   } else {
-    // Short: SL above entry, TPs at support levels
     stopLossPrice = entry + slDistance;
     
     const distanceToSupport = entry - support;
@@ -568,7 +643,6 @@ export async function generateSignalLevels(
   const rewardPips2 = Math.round(Math.abs(tp2Price - entry) / pipSize);
   const rewardPips3 = Math.round(Math.abs(tp3Price - entry) / pipSize);
 
-  // Confidence based on score
   const confidence = score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
 
   return {
