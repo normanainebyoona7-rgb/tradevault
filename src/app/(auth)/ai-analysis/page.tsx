@@ -249,10 +249,35 @@ export default function AIAnalysisPage() {
             background: signal.confidence === "HIGH" ? "#dcfce7" : signal.confidence === "MEDIUM" ? "#fef9c3" : "#fee2e2",
             color: signal.confidence === "HIGH" ? "#16a34a" : signal.confidence === "MEDIUM" ? "#ca8a04" : "#dc2626",
           }}>
-            {signal.confidence} Confidence
+            {signal.confidence} Confidence ({signal.signalScore}/100)
           </div>
 
-          {/* Signal Cards - ONLY Direction, Entry, SL, TP1-3 */}
+          {/* Order Type Display - PROMINENT */}
+          <div style={{
+            marginBottom: "16px",
+            padding: "16px",
+            borderRadius: "12px",
+            background: signal.orderType?.includes("BUY") ? "#f0fdf4" : "#fef2f2",
+            border: `2px solid ${signal.orderType?.includes("BUY") ? "#16a34a" : "#dc2626"}`,
+            textAlign: "center",
+          }}>
+            <p style={{ fontSize: "12px", fontWeight: "600", color: "#6b7280", marginBottom: "4px" }}>
+              📋 ORDER TYPE
+            </p>
+            <p style={{ 
+              fontSize: isMobile ? "18px" : "22px", 
+              fontWeight: "800", 
+              color: signal.orderType?.includes("BUY") ? "#16a34a" : "#dc2626",
+              letterSpacing: "1px",
+            }}>
+              {signal.orderType?.replace(/_/g, " ")}
+            </p>
+            <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
+              {signal.orderTypeDescription}
+            </p>
+          </div>
+
+          {/* Signal Cards - Direction, Entry, SL, TP1-3 */}
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))",
@@ -265,37 +290,30 @@ export default function AIAnalysisPage() {
               </p>
             </div>
             <div style={{ padding: "14px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>Current Price</p>
+              <p style={{ fontSize: "20px", fontWeight: "800" }}>{signal.currentPrice}</p>
+            </div>
+            <div style={{ padding: "14px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
               <p style={{ fontSize: "12px", color: "#6b7280" }}>Entry</p>
-              <p style={{ fontSize: "20px", fontWeight: "800" }}>{signal.entryPrice || signal.entryZone}</p>
+              <p style={{ fontSize: "20px", fontWeight: "800", color: "#1c69e3" }}>{signal.entryPrice}</p>
             </div>
             <div style={{ padding: "14px", background: "#fef2f2", borderRadius: "8px", textAlign: "center" }}>
               <p style={{ fontSize: "12px", color: "#6b7280" }}>Stop Loss</p>
-              <p style={{ fontSize: "20px", fontWeight: "800", color: "#dc2626" }}>{signal.stopLossPrice || signal.stopLoss}</p>
+              <p style={{ fontSize: "20px", fontWeight: "800", color: "#dc2626" }}>{signal.stopLossPrice}</p>
             </div>
             <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
               <p style={{ fontSize: "12px", color: "#6b7280" }}>TP1</p>
-              <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit1Price || signal.takeProfit1}</p>
+              <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit1Price}</p>
+            </div>
+            <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>TP2</p>
+              <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit2Price}</p>
+            </div>
+            <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>TP3</p>
+              <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit3Price}</p>
             </div>
           </div>
-
-          {/* TP2 and TP3 */}
-          {(signal.takeProfit2Price || signal.takeProfit2) && (
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: "10px",
-              marginTop: "10px",
-            }}>
-              <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                <p style={{ fontSize: "12px", color: "#6b7280" }}>TP2</p>
-                <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit2Price || signal.takeProfit2}</p>
-              </div>
-              <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                <p style={{ fontSize: "12px", color: "#6b7280" }}>TP3</p>
-                <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit3Price || signal.takeProfit3}</p>
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>
