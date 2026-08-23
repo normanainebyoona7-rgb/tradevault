@@ -15,7 +15,6 @@ export default function AIAnalysisPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [signal, setSignal] = useState<any>(null);
-  const [analysis, setAnalysis] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -34,7 +33,6 @@ export default function AIAnalysisPage() {
     reader.onload = (event) => setImage(event.target?.result as string);
     reader.readAsDataURL(selectedFile);
     setSignal(null);
-    setAnalysis(null);
   };
 
   const handleAnalyze = async () => {
@@ -67,7 +65,6 @@ export default function AIAnalysisPage() {
       }
 
       setSignal(data.signal);
-      setAnalysis(data.analysis);
     } catch (err) {
       setError("Something went wrong");
     } finally {
@@ -241,29 +238,21 @@ export default function AIAnalysisPage() {
             📊 Signal — {currentPair} ({currentTimeframe})
           </h2>
 
-          {/* Confidence Score */}
+          {/* Confidence Badge */}
           <div style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
+            display: "inline-block",
+            padding: "6px 14px",
+            borderRadius: "999px",
+            fontSize: "13px",
+            fontWeight: "700",
             marginBottom: "16px",
-            padding: "10px",
-            background: signal.confidence === "HIGH" ? "#f0fdf4" : signal.confidence === "MEDIUM" ? "#fefce8" : "#fef2f2",
-            borderRadius: "8px",
+            background: signal.confidence === "HIGH" ? "#dcfce7" : signal.confidence === "MEDIUM" ? "#fef9c3" : "#fee2e2",
+            color: signal.confidence === "HIGH" ? "#16a34a" : signal.confidence === "MEDIUM" ? "#ca8a04" : "#dc2626",
           }}>
-            <span style={{ fontSize: "14px", fontWeight: "700", color: "#111827" }}>
-              Confidence:
-            </span>
-            <span style={{
-              fontSize: "18px",
-              fontWeight: "800",
-              color: signal.confidence === "HIGH" ? "#16a34a" : signal.confidence === "MEDIUM" ? "#ca8a04" : "#dc2626",
-            }}>
-              {signal.confidence}
-            </span>
+            {signal.confidence} Confidence
           </div>
 
-          {/* Signal Cards */}
+          {/* Signal Cards - ONLY Direction, Entry, SL, TP1-3 */}
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))",
@@ -307,43 +296,6 @@ export default function AIAnalysisPage() {
               </div>
             </div>
           )}
-
-          {/* Multi-Timeframe Consensus - Simple */}
-          {signal.multiTimeframeConsensus && (
-            <div style={{
-              marginTop: "16px",
-              padding: "12px",
-              background: "#f9fafb",
-              borderRadius: "8px",
-              textAlign: "center",
-            }}>
-              <p style={{ fontSize: "12px", color: "#6b7280" }}>Multi-Timeframe Analysis</p>
-              <p style={{ fontSize: "16px", fontWeight: "700", color: "#1c69e3" }}>
-                {signal.multiTimeframeConsensus?.toUpperCase()} ({signal.multiTimeframeStrength}% alignment)
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {analysis && (
-        <div style={{
-          background: "#fff",
-          border: "1px solid #e5e7eb",
-          borderRadius: "12px",
-          padding: isMobile ? "16px" : "20px",
-        }}>
-          <h2 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "12px" }}>
-            📊 AI Professional Analysis
-          </h2>
-          <p style={{
-            fontSize: "14px",
-            color: "#111827",
-            whiteSpace: "pre-wrap",
-            lineHeight: "1.8",
-          }}>
-            {analysis}
-          </p>
         </div>
       )}
     </div>
