@@ -491,10 +491,6 @@ export async function generateSignalLevels(
   const atrBasedStop = Math.max(atr * 1.5, pipSize * 10);
   const stopLossPips = pair.includes("XAU") ? 150 : pair.includes("BTC") ? 300 : Math.round(atrBasedStop / pipSize);
 
-  const tp1Pips = Math.round(stopLossPips * 1.5);
-  const tp2Pips = Math.round(stopLossPips * 2.5);
-  const tp3Pips = Math.round(stopLossPips * 4);
-
   // Pattern detection
   const highs = priceHistory.map((p) => p + atr * 0.5);
   const lows = priceHistory.map((p) => p - atr * 0.5);
@@ -505,7 +501,7 @@ export async function generateSignalLevels(
     priceHistory,
     direction,
     stopLossPips,
-    tp1Pips,
+    Math.round(stopLossPips * 1.5),
     pipSize,
   );
 
@@ -528,28 +524,49 @@ export async function generateSignalLevels(
 
   const spreadAmount = spread * pipSize;
 
-  let entry: number;
-  let stopLoss: number;
-  let tp1: number;
-  let tp2: number;
-  let tp3: number;
-
-  // Use order recommendation entry price if it's a limit/stop order
+  // Entry based on order type
   const orderEntry = orderRecommendation.entryPrice;
+  const entry = direction === "long" ? orderEntry + spreadAmount : orderEntry - spreadAmount;
+
+  // Calculate SL and TP dynamically based on S/R levels
+  const slDistance = stopLossPips * pipSize;
+  
+  let stopLossPrice: number;
+  let tp1Price: number;
+  let tp2Price: number;
+  let tp3Price: number;
 
   if (direction === "long") {
-    entry = orderEntry + spreadAmount;
-    stopLoss = entry - stopLossPips * pipSize;
-    tp1 = entry + tp1Pips * pipSize;
-    tp2 = entry + tp2Pips * pipSize;
-    tp3 = entry + tp3Pips * pipSize;
+    // Long: SL below entry, TPs at resistance levels
+    stopLossPrice = entry - slDistance;
+    
+    const distanceToResistance = resistance - entry;
+    const tp1Distance = Math.min(distanceToResistance, slDistance * 1.5);
+    tp1Price = entry + tp1Distance;
+    
+    const tp2Distance = Math.min(distanceToResistance * 1.5, slDistance * 2.5);
+    tp2Price = entry + tp2Distance;
+    
+    const tp3Distance = Math.max(distanceToResistance * 2, slDistance * 4);
+    tp3Price = entry + tp3Distance;
   } else {
-    entry = orderEntry - spreadAmount;
-    stopLoss = entry + stopLossPips * pipSize;
-    tp1 = entry - tp1Pips * pipSize;
-    tp2 = entry - tp2Pips * pipSize;
-    tp3 = entry - tp3Pips * pipSize;
+    // Short: SL above entry, TPs at support levels
+    stopLossPrice = entry + slDistance;
+    
+    const distanceToSupport = entry - support;
+    const tp1Distance = Math.min(distanceToSupport, slDistance * 1.5);
+    tp1Price = entry - tp1Distance;
+    
+    const tp2Distance = Math.min(distanceToSupport * 1.5, slDistance * 2.5);
+    tp2Price = entry - tp2Distance;
+    
+    const tp3Distance = Math.max(distanceToSupport * 2, slDistance * 4);
+    tp3Price = entry - tp3Distance;
   }
+
+  const rewardPips1 = Math.round(Math.abs(tp1Price - entry) / pipSize);
+  const rewardPips2 = Math.round(Math.abs(tp2Price - entry) / pipSize);
+  const rewardPips3 = Math.round(Math.abs(tp3Price - entry) / pipSize);
 
   // Confidence based on score
   const confidence = score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
@@ -562,17 +579,17 @@ export async function generateSignalLevels(
     orderTypeDescription: getOrderTypeDescription(orderRecommendation.orderType),
     orderRecommendation,
     entry: Number(entry.toFixed(decimals)),
-    stopLoss: Number(stopLoss.toFixed(decimals)),
-    takeProfit1: Number(tp1.toFixed(decimals)),
-    takeProfit2: Number(tp2.toFixed(decimals)),
-    takeProfit3: Number(tp3.toFixed(decimals)),
+    stopLoss: Number(stopLossPrice.toFixed(decimals)),
+    takeProfit1: Number(tp1Price.toFixed(decimals)),
+    takeProfit2: Number(tp2Price.toFixed(decimals)),
+    takeProfit3: Number(tp3Price.toFixed(decimals)),
     riskPips: stopLossPips,
-    rewardPips1: tp1Pips,
-    rewardPips2: tp2Pips,
-    rewardPips3: tp3Pips,
-    riskReward1: (tp1Pips / stopLossPips).toFixed(1),
-    riskReward2: (tp2Pips / stopLossPips).toFixed(1),
-    riskReward3: (tp3Pips / stopLossPips).toFixed(1),
+    rewardPips1,
+    rewardPips2,
+    rewardPips3,
+    riskReward1: (rewardPips1 / stopLossPips).toFixed(1),
+    riskReward2: (rewardPips2 / stopLossPips).toFixed(1),
+    riskReward3: (rewardPips3 / stopLossPips).toFixed(1),
     confidence,
     confidenceScore: score,
     timestamp: Date.now(),
