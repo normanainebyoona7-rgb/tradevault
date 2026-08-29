@@ -95,7 +95,6 @@ function toYahooSymbol(pair: string): string {
   return symbols[pair] || "EURUSD=X";
 }
 
-// Map UI timeframe to Yahoo Finance interval
 function timeframeToYahooInterval(timeframe: string): string {
   const intervalMap: Record<string, string> = {
     "1m": "1m",
@@ -221,7 +220,6 @@ function calculateBollingerBands(prices: number[], period: number = 20): { upper
   };
 }
 
-// Tighter S/R from recent 20 candles
 function findSupportResistance(prices: number[]): { support: number; resistance: number } {
   if (prices.length === 0) return { support: 0, resistance: 0 };
 
@@ -488,7 +486,6 @@ export async function generateSignalLevels(
   if (pair.includes("BTC")) decimals = 2;
   if (pair.includes("ETH")) decimals = 2;
 
-  // Fetch data using the selected timeframe
   const priceHistory = await getRealHistoricalData(pair, timeframe);
 
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
@@ -536,8 +533,9 @@ export async function generateSignalLevels(
     supplyDemandZones,
   );
 
-  const atrBasedStop = Math.max(atr * 1.5, pipSize * 10);
-  const stopLossPips = pair.includes("XAU") ? 150 : pair.includes("BTC") ? 300 : Math.round(atrBasedStop / pipSize);
+  // Tighter SL/TP based on ATR
+  const atrBasedStop = Math.max(atr * 1.0, pipSize * 5);
+  const stopLossPips = pair.includes("XAU") ? 50 : pair.includes("BTC") ? 100 : Math.round(atrBasedStop / pipSize);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
 
@@ -564,10 +562,8 @@ export async function generateSignalLevels(
     atr,
   );
 
-  const spreadAmount = spread * pipSize;
-
-  const orderEntry = orderRecommendation.entryPrice;
-  const entry = direction === "long" ? orderEntry + spreadAmount : orderEntry - spreadAmount;
+  // Entry at LIVE current price
+  const entry = currentPrice;
 
   const slDistance = stopLossPips * pipSize;
   
@@ -578,14 +574,14 @@ export async function generateSignalLevels(
 
   if (direction === "long") {
     stopLossPrice = entry - slDistance;
-    tp1Price = entry + slDistance * 1.5;
-    tp2Price = entry + slDistance * 2.5;
-    tp3Price = entry + slDistance * 4;
+    tp1Price = entry + slDistance * 1.0;
+    tp2Price = entry + slDistance * 1.5;
+    tp3Price = entry + slDistance * 2.0;
   } else {
     stopLossPrice = entry + slDistance;
-    tp1Price = entry - slDistance * 1.5;
-    tp2Price = entry - slDistance * 2.5;
-    tp3Price = entry - slDistance * 4;
+    tp1Price = entry - slDistance * 1.0;
+    tp2Price = entry - slDistance * 1.5;
+    tp3Price = entry - slDistance * 2.0;
   }
 
   const rewardPips1 = Math.round(Math.abs(tp1Price - entry) / pipSize);
