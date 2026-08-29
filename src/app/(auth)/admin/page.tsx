@@ -561,6 +561,28 @@ export default function AdminPage() {
                 </div>
               )}
 
+              {autoResult.chartPatterns && autoResult.chartPatterns.length > 0 && (
+                <div style={{ marginBottom: "12px", padding: "10px", background: "#fef3c7", borderRadius: "8px", border: "1px solid #fde68a" }}>
+                  <p style={{ fontWeight: "700", color: "#d97706", marginBottom: "6px", fontSize: "12px" }}>📐 CHART PATTERNS:</p>
+                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                    {autoResult.chartPatterns.map((p: any, i: number) => (
+                      <li key={i} style={{ padding: "2px 0" }}>• {p.name} ({p.type}, Strength: {p.strength}/10) - {p.description}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {autoResult.supplyDemandZones && autoResult.supplyDemandZones.length > 0 && (
+                <div style={{ marginBottom: "12px", padding: "10px", background: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
+                  <p style={{ fontWeight: "700", color: "#1c69e3", marginBottom: "6px", fontSize: "12px" }}>📦 SUPPLY/DEMAND ZONES:</p>
+                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                    {autoResult.supplyDemandZones.map((z: any, i: number) => (
+                      <li key={i} style={{ padding: "2px 0" }}>• {z.type.toUpperCase()} at {z.bottom} - {z.top} (Strength: {z.strength}/10)</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px", color: "#6b7280" }}>
                 <p>RSI: <strong>{autoResult.rsi || "N/A"}</strong></p>
                 <p>ATR: <strong>{autoResult.atr || "N/A"}</strong></p>
@@ -586,7 +608,7 @@ export default function AdminPage() {
 
               {autoResult.patterns && autoResult.patterns.length > 0 && (
                 <div style={{ marginTop: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                  <p style={{ fontWeight: "700", color: "#16a34a", marginBottom: "6px", fontSize: "12px" }}>📊 PATTERNS:</p>
+                  <p style={{ fontWeight: "700", color: "#16a34a", marginBottom: "6px", fontSize: "12px" }}>📊 CANDLESTICK PATTERNS:</p>
                   <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
                     {autoResult.patterns.map((p: any, i: number) => (
                       <li key={i} style={{ padding: "2px 0" }}>• {p.name} ({p.type}, Strength: {p.strength}/10)</li>
