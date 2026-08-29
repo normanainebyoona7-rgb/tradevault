@@ -21,7 +21,7 @@ function generateProfessionalAnalysis(
 🔍 **ANALYSIS:**
 
 1. **Live Price: ${signal.currentPrice}**
-   • Real-time market data
+   • Real-time ${timeframe} market data
 
 2. **Trend: ${signal.trendBias}**
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
@@ -32,6 +32,12 @@ function generateProfessionalAnalysis(
 
 4. **Session: ${signal.session}**
    • ${signal.sessionAnalysis}
+
+5. **Chart Patterns Detected:**
+   • ${signal.chartPatterns?.length > 0 ? signal.chartPatterns.map((p: any) => p.name).join(", ") : "No major patterns"}
+
+6. **Supply/Demand Zones:**
+   • ${signal.supplyDemandZones?.length > 0 ? signal.supplyDemandZones.map((z: any) => `${z.type.toUpperCase()} at ${z.bottom}-${z.top}`).join(", ") : "No key zones"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -54,7 +60,7 @@ function generateProfessionalAnalysis(
 🔍 **ANALYSIS:**
 
 1. **Live Price: ${signal.currentPrice}**
-   • Real-time market data
+   • Real-time ${timeframe} market data
 
 2. **Trend: ${signal.trendBias}**
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
@@ -65,6 +71,12 @@ function generateProfessionalAnalysis(
 
 4. **Session: ${signal.session}**
    • ${signal.sessionAnalysis}
+
+5. **Chart Patterns Detected:**
+   • ${signal.chartPatterns?.length > 0 ? signal.chartPatterns.map((p: any) => p.name).join(", ") : "No major patterns"}
+
+6. **Supply/Demand Zones:**
+   • ${signal.supplyDemandZones?.length > 0 ? signal.supplyDemandZones.map((z: any) => `${z.type.toUpperCase()} at ${z.bottom}-${z.top}`).join(", ") : "No key zones"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -101,12 +113,12 @@ export async function POST(request: Request) {
       currentPrice = Number(userPrice);
       console.log(`Using user price for ${pair}: ${currentPrice}`);
     } else {
-      // Priority 2: Fetch live price
-      currentPrice = await getLivePrice(pair);
-      console.log(`Live price for ${pair}: ${currentPrice}`);
+      // Priority 2: Fetch live price using selected timeframe
+      currentPrice = await getLivePrice(pair, timeframe);
+      console.log(`Live price for ${pair} (${timeframe}): ${currentPrice}`);
     }
 
-    // Generate signal with real market data
+    // Generate signal with real market data using selected timeframe
     const signal = await generateSignalLevels(pair, currentPrice, timeframe);
     const spread = getExnessSpread(pair);
 
@@ -156,8 +168,10 @@ export async function POST(request: Request) {
         multiTimeframeStrength: signal.multiTimeframeStrength,
         confluences: signal.confluences,
         patterns: signal.patterns,
+        chartPatterns: signal.chartPatterns,
+        supplyDemandZones: signal.supplyDemandZones,
         backtest: signal.backtest,
-        dataSource: "Live Market Data",
+        dataSource: "Yahoo Finance Live Data",
       },
     });
   } catch (error) {

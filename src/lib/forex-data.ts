@@ -95,6 +95,21 @@ function toYahooSymbol(pair: string): string {
   return symbols[pair] || "EURUSD=X";
 }
 
+// Map UI timeframe to Yahoo Finance interval
+function timeframeToYahooInterval(timeframe: string): string {
+  const intervalMap: Record<string, string> = {
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1H": "1h",
+    "4H": "4h",
+    "1D": "1d",
+    "1W": "1wk",
+  };
+  return intervalMap[timeframe] || "1h";
+}
+
 export function calculatePipSize(pair: string): number {
   const [, quote] = pair.split("/");
   if (pair.includes("XAU")) return 0.10;
@@ -296,7 +311,6 @@ function determineDirection(
   if (currentPrice <= bollingerLower) longScore += 2;
   if (currentPrice >= bollingerUpper) shortScore += 2;
 
-  // Chart patterns influence direction
   const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
   const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
   
@@ -360,7 +374,6 @@ function calculateSignalScore(
     confluences.push(`MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"} momentum`);
   }
 
-  // Chart patterns add to score
   if (chartPatterns.length > 0) {
     score += Math.min(chartPatterns.length * 5, 15);
     reasons.push(`Chart patterns detected (+${Math.min(chartPatterns.length * 5, 15)})`);
@@ -369,7 +382,6 @@ function calculateSignalScore(
     });
   }
 
-  // Supply/Demand zones add to score
   if (supplyDemandZones.length > 0) {
     score += Math.min(supplyDemandZones.length * 5, 15);
     reasons.push(`Supply/Demand zones found (+${Math.min(supplyDemandZones.length * 5, 15)})`);
@@ -392,12 +404,14 @@ function calculateSignalScore(
 // ===== DATA FETCHING =====
 
 export async function getRealHistoricalData(pair: string, interval: string = "1d"): Promise<number[]> {
+  const yahooInterval = timeframeToYahooInterval(interval);
+  
   try {
     const symbol = toYahooSymbol(pair);
     const queryOptions = {
       period1: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000),
       period2: new Date(),
-      interval: interval as any,
+      interval: yahooInterval as any,
     };
 
     const result = await yahooFinance.chart(symbol, queryOptions);
@@ -426,13 +440,14 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
   return prices;
 }
 
-export async function getLivePrice(pair: string): Promise<number> {
+export async function getLivePrice(pair: string, timeframe: string = "1H"): Promise<number> {
   try {
     const symbol = toYahooSymbol(pair);
+    const yahooInterval = timeframeToYahooInterval(timeframe);
     const result = await yahooFinance.chart(symbol, {
       period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
       period2: new Date(),
-      interval: "1d",
+      interval: yahooInterval as any,
     });
     
     if (result.quotes && result.quotes.length > 0) {
@@ -473,9 +488,9 @@ export async function generateSignalLevels(
   if (pair.includes("BTC")) decimals = 2;
   if (pair.includes("ETH")) decimals = 2;
 
-  const priceHistory = await getRealHistoricalData(pair);
+  // Fetch data using the selected timeframe
+  const priceHistory = await getRealHistoricalData(pair, timeframe);
 
-  // Generate highs and lows from prices
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
   const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
 
@@ -494,7 +509,6 @@ export async function generateSignalLevels(
   const session = getCurrentSession();
   const sessionAnalysis = getSessionAnalysis(session, pair);
 
-  // Advanced patterns and supply/demand
   const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
 
   const direction = determineDirection(
@@ -525,7 +539,6 @@ export async function generateSignalLevels(
   const atrBasedStop = Math.max(atr * 1.5, pipSize * 10);
   const stopLossPips = pair.includes("XAU") ? 150 : pair.includes("BTC") ? 300 : Math.round(atrBasedStop / pipSize);
 
-  // Candlestick patterns (basic)
   const patterns = detectPatterns(priceHistory, highs, lows);
 
   const backtest = backtestStrategy(
