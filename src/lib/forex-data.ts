@@ -227,7 +227,7 @@ function calculateBollingerBands(prices: number[], period: number = 20): { upper
 function findSupportResistance(prices: number[]): { support: number; resistance: number } {
   if (prices.length === 0) return { support: 0, resistance: 0 };
 
-  const recentPrices = prices.slice(-20);
+  const recentPrices = prices.slice(-50);
   
   const swings: number[] = [];
   for (let i = 2; i < recentPrices.length - 2; i++) {
@@ -566,74 +566,40 @@ export async function generateSignalLevels(
     atr,
   );
 
-  // Entry based on Smart Money levels (Order Blocks, FVG, Liquidity)
+  // Entry based on Supply/Demand zones (institutional levels)
   let entry: number;
   
   if (direction === "long") {
-    const bullishBlocks = orderBlocks.filter(ob => ob.type === "bullish" && ob.bottom < currentPrice);
-    const bullishFVGs = fairValueGaps.filter(fvg => fvg.type === "bullish" && fvg.bottom < currentPrice);
-    const sellSideLiquidity = liquidityLevels.filter(liq => liq.type === "sell_side" && liq.price < currentPrice);
+    const demandZones = supplyDemandZones.filter(z => z.type === "demand" && z.bottom < currentPrice);
     
-    const candidates: number[] = [];
-    
-    if (bullishBlocks.length > 0) {
+    if (demandZones.length > 0) {
+      const nearestDemand = demandZones.reduce((closest, zone) => 
+        Math.abs(zone.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? zone : closest
+      );
+      entry = nearestDemand.bottom;
+    } else if (orderBlocks.filter(ob => ob.type === "bullish" && ob.bottom < currentPrice).length > 0) {
+      const bullishBlocks = orderBlocks.filter(ob => ob.type === "bullish" && ob.bottom < currentPrice);
       const nearestBlock = bullishBlocks.reduce((closest, block) => 
         Math.abs(block.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? block : closest
       );
-      candidates.push(nearestBlock.bottom);
-    }
-    
-    if (bullishFVGs.length > 0) {
-      const nearestFVG = bullishFVGs.reduce((closest, fvg) => 
-        Math.abs(fvg.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? fvg : closest
-      );
-      candidates.push(nearestFVG.bottom);
-    }
-    
-    if (sellSideLiquidity.length > 0) {
-      const nearestLiquidity = sellSideLiquidity.reduce((closest, liq) => 
-        Math.abs(liq.price - currentPrice) < Math.abs(closest.price - currentPrice) ? liq : closest
-      );
-      candidates.push(nearestLiquidity.price);
-    }
-    
-    if (candidates.length > 0) {
-      // Use the HIGHEST candidate (closest to current price but still below)
-      entry = Math.max(...candidates);
+      entry = nearestBlock.bottom;
     } else {
       entry = support;
     }
   } else {
-    const bearishBlocks = orderBlocks.filter(ob => ob.type === "bearish" && ob.top > currentPrice);
-    const bearishFVGs = fairValueGaps.filter(fvg => fvg.type === "bearish" && fvg.top > currentPrice);
-    const buySideLiquidity = liquidityLevels.filter(liq => liq.type === "buy_side" && liq.price > currentPrice);
+    const supplyZones = supplyDemandZones.filter(z => z.type === "supply" && z.top > currentPrice);
     
-    const candidates: number[] = [];
-    
-    if (bearishBlocks.length > 0) {
+    if (supplyZones.length > 0) {
+      const nearestSupply = supplyZones.reduce((closest, zone) => 
+        Math.abs(zone.top - currentPrice) < Math.abs(closest.top - currentPrice) ? zone : closest
+      );
+      entry = nearestSupply.top;
+    } else if (orderBlocks.filter(ob => ob.type === "bearish" && ob.top > currentPrice).length > 0) {
+      const bearishBlocks = orderBlocks.filter(ob => ob.type === "bearish" && ob.top > currentPrice);
       const nearestBlock = bearishBlocks.reduce((closest, block) => 
         Math.abs(block.top - currentPrice) < Math.abs(closest.top - currentPrice) ? block : closest
       );
-      candidates.push(nearestBlock.top);
-    }
-    
-    if (bearishFVGs.length > 0) {
-      const nearestFVG = bearishFVGs.reduce((closest, fvg) => 
-        Math.abs(fvg.top - currentPrice) < Math.abs(closest.top - currentPrice) ? fvg : closest
-      );
-      candidates.push(nearestFVG.top);
-    }
-    
-    if (buySideLiquidity.length > 0) {
-      const nearestLiquidity = buySideLiquidity.reduce((closest, liq) => 
-        Math.abs(liq.price - currentPrice) < Math.abs(closest.price - currentPrice) ? liq : closest
-      );
-      candidates.push(nearestLiquidity.price);
-    }
-    
-    if (candidates.length > 0) {
-      // Use the LOWEST candidate (closest to current price but still above)
-      entry = Math.min(...candidates);
+      entry = nearestBlock.top;
     } else {
       entry = resistance;
     }
