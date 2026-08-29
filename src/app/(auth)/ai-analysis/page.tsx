@@ -16,12 +16,24 @@ export default function AIAnalysisPage() {
   const [error, setError] = useState("");
   const [signal, setSignal] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [userTier, setUserTier] = useState("free");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
     window.addEventListener('resize', checkMobile);
+
+    // Check user tier
+    fetch("/api/session")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.user) {
+          setUserTier(data.user.tier || "free");
+        }
+      })
+      .catch(() => {});
+
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
@@ -86,6 +98,9 @@ export default function AIAnalysisPage() {
     fontWeight: "600" as const,
     marginBottom: "6px",
   };
+
+  // Check if user can see TP2 and TP3
+  const canSeeAllTPs = userTier === "vip" || userTier === "vvip";
 
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: isMobile ? "12px" : "24px" }}>
@@ -252,7 +267,7 @@ export default function AIAnalysisPage() {
             {signal.confidence} Confidence ({signal.signalScore}/100)
           </div>
 
-          {/* Order Type Display - PROMINENT */}
+          {/* Order Type Display */}
           <div style={{
             marginBottom: "16px",
             padding: "16px",
@@ -277,7 +292,7 @@ export default function AIAnalysisPage() {
             </p>
           </div>
 
-          {/* Signal Cards - Direction, Entry, SL, TP1-3 */}
+          {/* Signal Cards */}
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))",
@@ -305,15 +320,42 @@ export default function AIAnalysisPage() {
               <p style={{ fontSize: "12px", color: "#6b7280" }}>TP1</p>
               <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit1Price}</p>
             </div>
-            <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-              <p style={{ fontSize: "12px", color: "#6b7280" }}>TP2</p>
-              <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit2Price}</p>
-            </div>
-            <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-              <p style={{ fontSize: "12px", color: "#6b7280" }}>TP3</p>
-              <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit3Price}</p>
-            </div>
           </div>
+
+          {/* TP2 and TP3 - Only for VIP/VVIP */}
+          {canSeeAllTPs && (signal.takeProfit2Price || signal.takeProfit2) && (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(150px, 1fr))",
+              gap: "10px",
+              marginTop: "10px",
+            }}>
+              <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+                <p style={{ fontSize: "12px", color: "#6b7280" }}>TP2</p>
+                <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit2Price || signal.takeProfit2}</p>
+              </div>
+              <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
+                <p style={{ fontSize: "12px", color: "#6b7280" }}>TP3</p>
+                <p style={{ fontSize: "20px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit3Price || signal.takeProfit3}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Upgrade prompt for free users */}
+          {!canSeeAllTPs && (
+            <div style={{
+              marginTop: "16px",
+              padding: "12px",
+              background: "#fefce8",
+              borderRadius: "8px",
+              border: "1px solid #fde68a",
+              textAlign: "center",
+            }}>
+              <p style={{ fontSize: "13px", color: "#854d0e", fontWeight: "600" }}>
+                🔒 Upgrade to VIP to see TP2 & TP3 levels!
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
