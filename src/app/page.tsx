@@ -25,12 +25,25 @@ export default function LandingPage() {
     checkMobile();
     window.addEventListener('resize', checkMobile);
 
-    // Fetch free signals
+    // Fetch free signals with expiry check
     fetch("/api/signals")
       .then((res) => res.json())
       .then((data) => {
         if (data.signals) {
-          const activeSignals = data.signals.filter((s: any) => s.isActive !== false).slice(0, 3);
+          const now = Date.now();
+          const expiryTime = 24 * 60 * 60 * 1000; // 24 hours
+          
+          const activeSignals = data.signals
+            .filter((s: any) => {
+              if (s.isActive === false) return false;
+              
+              const signalTime = new Date(s.createdAt || s.timestamp || Date.now()).getTime();
+              const isExpired = now - signalTime > expiryTime;
+              
+              return !isExpired;
+            })
+            .slice(0, 3);
+          
           setFreeSignals(activeSignals);
         }
       })
@@ -181,14 +194,14 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Free Signals */}
+      {/* Free Signals with expiry */}
       {freeSignals.length > 0 && (
         <section className="animate-fadeInUp delay-2" style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
           <h2 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
             📡 Free Trading Signals
           </h2>
           <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "32px", fontSize: isMobile ? "14px" : "16px" }}>
-            Get a taste of our premium signals
+            Get a taste of our premium signals (expires in 24h)
           </p>
 
           <div style={{

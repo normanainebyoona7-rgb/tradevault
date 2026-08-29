@@ -16,6 +16,13 @@ export async function GET() {
 
     await dbConnect();
 
+    // Auto-expire signals older than 24 hours
+    const expiryTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await Signal.updateMany(
+      { isActive: true, createdAt: { $lt: expiryTime } },
+      { isActive: false }
+    );
+
     const user = await User.findById(session.id).lean();
     const userTier = (user as any)?.tier || "free";
 
