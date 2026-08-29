@@ -5,6 +5,7 @@ import { detectPatterns, CandlestickPattern } from "./patterns";
 import { backtestStrategy, BacktestResult } from "./backtest";
 import { analyzeMultipleTimeframes, getMultiTimeframeConsensus } from "./multi-timeframe";
 import { determineOrderType, OrderType, getOrderTypeDescription, OrderRecommendation } from "./order-types";
+import { analyzeAllPatterns, ChartPattern, SupplyDemandZone } from "./advanced-patterns";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -50,6 +51,8 @@ export interface SignalLevels {
   timeframe: string;
   reasons: string[];
   patterns: CandlestickPattern[];
+  chartPatterns: ChartPattern[];
+  supplyDemandZones: SupplyDemandZone[];
   backtest: BacktestResult;
   multiTimeframeConsensus: string;
   multiTimeframeStrength: number;
@@ -203,28 +206,38 @@ function calculateBollingerBands(prices: number[], period: number = 20): { upper
   };
 }
 
+// Tighter S/R from recent 20 candles
 function findSupportResistance(prices: number[]): { support: number; resistance: number } {
   if (prices.length === 0) return { support: 0, resistance: 0 };
 
+  const recentPrices = prices.slice(-20);
+  
   const swings: number[] = [];
-  for (let i = 2; i < prices.length - 2; i++) {
-    if (prices[i] < prices[i - 1] && prices[i] < prices[i - 2] && prices[i] < prices[i + 1] && prices[i] < prices[i + 2]) {
-      swings.push(prices[i]);
+  for (let i = 2; i < recentPrices.length - 2; i++) {
+    if (recentPrices[i] < recentPrices[i - 1] && recentPrices[i] < recentPrices[i - 2] && 
+        recentPrices[i] < recentPrices[i + 1] && recentPrices[i] < recentPrices[i + 2]) {
+      swings.push(recentPrices[i]);
     }
-    if (prices[i] > prices[i - 1] && prices[i] > prices[i - 2] && prices[i] > prices[i + 1] && prices[i] > prices[i + 2]) {
-      swings.push(prices[i]);
+    if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] > recentPrices[i - 2] && 
+        recentPrices[i] > recentPrices[i + 1] && recentPrices[i] > recentPrices[i + 2]) {
+      swings.push(recentPrices[i]);
     }
   }
 
   if (swings.length === 0) {
-    const recent = prices.slice(-50);
-    return { support: Math.min(...recent), resistance: Math.max(...recent) };
+    const support = Math.min(...recentPrices);
+    const resistance = Math.max(...recentPrices);
+    return { support, resistance };
   }
 
-  return {
-    support: Math.min(...swings.slice(0, 5)),
-    resistance: Math.max(...swings.slice(0, 5)),
-  };
+  const currentPrice = recentPrices[recentPrices.length - 1];
+  const supports = swings.filter(s => s < currentPrice);
+  const resistances = swings.filter(r => r > currentPrice);
+  
+  const support = supports.length > 0 ? Math.max(...supports) : Math.min(...recentPrices);
+  const resistance = resistances.length > 0 ? Math.min(...resistances) : Math.max(...recentPrices);
+
+  return { support, resistance };
 }
 
 function determineTrend(ma20: number, ma50: number, ma200: number): string {
@@ -262,6 +275,7 @@ function determineDirection(
   macdHistogram: number,
   bollingerUpper: number,
   bollingerLower: number,
+  chartPatterns: ChartPattern[],
 ): "long" | "short" {
   let longScore = 0;
   let shortScore = 0;
@@ -282,6 +296,13 @@ function determineDirection(
   if (currentPrice <= bollingerLower) longScore += 2;
   if (currentPrice >= bollingerUpper) shortScore += 2;
 
+  // Chart patterns influence direction
+  const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
+  const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
+  
+  if (bullishPatterns.length > 0) longScore += bullishPatterns.length * 2;
+  if (bearishPatterns.length > 0) shortScore += bearishPatterns.length * 2;
+
   const distanceToSupport = Math.abs(currentPrice - support);
   const distanceToResistance = Math.abs(resistance - currentPrice);
   if (distanceToSupport < distanceToResistance) longScore += 1;
@@ -299,6 +320,8 @@ function calculateSignalScore(
   session: string,
   support: number,
   resistance: number,
+  chartPatterns: ChartPattern[],
+  supplyDemandZones: SupplyDemandZone[],
 ): { score: number; reasons: string[]; confluences: string[] } {
   let score = 0;
   const reasons: string[] = [];
@@ -335,41 +358,32 @@ function calculateSignalScore(
     score += 20;
     reasons.push("MACD confirms momentum (+20)");
     confluences.push(`MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"} momentum`);
-  } else {
-    reasons.push("MACD no momentum (+0)");
-    confluences.push(`MACD: No momentum`);
+  }
+
+  // Chart patterns add to score
+  if (chartPatterns.length > 0) {
+    score += Math.min(chartPatterns.length * 5, 15);
+    reasons.push(`Chart patterns detected (+${Math.min(chartPatterns.length * 5, 15)})`);
+    chartPatterns.forEach(p => {
+      confluences.push(`Pattern: ${p.name} (${p.type}, Strength: ${p.strength}/10)`);
+    });
+  }
+
+  // Supply/Demand zones add to score
+  if (supplyDemandZones.length > 0) {
+    score += Math.min(supplyDemandZones.length * 5, 15);
+    reasons.push(`Supply/Demand zones found (+${Math.min(supplyDemandZones.length * 5, 15)})`);
+    supplyDemandZones.forEach(z => {
+      confluences.push(`${z.type.toUpperCase()} zone: ${z.bottom} - ${z.top}`);
+    });
   }
 
   if (session === "LONDON" || session === "NEW YORK") {
     score += 10;
-    reasons.push("High liquidity session (+10)");
     confluences.push(`Session: ${session} (high liquidity)`);
   } else {
     score += 5;
-    reasons.push("Normal session (+5)");
     confluences.push(`Session: ${session} (moderate liquidity)`);
-  }
-
-  const distanceToSR = Math.min(
-    Math.abs(currentPrice - support),
-    Math.abs(resistance - currentPrice)
-  );
-  if (distanceToSR < atr * 2) {
-    score += 10;
-    reasons.push("Near key S/R level (+10)");
-    confluences.push(`Near key S/R level`);
-  } else {
-    reasons.push("Far from S/R (+0)");
-    confluences.push(`Far from S/R levels`);
-  }
-
-  if (atr > 0 && atr < currentPrice * 0.01) {
-    score += 10;
-    reasons.push("Healthy volatility (+10)");
-    confluences.push(`Volatility: Healthy (ATR ${atr})`);
-  } else {
-    reasons.push("Extreme volatility (+0)");
-    confluences.push(`Volatility: Extreme (ATR ${atr})`);
   }
 
   return { score, reasons, confluences };
@@ -394,7 +408,6 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
         .map((item) => Number(item.close));
       
       if (prices.length > 30) {
-        console.log(`Got ${prices.length} real prices from Yahoo for ${pair}`);
         return prices;
       }
     }
@@ -428,7 +441,6 @@ export async function getLivePrice(pair: string): Promise<number> {
         .map((q) => Number(q.close));
       
       if (prices.length > 0) {
-        console.log(`Yahoo live price for ${pair}: ${prices[prices.length - 1]}`);
         return prices[prices.length - 1];
       }
     }
@@ -436,7 +448,6 @@ export async function getLivePrice(pair: string): Promise<number> {
     console.error(`Yahoo live price failed for ${pair}:`, error);
   }
   
-  console.log(`Using fallback for ${pair}`);
   return FALLBACK_PRICES[pair] || 1.0;
 }
 
@@ -464,6 +475,10 @@ export async function generateSignalLevels(
 
   const priceHistory = await getRealHistoricalData(pair);
 
+  // Generate highs and lows from prices
+  const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
+  const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
+
   const ma20 = calculateSMA(priceHistory, 20);
   const ma50 = calculateSMA(priceHistory, 50);
   const ma200 = calculateSMA(priceHistory, 200);
@@ -479,6 +494,9 @@ export async function generateSignalLevels(
   const session = getCurrentSession();
   const sessionAnalysis = getSessionAnalysis(session, pair);
 
+  // Advanced patterns and supply/demand
+  const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
+
   const direction = determineDirection(
     trendBias,
     currentPrice,
@@ -488,6 +506,7 @@ export async function generateSignalLevels(
     macdData.histogram,
     bollinger.upper,
     bollinger.lower,
+    chartPatterns,
   );
 
   const { score, reasons, confluences } = calculateSignalScore(
@@ -499,13 +518,14 @@ export async function generateSignalLevels(
     session,
     support,
     resistance,
+    chartPatterns,
+    supplyDemandZones,
   );
 
   const atrBasedStop = Math.max(atr * 1.5, pipSize * 10);
   const stopLossPips = pair.includes("XAU") ? 150 : pair.includes("BTC") ? 300 : Math.round(atrBasedStop / pipSize);
 
-  const highs = priceHistory.map((p) => p + atr * 0.5);
-  const lows = priceHistory.map((p) => p - atr * 0.5);
+  // Candlestick patterns (basic)
   const patterns = detectPatterns(priceHistory, highs, lows);
 
   const backtest = backtestStrategy(
@@ -533,7 +553,6 @@ export async function generateSignalLevels(
 
   const spreadAmount = spread * pipSize;
 
-  // Entry based on order type (limit/stop orders)
   const orderEntry = orderRecommendation.entryPrice;
   const entry = direction === "long" ? orderEntry + spreadAmount : orderEntry - spreadAmount;
 
@@ -604,6 +623,8 @@ export async function generateSignalLevels(
     timeframe,
     reasons,
     patterns,
+    chartPatterns,
+    supplyDemandZones,
     backtest,
     multiTimeframeConsensus: mtfConsensus.consensus,
     multiTimeframeStrength: mtfConsensus.strength,
