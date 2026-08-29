@@ -6,6 +6,7 @@ import { backtestStrategy, BacktestResult } from "./backtest";
 import { analyzeMultipleTimeframes, getMultiTimeframeConsensus } from "./multi-timeframe";
 import { determineOrderType, OrderType, getOrderTypeDescription, OrderRecommendation } from "./order-types";
 import { analyzeAllPatterns, ChartPattern, SupplyDemandZone } from "./advanced-patterns";
+import { analyzeSmartMoney, OrderBlock, FairValueGap, LiquidityLevel } from "./smart-money";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -53,6 +54,9 @@ export interface SignalLevels {
   patterns: CandlestickPattern[];
   chartPatterns: ChartPattern[];
   supplyDemandZones: SupplyDemandZone[];
+  orderBlocks: OrderBlock[];
+  fairValueGaps: FairValueGap[];
+  liquidityLevels: LiquidityLevel[];
   backtest: BacktestResult;
   multiTimeframeConsensus: string;
   multiTimeframeStrength: number;
@@ -507,6 +511,7 @@ export async function generateSignalLevels(
   const sessionAnalysis = getSessionAnalysis(session, pair);
 
   const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
+  const { orderBlocks, fairValueGaps, liquidityLevels } = analyzeSmartMoney(priceHistory, highs, lows);
 
   const direction = determineDirection(
     trendBias,
@@ -533,7 +538,6 @@ export async function generateSignalLevels(
     supplyDemandZones,
   );
 
-  // Tighter SL/TP based on ATR
   const atrBasedStop = Math.max(atr * 1.0, pipSize * 5);
   const stopLossPips = pair.includes("XAU") ? 50 : pair.includes("BTC") ? 100 : Math.round(atrBasedStop / pipSize);
 
@@ -562,8 +566,78 @@ export async function generateSignalLevels(
     atr,
   );
 
-  // Entry at LIVE current price
-  const entry = currentPrice;
+  // Entry based on Smart Money levels (Order Blocks, FVG, Liquidity)
+  let entry: number;
+  
+  if (direction === "long") {
+    const bullishBlocks = orderBlocks.filter(ob => ob.type === "bullish" && ob.bottom < currentPrice);
+    const bullishFVGs = fairValueGaps.filter(fvg => fvg.type === "bullish" && fvg.bottom < currentPrice);
+    const sellSideLiquidity = liquidityLevels.filter(liq => liq.type === "sell_side" && liq.price < currentPrice);
+    
+    const candidates: number[] = [];
+    
+    if (bullishBlocks.length > 0) {
+      const nearestBlock = bullishBlocks.reduce((closest, block) => 
+        Math.abs(block.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? block : closest
+      );
+      candidates.push(nearestBlock.bottom);
+    }
+    
+    if (bullishFVGs.length > 0) {
+      const nearestFVG = bullishFVGs.reduce((closest, fvg) => 
+        Math.abs(fvg.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? fvg : closest
+      );
+      candidates.push(nearestFVG.bottom);
+    }
+    
+    if (sellSideLiquidity.length > 0) {
+      const nearestLiquidity = sellSideLiquidity.reduce((closest, liq) => 
+        Math.abs(liq.price - currentPrice) < Math.abs(closest.price - currentPrice) ? liq : closest
+      );
+      candidates.push(nearestLiquidity.price);
+    }
+    
+    if (candidates.length > 0) {
+      // Use the HIGHEST candidate (closest to current price but still below)
+      entry = Math.max(...candidates);
+    } else {
+      entry = support;
+    }
+  } else {
+    const bearishBlocks = orderBlocks.filter(ob => ob.type === "bearish" && ob.top > currentPrice);
+    const bearishFVGs = fairValueGaps.filter(fvg => fvg.type === "bearish" && fvg.top > currentPrice);
+    const buySideLiquidity = liquidityLevels.filter(liq => liq.type === "buy_side" && liq.price > currentPrice);
+    
+    const candidates: number[] = [];
+    
+    if (bearishBlocks.length > 0) {
+      const nearestBlock = bearishBlocks.reduce((closest, block) => 
+        Math.abs(block.top - currentPrice) < Math.abs(closest.top - currentPrice) ? block : closest
+      );
+      candidates.push(nearestBlock.top);
+    }
+    
+    if (bearishFVGs.length > 0) {
+      const nearestFVG = bearishFVGs.reduce((closest, fvg) => 
+        Math.abs(fvg.top - currentPrice) < Math.abs(closest.top - currentPrice) ? fvg : closest
+      );
+      candidates.push(nearestFVG.top);
+    }
+    
+    if (buySideLiquidity.length > 0) {
+      const nearestLiquidity = buySideLiquidity.reduce((closest, liq) => 
+        Math.abs(liq.price - currentPrice) < Math.abs(closest.price - currentPrice) ? liq : closest
+      );
+      candidates.push(nearestLiquidity.price);
+    }
+    
+    if (candidates.length > 0) {
+      // Use the LOWEST candidate (closest to current price but still above)
+      entry = Math.min(...candidates);
+    } else {
+      entry = resistance;
+    }
+  }
 
   const slDistance = stopLossPips * pipSize;
   
@@ -634,6 +708,9 @@ export async function generateSignalLevels(
     patterns,
     chartPatterns,
     supplyDemandZones,
+    orderBlocks,
+    fairValueGaps,
+    liquidityLevels,
     backtest,
     multiTimeframeConsensus: mtfConsensus.consensus,
     multiTimeframeStrength: mtfConsensus.strength,
