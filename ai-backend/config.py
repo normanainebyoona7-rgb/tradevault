@@ -1,12 +1,10 @@
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-# API Keys
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+# Server configuration
+PORT = int(os.getenv('PORT', 8000))
 
-# Validate required environment variables
-if not GEMINI_API_KEY:
-    print("Warning: GEMINI_API_KEY not set. Gemini features will not work.")
+# FCS API Key (get from https://fcsapi.com/dashboard)
+FCS_API_KEY = os.getenv('FCS_API_KEY', '')
