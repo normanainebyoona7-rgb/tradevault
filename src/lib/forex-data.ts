@@ -89,8 +89,6 @@ const EXNESS_SPREADS: Record<string, number> = {
 const CRYPTO_PAIRS = ["BTC/USD", "ETH/USD"];
 const METAL_PAIRS = ["XAU/USD", "XAG/USD"];
 
-// ===== TIMEFRAME SCALING CONFIGURATION =====
-
 interface TimeframeConfig {
   atrMultiplier: number;
   rsiPeriod: number;
@@ -124,14 +122,9 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
 
 function toYahooSymbol(pair: string): string {
   const symbols: Record<string, string> = {
-    "EUR/USD": "EURUSD=X",
-    "GBP/USD": "GBPUSD=X",
-    "USD/JPY": "JPY=X",
-    "XAU/USD": "GC=F",
-    "XAG/USD": "SI=F",
-    "BTC/USD": "BTC-USD",
-    "ETH/USD": "ETH-USD",
-    "GBP/JPY": "GBPJPY=X",
+    "EUR/USD": "EURUSD=X", "GBP/USD": "GBPUSD=X", "USD/JPY": "JPY=X",
+    "XAU/USD": "GC=F", "XAG/USD": "SI=F", "BTC/USD": "BTC-USD",
+    "ETH/USD": "ETH-USD", "GBP/JPY": "GBPJPY=X",
   };
   return symbols[pair] || "EURUSD=X";
 }
@@ -158,7 +151,7 @@ export function getExnessSpread(pair: string): number {
   return EXNESS_SPREADS[pair] || 2;
 }
 
-// ===== DETERMINISTIC PRNG (for consistent fallback data) =====
+// ===== DETERMINISTIC PRNG =====
 
 function hashString(str: string): number {
   let hash = 0;
@@ -270,9 +263,9 @@ function findSupportResistance(prices: number[], lookback: number): { support: n
     }
   }
   if (swings.length === 0) return { support: Math.min(...recentPrices), resistance: Math.max(...recentPrices) };
-  const currentPrice = recentPrices[recentPrices.length - 1];
-  const supports = swings.filter(s => s < currentPrice);
-  const resistances = swings.filter(r => r > currentPrice);
+  const lastPrice = recentPrices[recentPrices.length - 1];
+  const supports = swings.filter(s => s < lastPrice);
+  const resistances = swings.filter(r => r > lastPrice);
   return {
     support: supports.length > 0 ? Math.max(...supports) : Math.min(...recentPrices),
     resistance: resistances.length > 0 ? Math.min(...resistances) : Math.max(...recentPrices),
@@ -305,28 +298,47 @@ function getSessionAnalysis(session: string, pair: string): string {
   return sessionDetails[session] || sessionDetails["OTHER"];
 }
 
-function determineDirection(trendBias: string, currentPrice: number, support: number, resistance: number, rsi: number, macdHistogram: number, bollingerUpper: number, bollingerLower: number, chartPatterns: ChartPattern[]): "long" | "short" {
+// CRITICAL: Direction is determined by INDICATORS ONLY (not live price)
+// This ensures user and admin see the same signal
+function determineDirection(
+  trendBias: string,
+  lastClose: number,
+  support: number,
+  resistance: number,
+  rsi: number,
+  macdHistogram: number,
+  bollingerUpper: number,
+  bollingerLower: number,
+  chartPatterns: ChartPattern[]
+): "long" | "short" {
   let longScore = 0, shortScore = 0;
+  
   if (trendBias === "STRONG UPTREND") longScore += 3;
   else if (trendBias === "UPTREND") longScore += 2;
   else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
   else if (trendBias === "DOWNTREND") shortScore += 2;
+  
   if (rsi < 30) longScore += 2;
   if (rsi > 70) shortScore += 2;
   if (rsi >= 30 && rsi <= 50) longScore += 1;
   if (rsi >= 50 && rsi <= 70) shortScore += 1;
+  
   if (macdHistogram > 0) longScore += 2;
   if (macdHistogram < 0) shortScore += 2;
-  if (currentPrice <= bollingerLower) longScore += 2;
-  if (currentPrice >= bollingerUpper) shortScore += 2;
+  
+  if (lastClose <= bollingerLower) longScore += 2;
+  if (lastClose >= bollingerUpper) shortScore += 2;
+  
   const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
   const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
   if (bullishPatterns.length > 0) longScore += bullishPatterns.length * 2;
   if (bearishPatterns.length > 0) shortScore += bearishPatterns.length * 2;
-  const distanceToSupport = Math.abs(currentPrice - support);
-  const distanceToResistance = Math.abs(resistance - currentPrice);
+  
+  const distanceToSupport = Math.abs(lastClose - support);
+  const distanceToResistance = Math.abs(resistance - lastClose);
   if (distanceToSupport < distanceToResistance) longScore += 1;
   else shortScore += 1;
+  
   return longScore > shortScore ? "long" : "short";
 }
 
@@ -354,7 +366,6 @@ function shouldUseYahoo(pair: string, timeframe: string): boolean {
   const isCrypto = CRYPTO_PAIRS.includes(pair);
   const isMetal = METAL_PAIRS.includes(pair);
   const isHighTF = ["1H", "4H", "1D", "1W"].includes(timeframe);
-  
   if (isCrypto) return isHighTF;
   if (isMetal) return true;
   return false;
@@ -421,16 +432,13 @@ export async function getRealHistoricalData(pair: string, interval: string = "1H
     if (yahooData) return { prices: yahooData, source: "yahoo" };
   }
 
-  // Deterministic synthetic fallback — same pair+timeframe = same data
   console.warn(`[Fallback] Using deterministic synthetic data for ${pair} ${interval}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
   const volatility = basePrice * 0.01;
-  
   const seed = hashString(`${pair}-${interval}`);
   const random = mulberry32(seed);
-  
   for (let i = 0; i < 200; i++) {
     price += (random() - 0.5) * volatility;
     prices.push(price);
@@ -516,6 +524,9 @@ export async function generateSignalLevels(
 
   const { prices: priceHistory, source: dataSource } = await getRealHistoricalData(pair, timeframe);
 
+  // CRITICAL: Use last CLOSE from history for direction, not live tick price
+  const lastClose = priceHistory[priceHistory.length - 1];
+
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
   const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
 
@@ -535,22 +546,24 @@ export async function generateSignalLevels(
   const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
   const { orderBlocks, fairValueGaps, liquidityLevels } = analyzeSmartMoney(priceHistory, highs, lows);
 
-  const direction = determineDirection(trendBias, currentPrice, support, resistance, rsi, macdData.histogram, bollinger.upper, bollinger.lower, chartPatterns);
+  // DIRECTION from indicators only — consistent across user and admin
+  const direction = determineDirection(trendBias, lastClose, support, resistance, rsi, macdData.histogram, bollinger.upper, bollinger.lower, chartPatterns);
 
-  const { score, reasons, confluences } = calculateSignalScore(trendBias, rsi, atr, currentPrice, macdData.histogram, session, support, resistance, chartPatterns, supplyDemandZones);
+  const { score, reasons, confluences } = calculateSignalScore(trendBias, rsi, atr, lastClose, macdData.histogram, session, support, resistance, chartPatterns, supplyDemandZones);
 
   const rawAtrPips = atr / pipSize;
   const stopLossPips = Math.max(Math.round(rawAtrPips * config.atrMultiplier), 5);
 
-  console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} atr=${atr.toFixed(5)} slPips=${stopLossPips} dir=${direction}`);
+  console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} lastClose=${lastClose.toFixed(4)} atr=${atr.toFixed(5)} slPips=${stopLossPips} dir=${direction}`);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
   const backtest = backtestStrategy(priceHistory, direction, stopLossPips, Math.round(stopLossPips * config.slToTpRatio[0]), pipSize);
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
-  const orderRecommendation = determineOrderType(direction, currentPrice, support, resistance, rsi, bollinger.upper, bollinger.lower, trendBias, atr);
+  const orderRecommendation = determineOrderType(direction, lastClose, support, resistance, rsi, bollinger.upper, bollinger.lower, trendBias, atr);
 
+  // Entry at live price (what user sees now)
   const entry = currentPrice;
   const slDistance = stopLossPips * pipSize;
   const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
