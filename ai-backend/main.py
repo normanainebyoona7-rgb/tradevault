@@ -25,25 +25,14 @@ FCS_API_KEY = config.FCS_API_KEY
 FCS_BASE_URL = "https://api-v4.fcsapi.com"
 
 FCS_SYMBOLS = {
-    "EUR/USD": "EURUSD",
-    "GBP/USD": "GBPUSD",
-    "USD/JPY": "USDJPY",
-    "XAU/USD": "XAUUSD",
-    "XAG/USD": "XAGUSD",
-    "GBP/JPY": "GBPJPY",
-    "BTC/USD": "BINANCE:BTCUSDT",
-    "ETH/USD": "BINANCE:ETHUSDT",
+    "EUR/USD": "EURUSD", "GBP/USD": "GBPUSD", "USD/JPY": "USDJPY",
+    "XAU/USD": "XAUUSD", "XAG/USD": "XAGUSD", "GBP/JPY": "GBPJPY",
+    "BTC/USD": "BINANCE:BTCUSDT", "ETH/USD": "BINANCE:ETHUSDT",
 }
 
 FCS_TIMEFRAME_MAP = {
-    "1m": "1",
-    "5m": "5",
-    "15m": "15",
-    "30m": "30",
-    "1H": "60",
-    "4H": "240",
-    "1D": "D",
-    "1W": "W",
+    "1m": "1", "5m": "5", "15m": "15", "30m": "30",
+    "1H": "60", "4H": "240", "1D": "D", "1W": "W",
 }
 
 
@@ -57,17 +46,14 @@ class HistoryRequest(BaseModel):
     limit: int = 200
 
 
+# ===== FCS API =====
+
 def get_fcs_price(pair: str) -> dict:
-    """Fetch live price from FCS API."""
     symbol = FCS_SYMBOLS.get(pair)
     if not symbol:
         raise Exception(f"Unsupported pair: {pair}")
 
-    if pair.startswith("BTC") or pair.startswith("ETH"):
-        endpoint = f"{FCS_BASE_URL}/crypto/latest"
-    else:
-        endpoint = f"{FCS_BASE_URL}/forex/latest"
-
+    endpoint = f"{FCS_BASE_URL}/crypto/latest" if pair.startswith(("BTC", "ETH")) else f"{FCS_BASE_URL}/forex/latest"
     params = {"symbol": symbol, "access_key": FCS_API_KEY}
 
     response = requests.get(endpoint, params=params, timeout=10)
@@ -75,63 +61,42 @@ def get_fcs_price(pair: str) -> dict:
     data = response.json()
 
     if not data.get("status"):
-        raise Exception(f"FCS API error: {data.get('msg', 'Unknown error')}")
+        raise Exception(f"FCS API error: {data.get('msg', 'Unknown')}")
 
     item = data["response"][0] if isinstance(data["response"], list) else data["response"]
     active = item.get("active", item)
 
     ask = float(active.get("a", 0))
     bid = float(active.get("b", 0))
-    current_price = (ask + bid) / 2 if ask and bid else (ask or bid)
+    price = (ask + bid) / 2 if ask and bid else (ask or bid)
 
-    return {
-        "pair": pair,
-        "price": current_price,
-        "ask": ask,
-        "bid": bid,
-        "open": float(active.get("o", 0)),
-        "high": float(active.get("h", 0)),
-        "low": float(active.get("l", 0)),
-        "timestamp": item.get("updateTime", ""),
-        "source": "fcs_api",
-    }
+    return {"pair": pair, "price": price, "ask": ask, "bid": bid, "source": "fcs_api"}
 
 
 def get_fcs_history(pair: str, timeframe: str, limit: int = 200) -> dict:
-    """Fetch historical OHLCV data from FCS API."""
     symbol = FCS_SYMBOLS.get(pair)
     if not symbol:
         raise Exception(f"Unsupported pair: {pair}")
 
     period = FCS_TIMEFRAME_MAP.get(timeframe, "60")
 
-    # Try candle endpoint
     endpoint = f"{FCS_BASE_URL}/forex/candle"
-    params = {
-        "symbol": symbol,
-        "period": period,
-        "limit": limit,
-        "access_key": FCS_API_KEY,
-    }
+    params = {"symbol": symbol, "period": period, "limit": limit, "access_key": FCS_API_KEY}
 
     response = requests.get(endpoint, params=params, timeout=15)
     response.raise_for_status()
     data = response.json()
 
     if not data.get("status"):
-        raise Exception(f"FCS API error: {data.get('msg', 'Unknown error')}")
+        raise Exception(f"FCS API error: {data.get('msg', 'Unknown')}")
 
     candles = data.get("response", [])
     closes = [float(c["c"]) for c in candles if c.get("c")]
 
-    return {
-        "pair": pair,
-        "timeframe": timeframe,
-        "closes": closes,
-        "count": len(closes),
-        "source": "fcs_api",
-    }
+    return {"pair": pair, "timeframe": timeframe, "closes": closes, "count": len(closes), "source": "fcs_api"}
 
+
+# ===== ENDPOINTS =====
 
 @app.get("/")
 def root():
@@ -140,15 +105,11 @@ def root():
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-        "fcs_api_configured": bool(FCS_API_KEY),
-    }
+    return {"status": "healthy", "fcs_api_configured": bool(FCS_API_KEY)}
 
 
 @app.post("/api/get-price")
 async def get_price(request: PriceRequest):
-    """Get live price using FCS API."""
     try:
         return get_fcs_price(request.pair)
     except Exception as e:
@@ -157,140 +118,176 @@ async def get_price(request: PriceRequest):
 
 @app.post("/api/get-history")
 async def get_history(request: HistoryRequest):
-    """Get recent price history from FCS API for a timeframe."""
     try:
         return get_fcs_history(request.pair, request.timeframe, request.limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ===== IMAGE ANALYSIS =====
+# ===== CHART IMAGE ANALYSIS =====
+# Extracts from the uploaded chart:
+# - Y-axis price range (via OCR)
+# - Support/resistance levels (horizontal pixel clusters)
+# - Candle direction (green vs red pixel mass)
+# - Chart trend
 
-def extract_prices_from_image(image_np: np.ndarray):
-    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+def extract_y_axis_range(image_np: np.ndarray) -> tuple:
+    """
+    Reads price labels from the right side of the chart (y-axis).
+    Returns (min_price, max_price, [list of detected prices])
+    """
+    h, w = image_np.shape[:2]
+    # Right 15% of image usually contains y-axis labels
+    right_strip = image_np[:, int(w * 0.85):]
+
+    gray = cv2.cvtColor(right_strip, cv2.COLOR_RGB2GRAY)
+    # Upscale for better OCR
+    gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     _, enhanced = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
     text = pytesseract.image_to_string(enhanced, config="--psm 6")
-    prices = re.findall(r'\d+\.\d{2,5}', text)
-    price_list = [float(p) for p in prices if 0.01 < float(p) < 100000]
-    return price_list, text
+
+    # Extract numbers (price format: 1234.56 or 1234.5 or 12345)
+    matches = re.findall(r'\b\d{1,6}\.?\d{0,5}\b', text)
+    prices = []
+    for m in matches:
+        try:
+            v = float(m)
+            if 0.01 < v < 1_000_000:
+                prices.append(v)
+        except ValueError:
+            continue
+
+    if not prices:
+        return (0, 0, [])
+
+    return (min(prices), max(prices), sorted(set(prices)))
 
 
-def detect_candles(image_np: np.ndarray) -> dict:
+def detect_sr_levels_by_pixels(image_np: np.ndarray, y_min: float, y_max: float) -> dict:
+    """
+    Detects support/resistance as horizontal bands where price has reversed.
+    Uses pixel density of wicks in a horizontal strip.
+    """
+    h, w = image_np.shape[:2]
+
+    if y_max <= y_min:
+        return {"support": [], "resistance": []}
+
+    # Focus on middle 80% (exclude toolbars)
+    chart = image_np[int(h * 0.05):int(h * 0.95), int(w * 0.02):int(w * 0.85)]
+    ch, cw = chart.shape[:2]
+
+    # Detect wick pixels (thin vertical lines). Use darker pixels on light bg.
+    gray = cv2.cvtColor(chart, cv2.COLOR_RGB2GRAY)
+    _, binary = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
+
+    # Horizontal projection of pixel density
+    row_density = binary.sum(axis=1) / 255  # count of active pixels per row
+
+    # Smooth
+    kernel = np.ones(5) / 5
+    smoothed = np.convolve(row_density, kernel, mode='same')
+
+    # Find peaks (rows where many wicks align = S/R level)
+    threshold = smoothed.mean() + smoothed.std() * 1.5
+    peak_rows = []
+    for i in range(3, ch - 3):
+        if smoothed[i] > threshold and smoothed[i] >= smoothed[i-1] and smoothed[i] >= smoothed[i+1]:
+            peak_rows.append(i)
+
+    # Deduplicate nearby peaks
+    deduped = []
+    for r in peak_rows:
+        if not deduped or r - deduped[-1] > 8:
+            deduped.append(r)
+
+    # Convert pixel rows to prices (image y=0 is top = highest price)
+    levels = []
+    for r in deduped[:10]:
+        price = y_max - (r / ch) * (y_max - y_min)
+        levels.append(round(price, 5))
+
+    # Split: above mid = resistance, below = support (relative to mid price)
+    mid_price = (y_min + y_max) / 2
+    resistance = sorted([p for p in levels if p > mid_price], reverse=True)
+    support = sorted([p for p in levels if p < mid_price])
+
+    return {"support": support[:4], "resistance": resistance[:4]}
+
+
+def detect_trend_from_candles(image_np: np.ndarray) -> dict:
+    """Uses color mass to determine bullish vs bearish."""
     hsv = cv2.cvtColor(image_np, cv2.COLOR_RGB2HSV)
-    lower_green = np.array([40, 50, 50])
-    upper_green = np.array([80, 255, 255])
-    green_mask = cv2.inRange(hsv, lower_green, upper_green)
-    lower_red1 = np.array([0, 50, 50])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 50, 50])
-    upper_red2 = np.array([180, 255, 255])
-    red_mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
-    red_mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
-    red_mask = cv2.bitwise_or(red_mask1, red_mask2)
 
-    green_count = cv2.countNonZero(green_mask)
-    red_count = cv2.countNonZero(red_mask)
+    # Green candles
+    green_mask = cv2.inRange(hsv, np.array([40, 40, 40]), np.array([85, 255, 255]))
+    # Red candles (two ranges)
+    red_mask = cv2.bitwise_or(
+        cv2.inRange(hsv, np.array([0, 40, 40]), np.array([10, 255, 255])),
+        cv2.inRange(hsv, np.array([170, 40, 40]), np.array([180, 255, 255]))
+    )
 
-    if green_count > red_count * 1.2:
-        bias, direction = "BULLISH", "long"
-    elif red_count > green_count * 1.2:
-        bias, direction = "BEARISH", "short"
+    green_count = int(cv2.countNonZero(green_mask))
+    red_count = int(cv2.countNonZero(red_mask))
+
+    total = green_count + red_count
+    if total == 0:
+        return {"bias": "NEUTRAL", "green": 0, "red": 0, "green_pct": 50}
+
+    green_pct = round((green_count / total) * 100, 1)
+
+    if green_pct >= 60:
+        bias = "BULLISH"
+    elif green_pct <= 40:
+        bias = "BEARISH"
     else:
-        bias, direction = "MIXED", "neutral"
+        bias = "MIXED"
 
-    return {
-        "green_candles": int(green_count),
-        "red_candles": int(red_count),
-        "bias": bias,
-        "direction": direction,
-    }
-
-
-def detect_swing_levels(prices: List[float], lookback: int = 5) -> dict:
-    if len(prices) < lookback * 2 + 1:
-        return {"swing_highs": [], "swing_lows": []}
-
-    swing_highs, swing_lows = [], []
-
-    for i in range(lookback, len(prices) - lookback):
-        is_swing_high = all(prices[i] > prices[i - j] and prices[i] > prices[i + j] for j in range(1, lookback + 1))
-        if is_swing_high:
-            swing_highs.append({"index": i, "price": prices[i]})
-
-        is_swing_low = all(prices[i] < prices[i - j] and prices[i] < prices[i + j] for j in range(1, lookback + 1))
-        if is_swing_low:
-            swing_lows.append({"index": i, "price": prices[i]})
-
-    return {"swing_highs": swing_highs, "swing_lows": swing_lows}
-
-
-def find_key_levels_from_swings(swing_highs: List[dict], swing_lows: List[dict]) -> dict:
-    resistance_levels = [s["price"] for s in swing_highs[-5:]] if swing_highs else []
-    support_levels = [s["price"] for s in swing_lows[-5:]] if swing_lows else []
-    resistance = max(resistance_levels) if resistance_levels else 0
-    support = min(support_levels) if support_levels else 0
-    return {"resistance": resistance, "support": support, "resistance_levels": resistance_levels, "support_levels": support_levels}
-
-
-def calculate_sl_tp(direction: str, current_price: float, support: float, resistance: float) -> dict:
-    if current_price <= 0:
-        return {"stop_loss": 0, "take_profit1": 0, "take_profit2": 0, "take_profit3": 0}
-    range_width = abs(resistance - support) if resistance > support else current_price * 0.02
-    if direction == "long":
-        sl = support - range_width * 0.1
-        tp1 = current_price + range_width * 0.5
-        tp2 = current_price + range_width * 1.0
-        tp3 = resistance + range_width * 0.1
-    elif direction == "short":
-        sl = resistance + range_width * 0.1
-        tp1 = current_price - range_width * 0.5
-        tp2 = current_price - range_width * 1.0
-        tp3 = support - range_width * 0.1
-    else:
-        sl = support - range_width * 0.1
-        tp1 = current_price + range_width * 0.5
-        tp2 = current_price + range_width * 1.0
-        tp3 = resistance
-    return {"stop_loss": round(sl, 5), "take_profit1": round(tp1, 5), "take_profit2": round(tp2, 5), "take_profit3": round(tp3, 5)}
+    return {"bias": bias, "green": green_count, "red": red_count, "green_pct": green_pct}
 
 
 @app.post("/api/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
+    """
+    Extracts chart structure from an uploaded screenshot.
+    Returns levels used by the frontend to place SL/TP.
+    """
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         image_np = np.array(image)
-        if image_np.shape[2] == 4:
+
+        if len(image_np.shape) == 2:
+            image_np = cv2.cvtColor(image_np, cv2.COLOR_GRAY2RGB)
+        elif image_np.shape[2] == 4:
             image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
-        prices, text = extract_prices_from_image(image_np)
-        candle_analysis = detect_candles(image_np)
-        swings = detect_swing_levels(prices, lookback=5)
-        key_levels = find_key_levels_from_swings(swings["swing_highs"], swings["swing_lows"])
-        if key_levels["support"] > 0 and key_levels["resistance"] > 0:
-            support, resistance = key_levels["support"], key_levels["resistance"]
-        else:
-            sorted_prices = sorted(prices) if prices else []
-            support = sorted_prices[0] if sorted_prices else 0
-            resistance = sorted_prices[-1] if sorted_prices else 0
-        current_price = prices[-1] if prices else 0
-        sl_tp = calculate_sl_tp(candle_analysis["direction"], current_price, support, resistance)
+
+        # 1. Y-axis price range (OCR)
+        y_min, y_max, ocr_prices = extract_y_axis_range(image_np)
+
+        # 2. Candle trend
+        trend = detect_trend_from_candles(image_np)
+
+        # 3. S/R levels from pixels
+        sr = detect_sr_levels_by_pixels(image_np, y_min, y_max) if y_max > y_min else {"support": [], "resistance": []}
+
+        # 4. Confidence based on data richness
+        confidence = 30
+        if ocr_prices: confidence += 25
+        if sr["support"] or sr["resistance"]: confidence += 25
+        if trend["bias"] in ("BULLISH", "BEARISH"): confidence += 20
+
         return {
             "status": "success",
-            "prices_detected": prices[:20],
-            "current_price": round(current_price, 5),
-            "support": round(support, 5),
-            "resistance": round(resistance, 5),
-            "direction": candle_analysis["direction"],
-            "bias": candle_analysis["bias"],
-            "green_candles": candle_analysis["green_candles"],
-            "red_candles": candle_analysis["red_candles"],
-            "entry": round(current_price, 5),
-            "stop_loss": sl_tp["stop_loss"],
-            "take_profit1": sl_tp["take_profit1"],
-            "take_profit2": sl_tp["take_profit2"],
-            "take_profit3": sl_tp["take_profit3"],
-            "swing_highs": [round(s["price"], 5) for s in swings["swing_highs"][-10:]],
-            "swing_lows": [round(s["price"], 5) for s in swings["swing_lows"][-10:]],
+            "y_axis_range": {"min": y_min, "max": y_max},
+            "ocr_prices": ocr_prices[:20],
+            "support_levels": sr["support"],
+            "resistance_levels": sr["resistance"],
+            "trend": trend,
+            "confidence": confidence,
+            "notes": f"Detected {len(sr['support'])} support, {len(sr['resistance'])} resistance levels",
         }
+
     except Exception as e:
         return {"status": "error", "message": str(e)}

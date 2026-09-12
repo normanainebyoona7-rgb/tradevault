@@ -6,10 +6,17 @@ import { backtestStrategy, BacktestResult } from "./backtest";
 import { analyzeMultipleTimeframes, getMultiTimeframeConsensus } from "./multi-timeframe";
 import { determineOrderType, OrderType, getOrderTypeDescription, OrderRecommendation } from "./order-types";
 import { analyzeAllPatterns, ChartPattern, SupplyDemandZone } from "./advanced-patterns";
-import { analyzeSmartMoney, OrderBlock, FairValueGap, LiquidityLevel } from "./smart-money";
-import { candlesFromCloses, analyzeSMCForDirection } from "./smc-engine";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
+
+export interface ImageLevels {
+  support: number[];
+  resistance: number[];
+  yMin: number;
+  yMax: number;
+  trend: string;
+  greenPct: number;
+}
 
 export interface SignalLevels {
   pair: string;
@@ -55,72 +62,45 @@ export interface SignalLevels {
   patterns: CandlestickPattern[];
   chartPatterns: ChartPattern[];
   supplyDemandZones: SupplyDemandZone[];
-  orderBlocks: OrderBlock[];
-  fairValueGaps: FairValueGap[];
-  liquidityLevels: LiquidityLevel[];
   backtest: BacktestResult;
   multiTimeframeConsensus: string;
   multiTimeframeStrength: number;
   confluences: string[];
-  smcConfluences: string[];
-  smcScore: number;
+  imageLevels: ImageLevels | null;
   dataSource: string;
 }
 
 const FALLBACK_PRICES: Record<string, number> = {
-  "EUR/USD": 1.0850,
-  "GBP/USD": 1.2700,
-  "USD/JPY": 148.50,
-  "XAU/USD": 2400.00,
-  "XAG/USD": 28.50,
-  "BTC/USD": 67000.00,
-  "ETH/USD": 3200.00,
-  "GBP/JPY": 188.50,
+  "EUR/USD": 1.0850, "GBP/USD": 1.2700, "USD/JPY": 148.50,
+  "XAU/USD": 2400.00, "XAG/USD": 28.50, "BTC/USD": 67000.00,
+  "ETH/USD": 3200.00, "GBP/JPY": 188.50,
 };
 
 const EXNESS_SPREADS: Record<string, number> = {
-  "EUR/USD": 1,
-  "GBP/USD": 1.5,
-  "USD/JPY": 1.2,
-  "XAU/USD": 50,
-  "XAG/USD": 30,
-  "BTC/USD": 100,
-  "ETH/USD": 20,
-  "GBP/JPY": 2.5,
+  "EUR/USD": 1, "GBP/USD": 1.5, "USD/JPY": 1.2, "XAU/USD": 50,
+  "XAG/USD": 30, "BTC/USD": 100, "ETH/USD": 20, "GBP/JPY": 2.5,
 };
-
-const CRYPTO_PAIRS = ["BTC/USD", "ETH/USD"];
-const METAL_PAIRS = ["XAU/USD", "XAG/USD"];
 
 interface TimeframeConfig {
   atrMultiplier: number;
   minSlPercent: number;
-  slToTpRatio: [number, number, number];
   rsiPeriod: number;
-  atrPeriod: number;
-  ma20: number;
-  ma50: number;
-  ma200: number;
+  ma20: number; ma50: number; ma200: number;
   bbPeriod: number;
-  bbStdDev: number;
-  macdFast: number;
-  macdSlow: number;
-  macdSignal: number;
+  macdFast: number; macdSlow: number; macdSignal: number;
   srLookback: number;
-  patternLookback: number;
-  minCandles: number;
 }
 
 function getTimeframeConfig(timeframe: string): TimeframeConfig {
   const configs: Record<string, TimeframeConfig> = {
-    "1m": { atrMultiplier: 1.5, minSlPercent: 0.0008, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 7, atrPeriod: 7, ma20: 10, ma50: 25, ma200: 100, bbPeriod: 10, bbStdDev: 2, macdFast: 6, macdSlow: 13, macdSignal: 5, srLookback: 15, patternLookback: 3, minCandles: 50 },
-    "5m": { atrMultiplier: 1.5, minSlPercent: 0.0012, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 9, atrPeriod: 9, ma20: 15, ma50: 35, ma200: 150, bbPeriod: 15, bbStdDev: 2, macdFast: 8, macdSlow: 17, macdSignal: 6, srLookback: 20, patternLookback: 4, minCandles: 60 },
-    "15m": { atrMultiplier: 1.5, minSlPercent: 0.002, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 11, atrPeriod: 11, ma20: 20, ma50: 50, ma200: 150, bbPeriod: 20, bbStdDev: 2, macdFast: 10, macdSlow: 22, macdSignal: 8, srLookback: 25, patternLookback: 5, minCandles: 80 },
-    "30m": { atrMultiplier: 1.5, minSlPercent: 0.0025, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 12, atrPeriod: 12, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30, patternLookback: 5, minCandles: 100 },
-    "1H": { atrMultiplier: 1.5, minSlPercent: 0.003, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50, patternLookback: 5, minCandles: 100 },
-    "4H": { atrMultiplier: 1.8, minSlPercent: 0.006, slToTpRatio: [2.0, 4.0, 7.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50, patternLookback: 5, minCandles: 100 },
-    "1D": { atrMultiplier: 2.0, minSlPercent: 0.012, slToTpRatio: [2.5, 5.0, 8.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30, patternLookback: 5, minCandles: 80 },
-    "1W": { atrMultiplier: 2.5, minSlPercent: 0.025, slToTpRatio: [3.0, 5.0, 8.0], rsiPeriod: 14, atrPeriod: 14, ma20: 10, ma50: 30, ma200: 100, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 20, patternLookback: 4, minCandles: 60 },
+    "1m": { atrMultiplier: 1.5, minSlPercent: 0.0008, rsiPeriod: 7, ma20: 10, ma50: 25, ma200: 100, bbPeriod: 10, macdFast: 6, macdSlow: 13, macdSignal: 5, srLookback: 15 },
+    "5m": { atrMultiplier: 1.5, minSlPercent: 0.0012, rsiPeriod: 9, ma20: 15, ma50: 35, ma200: 150, bbPeriod: 15, macdFast: 8, macdSlow: 17, macdSignal: 6, srLookback: 20 },
+    "15m": { atrMultiplier: 1.5, minSlPercent: 0.002, rsiPeriod: 11, ma20: 20, ma50: 50, ma200: 150, bbPeriod: 20, macdFast: 10, macdSlow: 22, macdSignal: 8, srLookback: 25 },
+    "30m": { atrMultiplier: 1.5, minSlPercent: 0.0025, rsiPeriod: 12, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30 },
+    "1H": { atrMultiplier: 1.5, minSlPercent: 0.003, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50 },
+    "4H": { atrMultiplier: 1.8, minSlPercent: 0.006, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50 },
+    "1D": { atrMultiplier: 2.0, minSlPercent: 0.012, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30 },
+    "1W": { atrMultiplier: 2.5, minSlPercent: 0.025, rsiPeriod: 14, ma20: 10, ma50: 30, ma200: 100, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 20 },
   };
   return configs[timeframe] || configs["1H"];
 }
@@ -135,11 +115,11 @@ function toYahooSymbol(pair: string): string {
 }
 
 function timeframeToYahooInterval(timeframe: string): string {
-  const intervalMap: Record<string, string> = {
+  const map: Record<string, string> = {
     "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
     "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1wk",
   };
-  return intervalMap[timeframe] || "1h";
+  return map[timeframe] || "1h";
 }
 
 export function calculatePipSize(pair: string): number {
@@ -175,6 +155,8 @@ function mulberry32(seed: number) {
   };
 }
 
+// ===== INDICATORS =====
+
 function calculateSMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
   const slice = prices.slice(-period);
@@ -203,8 +185,7 @@ function calculateRSI(prices: number[], period: number): number {
   }
   if (losses === 0) return 100;
   if (gains === 0) return 0;
-  const rs = gains / losses;
-  return 100 - 100 / (1 + rs);
+  return 100 - 100 / (1 + gains / losses);
 }
 
 function calculateATR(prices: number[], period: number): number {
@@ -216,7 +197,7 @@ function calculateATR(prices: number[], period: number): number {
   return totalRange / period;
 }
 
-function calculateMACD(prices: number[], fast: number, slow: number, signalPeriod: number): { macd: number; signal: number; histogram: number } {
+function calculateMACD(prices: number[], fast: number, slow: number, signalPeriod: number) {
   if (prices.length < slow + signalPeriod) return { macd: 0, signal: 0, histogram: 0 };
   const emaFast = calculateEMA(prices, fast);
   const emaSlow = calculateEMA(prices, slow);
@@ -232,44 +213,37 @@ function calculateMACD(prices: number[], fast: number, slow: number, signalPerio
   };
 }
 
-function calculateBollingerBands(prices: number[], period: number, stdDevMultiplier: number): { upper: number; middle: number; lower: number } {
+function calculateBollingerBands(prices: number[], period: number) {
   if (prices.length < period) {
     const middle = calculateSMA(prices, prices.length);
     return { upper: middle, middle, lower: middle };
   }
   const middle = calculateSMA(prices, period);
   const slice = prices.slice(-period);
-  const squaredDiffs = slice.map(p => Math.pow(p - middle, 2));
-  const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / period;
+  const variance = slice.map(p => Math.pow(p - middle, 2)).reduce((s, v) => s + v, 0) / period;
   const stdDev = Math.sqrt(variance);
   return {
-    upper: Number((middle + stdDevMultiplier * stdDev).toFixed(5)),
+    upper: Number((middle + 2 * stdDev).toFixed(5)),
     middle: Number(middle.toFixed(5)),
-    lower: Number((middle - stdDevMultiplier * stdDev).toFixed(5)),
+    lower: Number((middle - 2 * stdDev).toFixed(5)),
   };
 }
 
-function findSupportResistance(prices: number[], lookback: number): { support: number; resistance: number } {
+function findSupportResistance(prices: number[], lookback: number) {
   if (prices.length === 0) return { support: 0, resistance: 0 };
-  const recentPrices = prices.slice(-lookback);
+  const recent = prices.slice(-lookback);
   const swings: number[] = [];
-  for (let i = 2; i < recentPrices.length - 2; i++) {
-    if (recentPrices[i] < recentPrices[i - 1] && recentPrices[i] < recentPrices[i - 2] && 
-        recentPrices[i] < recentPrices[i + 1] && recentPrices[i] < recentPrices[i + 2]) {
-      swings.push(recentPrices[i]);
-    }
-    if (recentPrices[i] > recentPrices[i - 1] && recentPrices[i] > recentPrices[i - 2] && 
-        recentPrices[i] > recentPrices[i + 1] && recentPrices[i] > recentPrices[i + 2]) {
-      swings.push(recentPrices[i]);
-    }
+  for (let i = 2; i < recent.length - 2; i++) {
+    if (recent[i] < recent[i-1] && recent[i] < recent[i-2] && recent[i] < recent[i+1] && recent[i] < recent[i+2]) swings.push(recent[i]);
+    if (recent[i] > recent[i-1] && recent[i] > recent[i-2] && recent[i] > recent[i+1] && recent[i] > recent[i+2]) swings.push(recent[i]);
   }
-  if (swings.length === 0) return { support: Math.min(...recentPrices), resistance: Math.max(...recentPrices) };
-  const lastPrice = recentPrices[recentPrices.length - 1];
+  if (swings.length === 0) return { support: Math.min(...recent), resistance: Math.max(...recent) };
+  const lastPrice = recent[recent.length - 1];
   const supports = swings.filter(s => s < lastPrice);
   const resistances = swings.filter(r => r > lastPrice);
   return {
-    support: supports.length > 0 ? Math.max(...supports) : Math.min(...recentPrices),
-    resistance: resistances.length > 0 ? Math.min(...resistances) : Math.max(...recentPrices),
+    support: supports.length > 0 ? Math.max(...supports) : Math.min(...recent),
+    resistance: resistances.length > 0 ? Math.min(...resistances) : Math.max(...recent),
   };
 }
 
@@ -290,112 +264,173 @@ function getCurrentSession(): string {
 }
 
 function getSessionAnalysis(session: string, pair: string): string {
-  const sessionDetails: Record<string, string> = {
-    "LONDON": `London session active. High liquidity for ${pair}.`,
-    "NEW YORK": `New York session active. USD volatility high.`,
-    "ASIAN": `Asian session active. Lower volatility.`,
-    "OTHER": `Off-peak hours. Reduced liquidity.`,
+  const map: Record<string, string> = {
+    "LONDON": `London session. High liquidity for ${pair}.`,
+    "NEW YORK": `New York session. USD volatility.`,
+    "ASIAN": `Asian session. Lower volatility.`,
+    "OTHER": `Off-peak hours.`,
   };
-  return sessionDetails[session] || sessionDetails["OTHER"];
+  return map[session] || map["OTHER"];
 }
 
+// ===== DIRECTION: image trend dominates when provided =====
+
 function determineDirection(
+  imageLevels: ImageLevels | null,
   trendBias: string,
   lastClose: number,
   support: number,
   resistance: number,
   rsi: number,
   macdHistogram: number,
-  bollingerUpper: number,
-  bollingerLower: number,
-  chartPatterns: ChartPattern[]
 ): "long" | "short" | "neutral" {
   let longScore = 0, shortScore = 0;
 
-  if (trendBias === "STRONG UPTREND") longScore += 4;
-  else if (trendBias === "UPTREND") longScore += 3;
-  else if (trendBias === "STRONG DOWNTREND") shortScore += 4;
-  else if (trendBias === "DOWNTREND") shortScore += 3;
+  // Image trend has strong weight (uploaded chart is the actual market)
+  if (imageLevels) {
+    if (imageLevels.trend === "BULLISH") longScore += 4;
+    else if (imageLevels.trend === "BEARISH") shortScore += 4;
 
-  if (rsi < 25) longScore += 4;
-  else if (rsi < 35) longScore += 2;
-  else if (rsi > 75) shortScore += 4;
-  else if (rsi > 65) shortScore += 2;
-  else if (rsi >= 45 && rsi <= 55) {
-    if (trendBias.includes("UPTREND")) longScore += 1;
-    else if (trendBias.includes("DOWNTREND")) shortScore += 1;
+    // Green percentage
+    if (imageLevels.greenPct >= 65) longScore += 2;
+    else if (imageLevels.greenPct <= 35) shortScore += 2;
   }
 
-  if (macdHistogram > 0.0001) longScore += 2;
-  else if (macdHistogram < -0.0001) shortScore += 2;
+  // Indicator-based scoring
+  if (trendBias === "STRONG UPTREND") longScore += 3;
+  else if (trendBias === "UPTREND") longScore += 2;
+  else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
+  else if (trendBias === "DOWNTREND") shortScore += 2;
 
-  if (lastClose <= bollingerLower) longScore += 2;
-  if (lastClose >= bollingerUpper) shortScore += 2;
+  if (rsi < 30) longScore += 2;
+  else if (rsi > 70) shortScore += 2;
+  if (macdHistogram > 0) longScore += 1;
+  else if (macdHistogram < 0) shortScore += 1;
 
-  const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
-  const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
-  if (bullishPatterns.length > 0) longScore += bullishPatterns.length * 2;
-  if (bearishPatterns.length > 0) shortScore += bearishPatterns.length * 2;
-
-  const distanceToSupport = Math.abs(lastClose - support);
-  const distanceToResistance = Math.abs(resistance - lastClose);
-  const totalRange = distanceToSupport + distanceToResistance || 1;
-  const supportRatio = distanceToSupport / totalRange;
-  
-  if (supportRatio < 0.3) longScore += 2;
-  else if (supportRatio > 0.7) shortScore += 2;
-
-  const diff = Math.abs(longScore - shortScore);
-  if (diff < 2) return "neutral";
-
-  return longScore > shortScore ? "long" : "short";
+  if (longScore > shortScore) return "long";
+  if (shortScore > longScore) return "short";
+  return "neutral";
 }
 
-function calculateSignalScore(trendBias: string, rsi: number, atr: number, currentPrice: number, macdHistogram: number, session: string, support: number, resistance: number, chartPatterns: ChartPattern[], supplyDemandZones: SupplyDemandZone[]): { score: number; reasons: string[]; confluences: string[] } {
-  let score = 0;
-  const reasons: string[] = [];
-  const confluences: string[] = [];
-  if (trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND") { score += 30; reasons.push("Strong trend (+30)"); confluences.push(`Trend: ${trendBias}`); }
-  else if (trendBias === "UPTREND" || trendBias === "DOWNTREND") { score += 20; reasons.push("Moderate trend (+20)"); confluences.push(`Trend: ${trendBias}`); }
-  else { score += 10; reasons.push("Neutral trend (+10)"); confluences.push(`Trend: ${trendBias}`); }
-  if (rsi > 30 && rsi < 70) { score += 20; reasons.push("RSI optimal (+20)"); confluences.push(`RSI: ${rsi}`); }
-  else if (rsi > 20 && rsi < 80) { score += 10; reasons.push("RSI acceptable (+10)"); confluences.push(`RSI: ${rsi}`); }
-  else { confluences.push(`RSI: ${rsi} (extreme)`); }
-  if (Math.abs(macdHistogram) > 0) { score += 20; reasons.push("MACD confirms (+20)"); confluences.push(`MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"}`); }
-  if (chartPatterns.length > 0) { score += Math.min(chartPatterns.length * 5, 15); chartPatterns.forEach(p => confluences.push(`Pattern: ${p.name}`)); }
-  if (supplyDemandZones.length > 0) { score += Math.min(supplyDemandZones.length * 5, 15); supplyDemandZones.forEach(z => confluences.push(`${z.type.toUpperCase()}: ${z.bottom}-${z.top}`)); }
-  if (session === "LONDON" || session === "NEW YORK") { score += 10; confluences.push(`Session: ${session}`); }
-  else { score += 5; confluences.push(`Session: ${session}`); }
-  return { score, reasons, confluences };
+// ===== SL/TP: image levels drive placement, ATR fallback =====
+
+function placeSlTp(
+  direction: "long" | "short",
+  entry: number,
+  imageLevels: ImageLevels | null,
+  atr: number,
+  pipSize: number,
+  config: TimeframeConfig,
+): { sl: number; tp1: number; tp2: number; tp3: number; source: string } {
+  // Default ATR-based plan
+  const atrPips = atr / pipSize;
+  let slPips = Math.max(Math.round(atrPips * config.atrMultiplier), 5);
+  const minPips = Math.round((entry * config.minSlPercent) / pipSize);
+  slPips = Math.max(slPips, minPips);
+
+  const slDist = slPips * pipSize;
+
+  let sl: number, tp1: number, tp2: number, tp3: number;
+  if (direction === "long") {
+    sl = entry - slDist;
+    tp1 = entry + slDist * 1.0;
+    tp2 = entry + slDist * 2.0;
+    tp3 = entry + slDist * 3.0;
+  } else {
+    sl = entry + slDist;
+    tp1 = entry - slDist * 1.0;
+    tp2 = entry - slDist * 2.0;
+    tp3 = entry - slDist * 3.0;
+  }
+
+  if (!imageLevels) {
+    return { sl, tp1, tp2, tp3, source: "atr" };
+  }
+
+  // ===== IMAGE-BASED PLACEMENT =====
+  const { support, resistance } = imageLevels;
+
+  if (direction === "long") {
+    // SL: just below nearest support below entry
+    const supportBelow = support.filter(s => s < entry).sort((a, b) => b - a);
+    if (supportBelow.length > 0) {
+      sl = supportBelow[0] - slDist * 0.2;
+    }
+
+    // TPs: use resistance levels above entry
+    const resistAbove = resistance.filter(r => r > entry).sort((a, b) => a - b);
+    if (resistAbove.length >= 3) {
+      tp1 = resistAbove[0];
+      tp2 = resistAbove[1];
+      tp3 = resistAbove[2];
+    } else if (resistAbove.length === 2) {
+      tp1 = resistAbove[0];
+      tp2 = resistAbove[1];
+      tp3 = entry + (entry - sl) * 3;
+    } else if (resistAbove.length === 1) {
+      tp1 = resistAbove[0];
+      tp2 = entry + (entry - sl) * 2;
+      tp3 = entry + (entry - sl) * 3;
+    }
+  } else {
+    // Short
+    const resistAbove = resistance.filter(r => r > entry).sort((a, b) => a - b);
+    if (resistAbove.length > 0) {
+      sl = resistAbove[0] + slDist * 0.2;
+    }
+
+    const supportBelow = support.filter(s => s < entry).sort((a, b) => b - a);
+    if (supportBelow.length >= 3) {
+      tp1 = supportBelow[0];
+      tp2 = supportBelow[1];
+      tp3 = supportBelow[2];
+    } else if (supportBelow.length === 2) {
+      tp1 = supportBelow[0];
+      tp2 = supportBelow[1];
+      tp3 = entry - (sl - entry) * 3;
+    } else if (supportBelow.length === 1) {
+      tp1 = supportBelow[0];
+      tp2 = entry - (sl - entry) * 2;
+      tp3 = entry - (sl - entry) * 3;
+    }
+  }
+
+  // Sanity: TPs must be on the profitable side
+  const risk = Math.abs(entry - sl);
+  if (risk < pipSize * 5) {
+    // too tight, fallback
+    return { sl, tp1, tp2, tp3, source: "atr_fallback" };
+  }
+
+  return { sl, tp1, tp2, tp3, source: "image" };
 }
+
+// ===== DATA FETCHING =====
 
 function shouldUseYahoo(pair: string, timeframe: string): boolean {
-  const isCrypto = CRYPTO_PAIRS.includes(pair);
-  const isMetal = METAL_PAIRS.includes(pair);
-  const isHighTF = ["1H", "4H", "1D", "1W"].includes(timeframe);
-  if (isCrypto) return isHighTF;
-  if (isMetal) return true;
+  if (pair === "BTC/USD" || pair === "ETH/USD") return ["1H", "4H", "1D", "1W"].includes(timeframe);
+  if (pair === "XAU/USD" || pair === "XAG/USD") return true;
   return false;
 }
 
 async function fetchFromFCS(pair: string, timeframe: string): Promise<number[] | null> {
   try {
-    const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
-    const response = await fetch(`${pythonUrl}/api/get-history`, {
+    const url = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
+    const r = await fetch(`${url}/api/get-history`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pair, timeframe, limit: 200 }),
       signal: AbortSignal.timeout(15000),
     });
-    if (response.ok) {
-      const data = await response.json();
-      if (data.closes && data.closes.length >= 50) {
-        console.log(`[FCS] ${pair} ${timeframe}: ${data.closes.length} candles`);
-        return data.closes;
+    if (r.ok) {
+      const d = await r.json();
+      if (d.closes && d.closes.length >= 50) {
+        console.log(`[FCS] ${pair} ${timeframe}: ${d.closes.length} candles`);
+        return d.closes;
       }
     }
-  } catch (error: any) {
-    console.error(`FCS failed for ${pair} ${timeframe}:`, error?.message);
+  } catch (e: any) {
+    console.error(`FCS failed ${pair}: ${e?.message}`);
   }
   return null;
 }
@@ -403,102 +438,93 @@ async function fetchFromFCS(pair: string, timeframe: string): Promise<number[] |
 async function fetchFromYahoo(pair: string, timeframe: string): Promise<number[] | null> {
   try {
     const symbol = toYahooSymbol(pair);
-    const yahooInterval = timeframeToYahooInterval(timeframe);
+    const interval = timeframeToYahooInterval(timeframe);
     const result = await yahooFinance.chart(symbol, {
       period1: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000),
       period2: new Date(),
-      interval: yahooInterval as any,
+      interval: interval as any,
     });
     if (result.quotes && result.quotes.length >= 50) {
-      const prices = result.quotes
-        .filter((item) => item.close !== null && item.close !== undefined)
-        .map((item) => Number(item.close));
+      const prices = result.quotes.filter(q => q.close != null).map(q => Number(q.close));
       if (prices.length >= 50) {
         console.log(`[Yahoo] ${pair} ${timeframe}: ${prices.length} candles`);
         return prices;
       }
     }
-  } catch (error: any) {
-    console.error(`Yahoo failed for ${pair} ${timeframe}:`, error?.message);
+  } catch (e: any) {
+    console.error(`Yahoo failed ${pair}: ${e?.message}`);
   }
   return null;
 }
 
 export async function getRealHistoricalData(pair: string, interval: string = "1H"): Promise<{ prices: number[]; source: string }> {
-  const useYahooFirst = shouldUseYahoo(pair, interval);
+  const useYahoo = shouldUseYahoo(pair, interval);
 
-  if (useYahooFirst) {
-    const yahooData = await fetchFromYahoo(pair, interval);
-    if (yahooData) return { prices: yahooData, source: "yahoo" };
-    const fcsData = await fetchFromFCS(pair, interval);
-    if (fcsData) return { prices: fcsData, source: "fcs" };
+  if (useYahoo) {
+    const y = await fetchFromYahoo(pair, interval);
+    if (y) return { prices: y, source: "yahoo" };
+    const f = await fetchFromFCS(pair, interval);
+    if (f) return { prices: f, source: "fcs" };
   } else {
-    const fcsData = await fetchFromFCS(pair, interval);
-    if (fcsData) return { prices: fcsData, source: "fcs" };
-    const yahooData = await fetchFromYahoo(pair, interval);
-    if (yahooData) return { prices: yahooData, source: "yahoo" };
+    const f = await fetchFromFCS(pair, interval);
+    if (f) return { prices: f, source: "fcs" };
+    const y = await fetchFromYahoo(pair, interval);
+    if (y) return { prices: y, source: "yahoo" };
   }
 
-  console.warn(`[Fallback] Deterministic synthetic data for ${pair} ${interval}`);
-  const basePrice = FALLBACK_PRICES[pair] || 1.0;
+  console.warn(`[Fallback] deterministic synthetic for ${pair} ${interval}`);
+  const base = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
-  let price = basePrice;
-  const volatility = basePrice * 0.01;
-  const seed = hashString(`${pair}-${interval}`);
-  const random = mulberry32(seed);
+  let price = base;
+  const vol = base * 0.01;
+  const random = mulberry32(hashString(`${pair}-${interval}`));
   for (let i = 0; i < 200; i++) {
-    price += (random() - 0.5) * volatility;
+    price += (random() - 0.5) * vol;
     prices.push(price);
   }
   return { prices, source: "synthetic_deterministic" };
 }
 
 export async function getLivePrice(pair: string, timeframe: string = "1H"): Promise<number> {
-  const useYahooFirst = shouldUseYahoo(pair, timeframe);
-
-  if (useYahooFirst) {
+  const useYahoo = shouldUseYahoo(pair, timeframe);
+  if (useYahoo) {
     try {
       const symbol = toYahooSymbol(pair);
-      const yahooInterval = timeframeToYahooInterval(timeframe);
-      const result = await yahooFinance.chart(symbol, {
+      const interval = timeframeToYahooInterval(timeframe);
+      const r = await yahooFinance.chart(symbol, {
         period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
         period2: new Date(),
-        interval: yahooInterval as any,
+        interval: interval as any,
       });
-      if (result.quotes && result.quotes.length > 0) {
-        const prices = result.quotes
-          .filter((q) => q.close !== null && q.close !== undefined)
-          .map((q) => Number(q.close));
+      if (r.quotes && r.quotes.length > 0) {
+        const prices = r.quotes.filter(q => q.close != null).map(q => Number(q.close));
         if (prices.length > 0) return prices[prices.length - 1];
       }
-    } catch (error) {}
+    } catch {}
   }
-
   try {
-    const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
-    const response = await fetch(`${pythonUrl}/api/get-price`, {
+    const url = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
+    const r = await fetch(`${url}/api/get-price`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pair }),
       signal: AbortSignal.timeout(10000),
     });
-    if (response.ok) {
-      const data = await response.json();
-      if (data.price && data.price > 0) return data.price;
+    if (r.ok) {
+      const d = await r.json();
+      if (d.price && d.price > 0) return d.price;
     }
-  } catch (error) {}
-
+  } catch {}
   return FALLBACK_PRICES[pair] || 1.0;
 }
 
-export function getPipValue(pair: string, contractSize: number): number {
-  return calculatePipSize(pair) * contractSize;
-}
+// ===== MAIN =====
 
 export async function generateSignalLevels(
   pair: string,
   currentPrice: number,
   timeframe: string = "1H",
+  imageLevels: ImageLevels | null = null,
 ): Promise<SignalLevels> {
   const config = getTimeframeConfig(timeframe);
   const pipSize = calculatePipSize(pair);
@@ -513,7 +539,6 @@ export async function generateSignalLevels(
   if (pair.includes("ETH")) decimals = 2;
 
   const { prices: priceHistory, source: dataSource } = await getRealHistoricalData(pair, timeframe);
-
   const lastClose = priceHistory[priceHistory.length - 1];
 
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
@@ -523,9 +548,9 @@ export async function generateSignalLevels(
   const ma50 = calculateSMA(priceHistory, config.ma50);
   const ma200 = calculateSMA(priceHistory, config.ma200);
   const rsi = calculateRSI(priceHistory, config.rsiPeriod);
-  const atr = calculateATR(priceHistory, config.atrPeriod);
+  const atr = calculateATR(priceHistory, config.rsiPeriod);
   const macdData = calculateMACD(priceHistory, config.macdFast, config.macdSlow, config.macdSignal);
-  const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod, config.bbStdDev);
+  const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod);
 
   const { support, resistance } = findSupportResistance(priceHistory, config.srLookback);
   const trendBias = determineTrend(ma20, ma50, ma200);
@@ -533,102 +558,67 @@ export async function generateSignalLevels(
   const sessionAnalysis = getSessionAnalysis(session, pair);
 
   const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
-  const { orderBlocks, fairValueGaps, liquidityLevels } = analyzeSmartMoney(priceHistory, highs, lows);
 
   const direction = determineDirection(
-    trendBias, lastClose, support, resistance, rsi, macdData.histogram,
-    bollinger.upper, bollinger.lower, chartPatterns
+    imageLevels, trendBias, lastClose, support, resistance, rsi, macdData.histogram
   );
 
-  const { score, reasons, confluences } = calculateSignalScore(
-    trendBias, rsi, atr, lastClose, macdData.histogram,
-    session, support, resistance, chartPatterns, supplyDemandZones
-  );
+  // Signal score
+  let score = 0;
+  const reasons: string[] = [];
+  const confluences: string[] = [];
 
-  // ===== ATR-based SL (baseline) =====
-  const rawAtrPips = atr / pipSize;
-  let stopLossPips = Math.round(rawAtrPips * config.atrMultiplier);
-  const minSlPips = Math.round((currentPrice * config.minSlPercent) / pipSize);
-  stopLossPips = Math.max(stopLossPips, minSlPips);
-  const maxSlPips = Math.round((currentPrice * 0.10) / pipSize);
-  stopLossPips = Math.min(stopLossPips, maxSlPips);
-  stopLossPips = Math.max(stopLossPips, 5);
-
-  // ===== SMC ANALYSIS (overrides SL/TP when available) =====
-  const candles = candlesFromCloses(priceHistory);
-  const smc = analyzeSMCForDirection(candles, direction === "neutral" ? "long" : direction, currentPrice);
-
-  let useSMC = false;
-  let smcSL: number | null = null;
-  let smcTPs: number[] = [];
-
-  if (direction !== "neutral" && smc.bestSL && smc.tps.length >= 2) {
-    const atrSLDistance = stopLossPips * pipSize;
-    const smcSLDistance = Math.abs(currentPrice - smc.bestSL);
-    // Use SMC if it produces a sensible stop (not too far, not too tight)
-    if (smcSLDistance > atrSLDistance * 0.3 && smcSLDistance < atrSLDistance * 3) {
-      useSMC = true;
-      smcSL = smc.bestSL;
-      smcTPs = smc.tps;
-    }
+  if (imageLevels) {
+    if (imageLevels.trend === "BULLISH" && direction === "long") { score += 25; confluences.push("✅ Image shows bullish structure"); }
+    if (imageLevels.trend === "BEARISH" && direction === "short") { score += 25; confluences.push("✅ Image shows bearish structure"); }
+    if (imageLevels.support.length > 0) { score += 10; confluences.push(`📍 ${imageLevels.support.length} support levels in image`); }
+    if (imageLevels.resistance.length > 0) { score += 10; confluences.push(`📍 ${imageLevels.resistance.length} resistance levels in image`); }
   }
 
-  if (useSMC && smcSL) {
-    stopLossPips = Math.round(Math.abs(currentPrice - smcSL) / pipSize);
-    console.log(`[SMC] ${pair} ${timeframe}: SL at ${smcSL.toFixed(5)} (${stopLossPips} pips), ${smcTPs.length} TPs, score ${smc.score}`);
+  if (trendBias.includes("UPTREND") && direction === "long") { score += 15; confluences.push(`✅ ${trendBias}`); }
+  if (trendBias.includes("DOWNTREND") && direction === "short") { score += 15; confluences.push(`✅ ${trendBias}`); }
+  if (macdData.histogram > 0 && direction === "long") { score += 10; confluences.push("✅ MACD bullish"); }
+  if (macdData.histogram < 0 && direction === "short") { score += 10; confluences.push("✅ MACD bearish"); }
+  if (rsi > 30 && rsi < 70) { score += 10; confluences.push(`✅ RSI healthy (${rsi})`); }
+
+  score = Math.min(score, 100);
+
+  // Place SL/TP
+  let sl: number, tp1: number, tp2: number, tp3: number, placementSource: string;
+  const entry = currentPrice;
+
+  if (direction === "neutral") {
+    sl = entry; tp1 = entry; tp2 = entry; tp3 = entry;
+    placementSource = "neutral";
   } else {
-    console.log(`[ATR] ${pair} ${timeframe}: SL ${stopLossPips} pips (SMC not applicable)`);
+    const placed = placeSlTp(direction, entry, imageLevels, atr, pipSize, config);
+    sl = placed.sl; tp1 = placed.tp1; tp2 = placed.tp2; tp3 = placed.tp3;
+    placementSource = placed.source;
+    confluences.push(`🎯 SL/TP placed from ${placementSource === "image" ? "chart image levels" : "ATR"}`);
   }
 
-  // Merge SMC score into the overall signal score
-  const totalScore = Math.min(score + Math.round(smc.score * 0.3), 100);
-  confluences.push(...smc.confluences);
+  const riskPips = Math.round(Math.abs(entry - sl) / pipSize);
+  const rewardPips1 = Math.round(Math.abs(tp1 - entry) / pipSize);
+  const rewardPips2 = Math.round(Math.abs(tp2 - entry) / pipSize);
+  const rewardPips3 = Math.round(Math.abs(tp3 - entry) / pipSize);
 
-  console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} lastClose=${lastClose.toFixed(4)} atr=${atr.toFixed(5)} slPips=${stopLossPips} dir=${direction}`);
+  const rr1 = riskPips > 0 ? (rewardPips1 / riskPips).toFixed(1) : "0";
+  const rr2 = riskPips > 0 ? (rewardPips2 / riskPips).toFixed(1) : "0";
+  const rr3 = riskPips > 0 ? (rewardPips3 / riskPips).toFixed(1) : "0";
+
+  const confidence = direction === "neutral" ? "NEUTRAL" : score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
+
+  console.log(`[Signal] ${pair} ${timeframe}: dir=${direction} src=${placementSource} entry=${entry.toFixed(4)} sl=${sl.toFixed(4)} tp1=${tp1.toFixed(4)} score=${score}`);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
-  const backtest = backtestStrategy(priceHistory, direction === "neutral" ? "long" : direction, stopLossPips, Math.round(stopLossPips * config.slToTpRatio[0]), pipSize);
+  const backtest = backtestStrategy(priceHistory, direction === "neutral" ? "long" : direction, riskPips, rewardPips1, pipSize);
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
   const orderRecommendation = determineOrderType(
     direction === "neutral" ? "long" : direction,
-    lastClose, support, resistance, rsi, bollinger.upper, bollinger.lower, trendBias, atr
+    entry, support, resistance, rsi, bollinger.upper, bollinger.lower, trendBias, atr
   );
-
-  const entry = currentPrice;
-  const slDistance = stopLossPips * pipSize;
-  const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
-
-  let stopLossPrice: number, tp1Price: number, tp2Price: number, tp3Price: number;
-
-  if (direction === "neutral") {
-    stopLossPrice = entry;
-    tp1Price = entry;
-    tp2Price = entry;
-    tp3Price = entry;
-  } else if (useSMC && smcSL && smcTPs.length >= 3) {
-    stopLossPrice = smcSL;
-    tp1Price = smcTPs[0];
-    tp2Price = smcTPs[1];
-    tp3Price = smcTPs[2];
-  } else if (direction === "long") {
-    stopLossPrice = entry - slDistance;
-    tp1Price = entry + slDistance * tp1Ratio;
-    tp2Price = entry + slDistance * tp2Ratio;
-    tp3Price = entry + slDistance * tp3Ratio;
-  } else {
-    stopLossPrice = entry + slDistance;
-    tp1Price = entry - slDistance * tp1Ratio;
-    tp2Price = entry - slDistance * tp2Ratio;
-    tp3Price = entry - slDistance * tp3Ratio;
-  }
-
-  const rewardPips1 = Math.round(Math.abs(tp1Price - entry) / pipSize);
-  const rewardPips2 = Math.round(Math.abs(tp2Price - entry) / pipSize);
-  const rewardPips3 = Math.round(Math.abs(tp3Price - entry) / pipSize);
-
-  const confidence = direction === "neutral" ? "NEUTRAL" : totalScore >= 70 ? "HIGH" : totalScore >= 50 ? "MEDIUM" : "LOW";
 
   return {
     pair,
@@ -638,17 +628,17 @@ export async function generateSignalLevels(
     orderTypeDescription: getOrderTypeDescription(orderRecommendation.orderType),
     orderRecommendation,
     entry: Number(entry.toFixed(decimals)),
-    stopLoss: Number(stopLossPrice.toFixed(decimals)),
-    takeProfit1: Number(tp1Price.toFixed(decimals)),
-    takeProfit2: Number(tp2Price.toFixed(decimals)),
-    takeProfit3: Number(tp3Price.toFixed(decimals)),
-    riskPips: stopLossPips,
+    stopLoss: Number(sl.toFixed(decimals)),
+    takeProfit1: Number(tp1.toFixed(decimals)),
+    takeProfit2: Number(tp2.toFixed(decimals)),
+    takeProfit3: Number(tp3.toFixed(decimals)),
+    riskPips,
     rewardPips1, rewardPips2, rewardPips3,
-    riskReward1: direction === "neutral" ? "0" : (rewardPips1 / stopLossPips).toFixed(1),
-    riskReward2: direction === "neutral" ? "0" : (rewardPips2 / stopLossPips).toFixed(1),
-    riskReward3: direction === "neutral" ? "0" : (rewardPips3 / stopLossPips).toFixed(1),
+    riskReward1: rr1,
+    riskReward2: rr2,
+    riskReward3: rr3,
     confidence,
-    confidenceScore: direction === "neutral" ? 0 : totalScore,
+    confidenceScore: direction === "neutral" ? 0 : score,
     timestamp: Date.now(),
     trendBias,
     supportLevel: Number(support.toFixed(decimals)),
@@ -666,21 +656,17 @@ export async function generateSignalLevels(
     bollingerLower: bollinger.lower,
     session,
     sessionAnalysis,
-    signalScore: totalScore,
+    signalScore: score,
     timeframe,
     reasons,
     patterns,
     chartPatterns,
     supplyDemandZones,
-    orderBlocks,
-    fairValueGaps,
-    liquidityLevels,
     backtest,
     multiTimeframeConsensus: mtfConsensus.consensus,
     multiTimeframeStrength: mtfConsensus.strength,
     confluences,
-    smcConfluences: smc.confluences,
-    smcScore: smc.score,
+    imageLevels,
     dataSource,
   };
 }
