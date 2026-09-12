@@ -25,7 +25,6 @@ function generateProfessionalAnalysis(
 
 2. **Trend: ${signal.trendBias}**
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
-   • ${signal.ma20 > signal.ma50 ? "Bullish: MA20 above MA50" : "Bearish: MA20 below MA50"}
 
 3. **RSI (${signal.rsi}):**
    • Status: ${rsiStatus}
@@ -33,15 +32,9 @@ function generateProfessionalAnalysis(
 4. **Session: ${signal.session}**
    • ${signal.sessionAnalysis}
 
-5. **Chart Patterns Detected:**
-   • ${signal.chartPatterns?.length > 0 ? signal.chartPatterns.map((p: any) => p.name).join(", ") : "No major patterns"}
-
-6. **Supply/Demand Zones:**
-   • ${signal.supplyDemandZones?.length > 0 ? signal.supplyDemandZones.map((z: any) => `${z.type.toUpperCase()} at ${z.bottom}-${z.top}`).join(", ") : "No key zones"}
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🎯 **ENTRY (${signal.orderType}): ${signal.entry}**
+🎯 **ENTRY: ${signal.entry}**
 🛑 **STOP LOSS: ${signal.stopLoss}** (${signal.riskPips} pips)
 ✅ **TP1: ${signal.takeProfit1}** (R:R 1:${signal.riskReward1})
 ✅ **TP2: ${signal.takeProfit2}** (R:R 1:${signal.riskReward2})
@@ -64,7 +57,6 @@ function generateProfessionalAnalysis(
 
 2. **Trend: ${signal.trendBias}**
    • MA20 (${signal.ma20}) vs MA50 (${signal.ma50})
-   • ${signal.ma20 < signal.ma50 ? "Bearish: MA20 below MA50" : "Bullish: MA20 above MA50"}
 
 3. **RSI (${signal.rsi}):**
    • Status: ${rsiStatus}
@@ -72,15 +64,9 @@ function generateProfessionalAnalysis(
 4. **Session: ${signal.session}**
    • ${signal.sessionAnalysis}
 
-5. **Chart Patterns Detected:**
-   • ${signal.chartPatterns?.length > 0 ? signal.chartPatterns.map((p: any) => p.name).join(", ") : "No major patterns"}
-
-6. **Supply/Demand Zones:**
-   • ${signal.supplyDemandZones?.length > 0 ? signal.supplyDemandZones.map((z: any) => `${z.type.toUpperCase()} at ${z.bottom}-${z.top}`).join(", ") : "No key zones"}
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🎯 **ENTRY (${signal.orderType}): ${signal.entry}**
+🎯 **ENTRY: ${signal.entry}**
 🛑 **STOP LOSS: ${signal.stopLoss}** (${signal.riskPips} pips)
 ✅ **TP1: ${signal.takeProfit1}** (R:R 1:${signal.riskReward1})
 ✅ **TP2: ${signal.takeProfit2}** (R:R 1:${signal.riskReward2})
@@ -108,43 +94,44 @@ export async function POST(request: Request) {
 
     let currentPrice: number;
 
-    // Priority 1: User manually entered price
     if (userPrice && !isNaN(Number(userPrice)) && Number(userPrice) > 0) {
       currentPrice = Number(userPrice);
-      console.log(`Using user price for ${pair}: ${currentPrice}`);
     } else {
-      // Priority 2: Fetch live price using selected timeframe
       currentPrice = await getLivePrice(pair, timeframe);
-      console.log(`Live price for ${pair} (${timeframe}): ${currentPrice}`);
     }
 
-    // Generate signal with real market data using selected timeframe
     const signal = await generateSignalLevels(pair, currentPrice, timeframe);
     const spread = getExnessSpread(pair);
-
     const analysis = generateProfessionalAnalysis(pair, timeframe, signal, spread);
 
     return NextResponse.json({
       analysis,
       signal: {
+        // Core values (numbers — for admin panel display)
         direction: signal.direction,
         orderType: signal.orderType,
         orderTypeDescription: signal.orderTypeDescription,
         orderRecommendation: signal.orderRecommendation,
-        entryZone: `${signal.entry}`,
-        stopLoss: `${signal.stopLoss} (${signal.riskPips} pips)`,
-        takeProfit1: `${signal.takeProfit1} (${signal.rewardPips1} pips)`,
-        takeProfit2: `${signal.takeProfit2} (${signal.rewardPips2} pips)`,
-        takeProfit3: `${signal.takeProfit3} (${signal.rewardPips3} pips)`,
-        riskReward: `1:${signal.riskReward1} to 1:${signal.riskReward3}`,
-        confidence: signal.confidence,
-        confidenceScore: signal.signalScore,
+
         currentPrice: signal.currentPrice,
         entryPrice: signal.entry,
         stopLossPrice: signal.stopLoss,
         takeProfit1Price: signal.takeProfit1,
         takeProfit2Price: signal.takeProfit2,
         takeProfit3Price: signal.takeProfit3,
+
+        // Text versions (with pips)
+        entryZone: `${signal.entry}`,
+        stopLoss: `${signal.stopLoss} (${signal.riskPips} pips)`,
+        takeProfit1: `${signal.takeProfit1} (${signal.rewardPips1} pips)`,
+        takeProfit2: `${signal.takeProfit2} (${signal.rewardPips2} pips)`,
+        takeProfit3: `${signal.takeProfit3} (${signal.rewardPips3} pips)`,
+        riskReward: `1:${signal.riskReward1} to 1:${signal.riskReward3}`,
+
+        // Supporting data
+        confidence: signal.confidence,
+        confidenceScore: signal.signalScore,
+        signalScore: signal.signalScore,
         riskPips: signal.riskPips,
         timeframe,
         spread,
@@ -163,19 +150,27 @@ export async function POST(request: Request) {
         bollingerLower: signal.bollingerLower,
         session: signal.session,
         sessionAnalysis: signal.sessionAnalysis,
-        signalScore: signal.signalScore,
         multiTimeframeConsensus: signal.multiTimeframeConsensus,
         multiTimeframeStrength: signal.multiTimeframeStrength,
         confluences: signal.confluences,
         patterns: signal.patterns,
         chartPatterns: signal.chartPatterns,
         supplyDemandZones: signal.supplyDemandZones,
+        orderBlocks: signal.orderBlocks,
+        fairValueGaps: signal.fairValueGaps,
+        liquidityLevels: signal.liquidityLevels,
         backtest: signal.backtest,
-        dataSource: "Yahoo Finance Live Data",
+        dataSource: signal.dataSource,
       },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Analysis error:", error);
-    return NextResponse.json({ error: "Analysis failed" }, { status: 500 });
+    return NextResponse.json(
+      {
+        error: "Analysis failed",
+        message: error?.message || String(error),
+      },
+      { status: 500 }
+    );
   }
 }
