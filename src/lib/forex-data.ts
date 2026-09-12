@@ -88,26 +88,26 @@ const EXNESS_SPREADS: Record<string, number> = {
 // ===== TIMEFRAME SCALING CONFIGURATION =====
 
 interface TimeframeConfig {
-  atrMultiplier: number;        // ATR multiplier for stop loss
-  rsiPeriod: number;            // RSI period
-  ma20: number;                 // Fast MA period
-  ma50: number;                 // Medium MA period
-  ma200: number;                // Slow MA period
-  patternLookback: number;      // Candles needed for pattern detection
-  minCandles: number;           // Minimum candles required
-  srLookback: number;           // Support/Resistance recent candles
-  smartMoneyLookback: number;   // Smart money analysis range
-  bbPeriod: number;             // Bollinger Bands period
-  macdFast: number;             // MACD fast EMA
-  macdSlow: number;             // MACD slow EMA
-  macdSignal: number;           // MACD signal EMA
-  slToTpRatio: [number, number, number]; // TP1, TP2, TP3 vs SL distance
+  atrMultiplier: number;
+  rsiPeriod: number;
+  ma20: number;
+  ma50: number;
+  ma200: number;
+  patternLookback: number;
+  minCandles: number;
+  srLookback: number;
+  smartMoneyLookback: number;
+  bbPeriod: number;
+  macdFast: number;
+  macdSlow: number;
+  macdSignal: number;
+  slToTpRatio: [number, number, number];
 }
 
 function getTimeframeConfig(timeframe: string): TimeframeConfig {
   const configs: Record<string, TimeframeConfig> = {
     "1m": {
-      atrMultiplier: 0.5,
+      atrMultiplier: 1.0,
       rsiPeriod: 7,
       ma20: 10,
       ma50: 25,
@@ -120,10 +120,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 6,
       macdSlow: 13,
       macdSignal: 5,
-      slToTpRatio: [0.8, 1.2, 1.5],
+      slToTpRatio: [1.5, 3.0, 5.0],
     },
     "5m": {
-      atrMultiplier: 0.75,
+      atrMultiplier: 1.0,
       rsiPeriod: 9,
       ma20: 15,
       ma50: 35,
@@ -136,10 +136,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 8,
       macdSlow: 17,
       macdSignal: 6,
-      slToTpRatio: [1.0, 1.5, 2.0],
+      slToTpRatio: [1.5, 3.0, 5.0],
     },
     "15m": {
-      atrMultiplier: 1.0,
+      atrMultiplier: 1.2,
       rsiPeriod: 11,
       ma20: 20,
       ma50: 50,
@@ -152,10 +152,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 10,
       macdSlow: 22,
       macdSignal: 8,
-      slToTpRatio: [1.0, 1.5, 2.0],
+      slToTpRatio: [1.5, 3.0, 5.0],
     },
     "30m": {
-      atrMultiplier: 1.0,
+      atrMultiplier: 1.2,
       rsiPeriod: 12,
       ma20: 20,
       ma50: 50,
@@ -168,10 +168,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 12,
       macdSlow: 26,
       macdSignal: 9,
-      slToTpRatio: [1.0, 1.5, 2.0],
+      slToTpRatio: [1.5, 3.0, 5.0],
     },
     "1H": {
-      atrMultiplier: 1.0,
+      atrMultiplier: 1.5,
       rsiPeriod: 14,
       ma20: 20,
       ma50: 50,
@@ -184,10 +184,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 12,
       macdSlow: 26,
       macdSignal: 9,
-      slToTpRatio: [1.0, 1.5, 2.0],
+      slToTpRatio: [1.5, 3.0, 5.0],
     },
     "4H": {
-      atrMultiplier: 1.25,
+      atrMultiplier: 1.8,
       rsiPeriod: 14,
       ma20: 20,
       ma50: 50,
@@ -200,10 +200,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 12,
       macdSlow: 26,
       macdSignal: 9,
-      slToTpRatio: [1.2, 1.8, 2.5],
+      slToTpRatio: [2.0, 3.5, 6.0],
     },
     "1D": {
-      atrMultiplier: 1.5,
+      atrMultiplier: 2.0,
       rsiPeriod: 14,
       ma20: 20,
       ma50: 50,
@@ -216,10 +216,10 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 12,
       macdSlow: 26,
       macdSignal: 9,
-      slToTpRatio: [1.5, 2.5, 4.0],
+      slToTpRatio: [2.0, 4.0, 7.0],
     },
     "1W": {
-      atrMultiplier: 2.0,
+      atrMultiplier: 2.5,
       rsiPeriod: 14,
       ma20: 10,
       ma50: 30,
@@ -232,7 +232,7 @@ function getTimeframeConfig(timeframe: string): TimeframeConfig {
       macdFast: 12,
       macdSlow: 26,
       macdSignal: 9,
-      slToTpRatio: [2.0, 3.0, 5.0],
+      slToTpRatio: [3.0, 5.0, 8.0],
     },
   };
 
@@ -281,7 +281,7 @@ export function getExnessSpread(pair: string): number {
   return EXNESS_SPREADS[pair] || 2;
 }
 
-// ===== TECHNICAL INDICATORS (with custom periods) =====
+// ===== TECHNICAL INDICATORS =====
 
 function calculateSMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
@@ -631,7 +631,6 @@ export async function generateSignalLevels(
   currentPrice: number,
   timeframe: string = "1H",
 ): Promise<SignalLevels> {
-  // Get timeframe-specific configuration
   const config = getTimeframeConfig(timeframe);
   
   const pipSize = calculatePipSize(pair);
@@ -650,12 +649,11 @@ export async function generateSignalLevels(
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
   const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
 
-  // Use timeframe-scaled periods
   const ma20 = calculateSMA(priceHistory, config.ma20);
   const ma50 = calculateSMA(priceHistory, config.ma50);
   const ma200 = calculateSMA(priceHistory, config.ma200);
   const rsi = calculateRSI(priceHistory, config.rsiPeriod);
-  const atr = calculateATR(priceHistory, config.rsiPeriod); // Use same period as RSI
+  const atr = calculateATR(priceHistory, config.rsiPeriod);
   const macdData = calculateMACD(priceHistory, config.macdFast, config.macdSlow, config.macdSignal);
   const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod);
 
@@ -694,10 +692,8 @@ export async function generateSignalLevels(
     supplyDemandZones,
   );
 
-  // Timeframe-scaled ATR-based stop loss
   const atrBasedStop = Math.max(atr * config.atrMultiplier, pipSize * 5);
   
-  // Pair-specific fixed stop for volatile assets
   let stopLossPips: number;
   if (pair.includes("XAU")) {
     stopLossPips = Math.round(50 * config.atrMultiplier);
@@ -732,7 +728,6 @@ export async function generateSignalLevels(
     atr,
   );
 
-  // IMMEDIATE ENTRY at live market price
   const entry = currentPrice;
 
   const slDistance = stopLossPips * pipSize;
@@ -742,7 +737,6 @@ export async function generateSignalLevels(
   let tp2Price: number;
   let tp3Price: number;
 
-  // Use timeframe-scaled TP ratios
   const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
 
   if (direction === "long") {
