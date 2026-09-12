@@ -5,7 +5,6 @@ export async function POST(request: Request) {
     const contentType = request.headers.get("content-type") || "";
     const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
 
-    // If image upload → forward to /api/analyze-image
     if (contentType.includes("multipart/form-data")) {
       const formData = await request.formData();
       const response = await fetch(`${pythonUrl}/api/analyze-image`, {
@@ -16,7 +15,6 @@ export async function POST(request: Request) {
       return NextResponse.json(data);
     }
 
-    // Otherwise → forward JSON to /api/get-price
     const body = await request.json();
     const response = await fetch(`${pythonUrl}/api/get-price`, {
       method: "POST",
