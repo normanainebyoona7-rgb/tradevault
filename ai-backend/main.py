@@ -24,7 +24,6 @@ app.add_middleware(
 FCS_API_KEY = config.FCS_API_KEY
 FCS_BASE_URL = "https://api-v4.fcsapi.com"
 
-# Symbol mapping: our format -> FCS API format
 FCS_SYMBOLS = {
     "EUR/USD": "EURUSD",
     "GBP/USD": "GBPUSD",
@@ -36,9 +35,26 @@ FCS_SYMBOLS = {
     "ETH/USD": "BINANCE:ETHUSDT",
 }
 
+FCS_TIMEFRAME_MAP = {
+    "1m": "1",
+    "5m": "5",
+    "15m": "15",
+    "30m": "30",
+    "1H": "60",
+    "4H": "240",
+    "1D": "D",
+    "1W": "W",
+}
+
 
 class PriceRequest(BaseModel):
     pair: str
+
+
+class HistoryRequest(BaseModel):
+    pair: str
+    timeframe: str = "1H"
+    limit: int = 200
 
 
 def get_fcs_price(pair: str) -> dict:
@@ -47,16 +63,12 @@ def get_fcs_price(pair: str) -> dict:
     if not symbol:
         raise Exception(f"Unsupported pair: {pair}")
 
-    # Determine endpoint: crypto vs forex
     if pair.startswith("BTC") or pair.startswith("ETH"):
         endpoint = f"{FCS_BASE_URL}/crypto/latest"
     else:
         endpoint = f"{FCS_BASE_URL}/forex/latest"
 
-    params = {
-        "symbol": symbol,
-        "access_key": FCS_API_KEY,
-    }
+    params = {"symbol": symbol, "access_key": FCS_API_KEY}
 
     response = requests.get(endpoint, params=params, timeout=10)
     response.raise_for_status()
@@ -65,16 +77,11 @@ def get_fcs_price(pair: str) -> dict:
     if not data.get("status"):
         raise Exception(f"FCS API error: {data.get('msg', 'Unknown error')}")
 
-    # Parse response - FCS API returns nested "active" object
     item = data["response"][0] if isinstance(data["response"], list) else data["response"]
-
-    # FCS API price fields (inside "active" object):
-    # a = ask, b = bid, o = open, h = high, l = low
     active = item.get("active", item)
 
     ask = float(active.get("a", 0))
     bid = float(active.get("b", 0))
-    # Use mid price (average of ask and bid)
     current_price = (ask + bid) / 2 if ask and bid else (ask or bid)
 
     return {
@@ -86,6 +93,42 @@ def get_fcs_price(pair: str) -> dict:
         "high": float(active.get("h", 0)),
         "low": float(active.get("l", 0)),
         "timestamp": item.get("updateTime", ""),
+        "source": "fcs_api",
+    }
+
+
+def get_fcs_history(pair: str, timeframe: str, limit: int = 200) -> dict:
+    """Fetch historical OHLCV data from FCS API."""
+    symbol = FCS_SYMBOLS.get(pair)
+    if not symbol:
+        raise Exception(f"Unsupported pair: {pair}")
+
+    period = FCS_TIMEFRAME_MAP.get(timeframe, "60")
+
+    # Try candle endpoint
+    endpoint = f"{FCS_BASE_URL}/forex/candle"
+    params = {
+        "symbol": symbol,
+        "period": period,
+        "limit": limit,
+        "access_key": FCS_API_KEY,
+    }
+
+    response = requests.get(endpoint, params=params, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+
+    if not data.get("status"):
+        raise Exception(f"FCS API error: {data.get('msg', 'Unknown error')}")
+
+    candles = data.get("response", [])
+    closes = [float(c["c"]) for c in candles if c.get("c")]
+
+    return {
+        "pair": pair,
+        "timeframe": timeframe,
+        "closes": closes,
+        "count": len(closes),
         "source": "fcs_api",
     }
 
@@ -108,6 +151,15 @@ async def get_price(request: PriceRequest):
     """Get live price using FCS API."""
     try:
         return get_fcs_price(request.pair)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/get-history")
+async def get_history(request: HistoryRequest):
+    """Get recent price history from FCS API for a timeframe."""
+    try:
+        return get_fcs_history(request.pair, request.timeframe, request.limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
