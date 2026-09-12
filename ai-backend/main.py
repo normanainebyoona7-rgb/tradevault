@@ -177,11 +177,9 @@ def extract_prices_from_image(image_np: np.ndarray):
 
 def detect_candles(image_np: np.ndarray) -> dict:
     hsv = cv2.cvtColor(image_np, cv2.COLOR_RGB2HSV)
-
     lower_green = np.array([40, 50, 50])
     upper_green = np.array([80, 255, 255])
     green_mask = cv2.inRange(hsv, lower_green, upper_green)
-
     lower_red1 = np.array([0, 50, 50])
     upper_red1 = np.array([10, 255, 255])
     lower_red2 = np.array([170, 50, 50])
@@ -194,14 +192,11 @@ def detect_candles(image_np: np.ndarray) -> dict:
     red_count = cv2.countNonZero(red_mask)
 
     if green_count > red_count * 1.2:
-        bias = "BULLISH"
-        direction = "long"
+        bias, direction = "BULLISH", "long"
     elif red_count > green_count * 1.2:
-        bias = "BEARISH"
-        direction = "short"
+        bias, direction = "BEARISH", "short"
     else:
-        bias = "MIXED"
-        direction = "neutral"
+        bias, direction = "MIXED", "neutral"
 
     return {
         "green_candles": int(green_count),
@@ -215,23 +210,14 @@ def detect_swing_levels(prices: List[float], lookback: int = 5) -> dict:
     if len(prices) < lookback * 2 + 1:
         return {"swing_highs": [], "swing_lows": []}
 
-    swing_highs = []
-    swing_lows = []
+    swing_highs, swing_lows = [], []
 
     for i in range(lookback, len(prices) - lookback):
-        is_swing_high = True
-        for j in range(1, lookback + 1):
-            if prices[i] <= prices[i - j] or prices[i] <= prices[i + j]:
-                is_swing_high = False
-                break
+        is_swing_high = all(prices[i] > prices[i - j] and prices[i] > prices[i + j] for j in range(1, lookback + 1))
         if is_swing_high:
             swing_highs.append({"index": i, "price": prices[i]})
 
-        is_swing_low = True
-        for j in range(1, lookback + 1):
-            if prices[i] >= prices[i - j] or prices[i] >= prices[i + j]:
-                is_swing_low = False
-                break
+        is_swing_low = all(prices[i] < prices[i - j] and prices[i] < prices[i + j] for j in range(1, lookback + 1))
         if is_swing_low:
             swing_lows.append({"index": i, "price": prices[i]})
 
@@ -241,24 +227,15 @@ def detect_swing_levels(prices: List[float], lookback: int = 5) -> dict:
 def find_key_levels_from_swings(swing_highs: List[dict], swing_lows: List[dict]) -> dict:
     resistance_levels = [s["price"] for s in swing_highs[-5:]] if swing_highs else []
     support_levels = [s["price"] for s in swing_lows[-5:]] if swing_lows else []
-
     resistance = max(resistance_levels) if resistance_levels else 0
     support = min(support_levels) if support_levels else 0
-
-    return {
-        "resistance": resistance,
-        "support": support,
-        "resistance_levels": resistance_levels,
-        "support_levels": support_levels,
-    }
+    return {"resistance": resistance, "support": support, "resistance_levels": resistance_levels, "support_levels": support_levels}
 
 
 def calculate_sl_tp(direction: str, current_price: float, support: float, resistance: float) -> dict:
     if current_price <= 0:
         return {"stop_loss": 0, "take_profit1": 0, "take_profit2": 0, "take_profit3": 0}
-
     range_width = abs(resistance - support) if resistance > support else current_price * 0.02
-
     if direction == "long":
         sl = support - range_width * 0.1
         tp1 = current_price + range_width * 0.5
@@ -274,13 +251,7 @@ def calculate_sl_tp(direction: str, current_price: float, support: float, resist
         tp1 = current_price + range_width * 0.5
         tp2 = current_price + range_width * 1.0
         tp3 = resistance
-
-    return {
-        "stop_loss": round(sl, 5),
-        "take_profit1": round(tp1, 5),
-        "take_profit2": round(tp2, 5),
-        "take_profit3": round(tp3, 5),
-    }
+    return {"stop_loss": round(sl, 5), "take_profit1": round(tp1, 5), "take_profit2": round(tp2, 5), "take_profit3": round(tp3, 5)}
 
 
 @app.post("/api/analyze-image")
@@ -289,27 +260,20 @@ async def analyze_image(file: UploadFile = File(...)):
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
         image_np = np.array(image)
-
         if image_np.shape[2] == 4:
             image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
-
         prices, text = extract_prices_from_image(image_np)
         candle_analysis = detect_candles(image_np)
-
         swings = detect_swing_levels(prices, lookback=5)
         key_levels = find_key_levels_from_swings(swings["swing_highs"], swings["swing_lows"])
-
         if key_levels["support"] > 0 and key_levels["resistance"] > 0:
-            support = key_levels["support"]
-            resistance = key_levels["resistance"]
+            support, resistance = key_levels["support"], key_levels["resistance"]
         else:
             sorted_prices = sorted(prices) if prices else []
             support = sorted_prices[0] if sorted_prices else 0
             resistance = sorted_prices[-1] if sorted_prices else 0
-
         current_price = prices[-1] if prices else 0
         sl_tp = calculate_sl_tp(candle_analysis["direction"], current_price, support, resistance)
-
         return {
             "status": "success",
             "prices_detected": prices[:20],
@@ -328,6 +292,5 @@ async def analyze_image(file: UploadFile = File(...)):
             "swing_highs": [round(s["price"], 5) for s in swings["swing_highs"][-10:]],
             "swing_lows": [round(s["price"], 5) for s in swings["swing_lows"][-10:]],
         }
-
     except Exception as e:
         return {"status": "error", "message": str(e)}
