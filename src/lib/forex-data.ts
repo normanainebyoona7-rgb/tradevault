@@ -7,6 +7,7 @@ import { analyzeMultipleTimeframes, getMultiTimeframeConsensus } from "./multi-t
 import { determineOrderType, OrderType, getOrderTypeDescription, OrderRecommendation } from "./order-types";
 import { analyzeAllPatterns, ChartPattern, SupplyDemandZone } from "./advanced-patterns";
 import { analyzeSmartMoney, OrderBlock, FairValueGap, LiquidityLevel } from "./smart-money";
+import { candlesFromCloses, analyzeSMCForDirection } from "./smc-engine";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
 
@@ -61,6 +62,8 @@ export interface SignalLevels {
   multiTimeframeConsensus: string;
   multiTimeframeStrength: number;
   confluences: string[];
+  smcConfluences: string[];
+  smcScore: number;
   dataSource: string;
 }
 
@@ -89,18 +92,10 @@ const EXNESS_SPREADS: Record<string, number> = {
 const CRYPTO_PAIRS = ["BTC/USD", "ETH/USD"];
 const METAL_PAIRS = ["XAU/USD", "XAG/USD"];
 
-// ===== TIMEFRAME-AWARE CONFIGURATION =====
-// Every indicator period, SL multiplier, and TP ratio is specific to the timeframe.
-// The selected timeframe's data is the ONLY data used for analysis.
-
 interface TimeframeConfig {
-  // ATR-based SL multiplier (relative to that timeframe's ATR)
   atrMultiplier: number;
-  // Minimum SL as % of price (protects against tight stops on low-volatility TFs)
   minSlPercent: number;
-  // SL to TP ratios (TP1, TP2, TP3 as multiples of SL distance)
   slToTpRatio: [number, number, number];
-  // Indicator periods
   rsiPeriod: number;
   atrPeriod: number;
   ma20: number;
@@ -111,7 +106,6 @@ interface TimeframeConfig {
   macdFast: number;
   macdSlow: number;
   macdSignal: number;
-  // Analysis depth
   srLookback: number;
   patternLookback: number;
   minCandles: number;
@@ -119,78 +113,14 @@ interface TimeframeConfig {
 
 function getTimeframeConfig(timeframe: string): TimeframeConfig {
   const configs: Record<string, TimeframeConfig> = {
-    "1m": {
-      atrMultiplier: 1.5, minSlPercent: 0.0008,
-      slToTpRatio: [2.0, 3.5, 6.0],
-      rsiPeriod: 7, atrPeriod: 7,
-      ma20: 10, ma50: 25, ma200: 100,
-      bbPeriod: 10, bbStdDev: 2,
-      macdFast: 6, macdSlow: 13, macdSignal: 5,
-      srLookback: 15, patternLookback: 3, minCandles: 50,
-    },
-    "5m": {
-      atrMultiplier: 1.5, minSlPercent: 0.0012,
-      slToTpRatio: [2.0, 3.5, 6.0],
-      rsiPeriod: 9, atrPeriod: 9,
-      ma20: 15, ma50: 35, ma200: 150,
-      bbPeriod: 15, bbStdDev: 2,
-      macdFast: 8, macdSlow: 17, macdSignal: 6,
-      srLookback: 20, patternLookback: 4, minCandles: 60,
-    },
-    "15m": {
-      atrMultiplier: 1.5, minSlPercent: 0.002,
-      slToTpRatio: [2.0, 3.5, 6.0],
-      rsiPeriod: 11, atrPeriod: 11,
-      ma20: 20, ma50: 50, ma200: 150,
-      bbPeriod: 20, bbStdDev: 2,
-      macdFast: 10, macdSlow: 22, macdSignal: 8,
-      srLookback: 25, patternLookback: 5, minCandles: 80,
-    },
-    "30m": {
-      atrMultiplier: 1.5, minSlPercent: 0.0025,
-      slToTpRatio: [2.0, 3.5, 6.0],
-      rsiPeriod: 12, atrPeriod: 12,
-      ma20: 20, ma50: 50, ma200: 200,
-      bbPeriod: 20, bbStdDev: 2,
-      macdFast: 12, macdSlow: 26, macdSignal: 9,
-      srLookback: 30, patternLookback: 5, minCandles: 100,
-    },
-    "1H": {
-      atrMultiplier: 1.5, minSlPercent: 0.003,
-      slToTpRatio: [2.0, 3.5, 6.0],
-      rsiPeriod: 14, atrPeriod: 14,
-      ma20: 20, ma50: 50, ma200: 200,
-      bbPeriod: 20, bbStdDev: 2,
-      macdFast: 12, macdSlow: 26, macdSignal: 9,
-      srLookback: 50, patternLookback: 5, minCandles: 100,
-    },
-    "4H": {
-      atrMultiplier: 1.8, minSlPercent: 0.006,
-      slToTpRatio: [2.0, 4.0, 7.0],
-      rsiPeriod: 14, atrPeriod: 14,
-      ma20: 20, ma50: 50, ma200: 200,
-      bbPeriod: 20, bbStdDev: 2,
-      macdFast: 12, macdSlow: 26, macdSignal: 9,
-      srLookback: 50, patternLookback: 5, minCandles: 100,
-    },
-    "1D": {
-      atrMultiplier: 2.0, minSlPercent: 0.012,
-      slToTpRatio: [2.5, 5.0, 8.0],
-      rsiPeriod: 14, atrPeriod: 14,
-      ma20: 20, ma50: 50, ma200: 200,
-      bbPeriod: 20, bbStdDev: 2,
-      macdFast: 12, macdSlow: 26, macdSignal: 9,
-      srLookback: 30, patternLookback: 5, minCandles: 80,
-    },
-    "1W": {
-      atrMultiplier: 2.5, minSlPercent: 0.025,
-      slToTpRatio: [3.0, 5.0, 8.0],
-      rsiPeriod: 14, atrPeriod: 14,
-      ma20: 10, ma50: 30, ma200: 100,
-      bbPeriod: 20, bbStdDev: 2,
-      macdFast: 12, macdSlow: 26, macdSignal: 9,
-      srLookback: 20, patternLookback: 4, minCandles: 60,
-    },
+    "1m": { atrMultiplier: 1.5, minSlPercent: 0.0008, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 7, atrPeriod: 7, ma20: 10, ma50: 25, ma200: 100, bbPeriod: 10, bbStdDev: 2, macdFast: 6, macdSlow: 13, macdSignal: 5, srLookback: 15, patternLookback: 3, minCandles: 50 },
+    "5m": { atrMultiplier: 1.5, minSlPercent: 0.0012, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 9, atrPeriod: 9, ma20: 15, ma50: 35, ma200: 150, bbPeriod: 15, bbStdDev: 2, macdFast: 8, macdSlow: 17, macdSignal: 6, srLookback: 20, patternLookback: 4, minCandles: 60 },
+    "15m": { atrMultiplier: 1.5, minSlPercent: 0.002, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 11, atrPeriod: 11, ma20: 20, ma50: 50, ma200: 150, bbPeriod: 20, bbStdDev: 2, macdFast: 10, macdSlow: 22, macdSignal: 8, srLookback: 25, patternLookback: 5, minCandles: 80 },
+    "30m": { atrMultiplier: 1.5, minSlPercent: 0.0025, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 12, atrPeriod: 12, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30, patternLookback: 5, minCandles: 100 },
+    "1H": { atrMultiplier: 1.5, minSlPercent: 0.003, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50, patternLookback: 5, minCandles: 100 },
+    "4H": { atrMultiplier: 1.8, minSlPercent: 0.006, slToTpRatio: [2.0, 4.0, 7.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50, patternLookback: 5, minCandles: 100 },
+    "1D": { atrMultiplier: 2.0, minSlPercent: 0.012, slToTpRatio: [2.5, 5.0, 8.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30, patternLookback: 5, minCandles: 80 },
+    "1W": { atrMultiplier: 2.5, minSlPercent: 0.025, slToTpRatio: [3.0, 5.0, 8.0], rsiPeriod: 14, atrPeriod: 14, ma20: 10, ma50: 30, ma200: 100, bbPeriod: 20, bbStdDev: 2, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 20, patternLookback: 4, minCandles: 60 },
   };
   return configs[timeframe] || configs["1H"];
 }
@@ -226,8 +156,6 @@ export function getExnessSpread(pair: string): number {
   return EXNESS_SPREADS[pair] || 2;
 }
 
-// ===== DETERMINISTIC PRNG =====
-
 function hashString(str: string): number {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -246,8 +174,6 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
-// ===== TECHNICAL INDICATORS =====
 
 function calculateSMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
@@ -373,7 +299,6 @@ function getSessionAnalysis(session: string, pair: string): string {
   return sessionDetails[session] || sessionDetails["OTHER"];
 }
 
-// Direction with confidence threshold - returns NEUTRAL when unclear
 function determineDirection(
   trendBias: string,
   lastClose: number,
@@ -443,8 +368,6 @@ function calculateSignalScore(trendBias: string, rsi: number, atr: number, curre
   else { score += 5; confluences.push(`Session: ${session}`); }
   return { score, reasons, confluences };
 }
-
-// ===== DATA FETCHING =====
 
 function shouldUseYahoo(pair: string, timeframe: string): boolean {
   const isCrypto = CRYPTO_PAIRS.includes(pair);
@@ -516,7 +439,6 @@ export async function getRealHistoricalData(pair: string, interval: string = "1H
     if (yahooData) return { prices: yahooData, source: "yahoo" };
   }
 
-  // Deterministic synthetic fallback — same pair+timeframe = same data
   console.warn(`[Fallback] Deterministic synthetic data for ${pair} ${interval}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
@@ -573,8 +495,6 @@ export function getPipValue(pair: string, contractSize: number): number {
   return calculatePipSize(pair) * contractSize;
 }
 
-// ===== MAIN SIGNAL GENERATION =====
-
 export async function generateSignalLevels(
   pair: string,
   currentPrice: number,
@@ -592,7 +512,6 @@ export async function generateSignalLevels(
   if (pair.includes("BTC")) decimals = 2;
   if (pair.includes("ETH")) decimals = 2;
 
-  // Fetch data SPECIFIC to the selected timeframe
   const { prices: priceHistory, source: dataSource } = await getRealHistoricalData(pair, timeframe);
 
   const lastClose = priceHistory[priceHistory.length - 1];
@@ -600,7 +519,6 @@ export async function generateSignalLevels(
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
   const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
 
-  // All indicators use TIMEFRAME-SPECIFIC periods
   const ma20 = calculateSMA(priceHistory, config.ma20);
   const ma50 = calculateSMA(priceHistory, config.ma50);
   const ma200 = calculateSMA(priceHistory, config.ma200);
@@ -627,17 +545,44 @@ export async function generateSignalLevels(
     session, support, resistance, chartPatterns, supplyDemandZones
   );
 
-  // SL with proper buffer - derived from the selected timeframe's ATR
+  // ===== ATR-based SL (baseline) =====
   const rawAtrPips = atr / pipSize;
   let stopLossPips = Math.round(rawAtrPips * config.atrMultiplier);
-  // Enforce minimum SL as % of price
   const minSlPips = Math.round((currentPrice * config.minSlPercent) / pipSize);
   stopLossPips = Math.max(stopLossPips, minSlPips);
-  // Cap at 10% of price
   const maxSlPips = Math.round((currentPrice * 0.10) / pipSize);
   stopLossPips = Math.min(stopLossPips, maxSlPips);
-  // Absolute floor
   stopLossPips = Math.max(stopLossPips, 5);
+
+  // ===== SMC ANALYSIS (overrides SL/TP when available) =====
+  const candles = candlesFromCloses(priceHistory);
+  const smc = analyzeSMCForDirection(candles, direction === "neutral" ? "long" : direction, currentPrice);
+
+  let useSMC = false;
+  let smcSL: number | null = null;
+  let smcTPs: number[] = [];
+
+  if (direction !== "neutral" && smc.bestSL && smc.tps.length >= 2) {
+    const atrSLDistance = stopLossPips * pipSize;
+    const smcSLDistance = Math.abs(currentPrice - smc.bestSL);
+    // Use SMC if it produces a sensible stop (not too far, not too tight)
+    if (smcSLDistance > atrSLDistance * 0.3 && smcSLDistance < atrSLDistance * 3) {
+      useSMC = true;
+      smcSL = smc.bestSL;
+      smcTPs = smc.tps;
+    }
+  }
+
+  if (useSMC && smcSL) {
+    stopLossPips = Math.round(Math.abs(currentPrice - smcSL) / pipSize);
+    console.log(`[SMC] ${pair} ${timeframe}: SL at ${smcSL.toFixed(5)} (${stopLossPips} pips), ${smcTPs.length} TPs, score ${smc.score}`);
+  } else {
+    console.log(`[ATR] ${pair} ${timeframe}: SL ${stopLossPips} pips (SMC not applicable)`);
+  }
+
+  // Merge SMC score into the overall signal score
+  const totalScore = Math.min(score + Math.round(smc.score * 0.3), 100);
+  confluences.push(...smc.confluences);
 
   console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} lastClose=${lastClose.toFixed(4)} atr=${atr.toFixed(5)} slPips=${stopLossPips} dir=${direction}`);
 
@@ -658,11 +603,15 @@ export async function generateSignalLevels(
   let stopLossPrice: number, tp1Price: number, tp2Price: number, tp3Price: number;
 
   if (direction === "neutral") {
-    // No trade — collapse all levels to entry
     stopLossPrice = entry;
     tp1Price = entry;
     tp2Price = entry;
     tp3Price = entry;
+  } else if (useSMC && smcSL && smcTPs.length >= 3) {
+    stopLossPrice = smcSL;
+    tp1Price = smcTPs[0];
+    tp2Price = smcTPs[1];
+    tp3Price = smcTPs[2];
   } else if (direction === "long") {
     stopLossPrice = entry - slDistance;
     tp1Price = entry + slDistance * tp1Ratio;
@@ -679,7 +628,7 @@ export async function generateSignalLevels(
   const rewardPips2 = Math.round(Math.abs(tp2Price - entry) / pipSize);
   const rewardPips3 = Math.round(Math.abs(tp3Price - entry) / pipSize);
 
-  const confidence = direction === "neutral" ? "NEUTRAL" : score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
+  const confidence = direction === "neutral" ? "NEUTRAL" : totalScore >= 70 ? "HIGH" : totalScore >= 50 ? "MEDIUM" : "LOW";
 
   return {
     pair,
@@ -699,7 +648,7 @@ export async function generateSignalLevels(
     riskReward2: direction === "neutral" ? "0" : (rewardPips2 / stopLossPips).toFixed(1),
     riskReward3: direction === "neutral" ? "0" : (rewardPips3 / stopLossPips).toFixed(1),
     confidence,
-    confidenceScore: direction === "neutral" ? 0 : score,
+    confidenceScore: direction === "neutral" ? 0 : totalScore,
     timestamp: Date.now(),
     trendBias,
     supportLevel: Number(support.toFixed(decimals)),
@@ -717,7 +666,7 @@ export async function generateSignalLevels(
     bollingerLower: bollinger.lower,
     session,
     sessionAnalysis,
-    signalScore: score,
+    signalScore: totalScore,
     timeframe,
     reasons,
     patterns,
@@ -730,6 +679,8 @@ export async function generateSignalLevels(
     multiTimeframeConsensus: mtfConsensus.consensus,
     multiTimeframeStrength: mtfConsensus.strength,
     confluences,
+    smcConfluences: smc.confluences,
+    smcScore: smc.score,
     dataSource,
   };
 }
