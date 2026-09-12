@@ -93,6 +93,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // NEUTRAL signals: don't save, don't send to Telegram
+    if (direction === "neutral") {
+      console.log(`[Signal] Skipping NEUTRAL signal for ${pair} — no trade`);
+      return NextResponse.json(
+        {
+          message: "Neutral signal — not saved and not sent to Telegram",
+          skipped: true,
+          reason: "AI has no clear direction for this setup",
+        },
+        { status: 200 }
+      );
+    }
+
     await dbConnect();
 
     const signal = await Signal.create({
@@ -109,7 +122,7 @@ export async function POST(request: Request) {
       orderTypeDescription: orderTypeDescription || "",
     });
 
-    // Post to Telegram channel with order type
+    // Post to Telegram channel — only for confirmed long/short
     await sendTelegramSignal({
       pair,
       direction,
