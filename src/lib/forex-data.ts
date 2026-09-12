@@ -85,6 +85,160 @@ const EXNESS_SPREADS: Record<string, number> = {
   "GBP/JPY": 2.5,
 };
 
+// ===== TIMEFRAME SCALING CONFIGURATION =====
+
+interface TimeframeConfig {
+  atrMultiplier: number;        // ATR multiplier for stop loss
+  rsiPeriod: number;            // RSI period
+  ma20: number;                 // Fast MA period
+  ma50: number;                 // Medium MA period
+  ma200: number;                // Slow MA period
+  patternLookback: number;      // Candles needed for pattern detection
+  minCandles: number;           // Minimum candles required
+  srLookback: number;           // Support/Resistance recent candles
+  smartMoneyLookback: number;   // Smart money analysis range
+  bbPeriod: number;             // Bollinger Bands period
+  macdFast: number;             // MACD fast EMA
+  macdSlow: number;             // MACD slow EMA
+  macdSignal: number;           // MACD signal EMA
+  slToTpRatio: [number, number, number]; // TP1, TP2, TP3 vs SL distance
+}
+
+function getTimeframeConfig(timeframe: string): TimeframeConfig {
+  const configs: Record<string, TimeframeConfig> = {
+    "1m": {
+      atrMultiplier: 0.5,
+      rsiPeriod: 7,
+      ma20: 10,
+      ma50: 25,
+      ma200: 100,
+      patternLookback: 3,
+      minCandles: 50,
+      srLookback: 15,
+      smartMoneyLookback: 10,
+      bbPeriod: 10,
+      macdFast: 6,
+      macdSlow: 13,
+      macdSignal: 5,
+      slToTpRatio: [0.8, 1.2, 1.5],
+    },
+    "5m": {
+      atrMultiplier: 0.75,
+      rsiPeriod: 9,
+      ma20: 15,
+      ma50: 35,
+      ma200: 150,
+      patternLookback: 4,
+      minCandles: 60,
+      srLookback: 20,
+      smartMoneyLookback: 15,
+      bbPeriod: 15,
+      macdFast: 8,
+      macdSlow: 17,
+      macdSignal: 6,
+      slToTpRatio: [1.0, 1.5, 2.0],
+    },
+    "15m": {
+      atrMultiplier: 1.0,
+      rsiPeriod: 11,
+      ma20: 20,
+      ma50: 50,
+      ma200: 150,
+      patternLookback: 5,
+      minCandles: 80,
+      srLookback: 25,
+      smartMoneyLookback: 20,
+      bbPeriod: 20,
+      macdFast: 10,
+      macdSlow: 22,
+      macdSignal: 8,
+      slToTpRatio: [1.0, 1.5, 2.0],
+    },
+    "30m": {
+      atrMultiplier: 1.0,
+      rsiPeriod: 12,
+      ma20: 20,
+      ma50: 50,
+      ma200: 200,
+      patternLookback: 5,
+      minCandles: 100,
+      srLookback: 30,
+      smartMoneyLookback: 25,
+      bbPeriod: 20,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+      slToTpRatio: [1.0, 1.5, 2.0],
+    },
+    "1H": {
+      atrMultiplier: 1.0,
+      rsiPeriod: 14,
+      ma20: 20,
+      ma50: 50,
+      ma200: 200,
+      patternLookback: 5,
+      minCandles: 150,
+      srLookback: 50,
+      smartMoneyLookback: 30,
+      bbPeriod: 20,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+      slToTpRatio: [1.0, 1.5, 2.0],
+    },
+    "4H": {
+      atrMultiplier: 1.25,
+      rsiPeriod: 14,
+      ma20: 20,
+      ma50: 50,
+      ma200: 200,
+      patternLookback: 5,
+      minCandles: 150,
+      srLookback: 50,
+      smartMoneyLookback: 30,
+      bbPeriod: 20,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+      slToTpRatio: [1.2, 1.8, 2.5],
+    },
+    "1D": {
+      atrMultiplier: 1.5,
+      rsiPeriod: 14,
+      ma20: 20,
+      ma50: 50,
+      ma200: 200,
+      patternLookback: 5,
+      minCandles: 150,
+      srLookback: 30,
+      smartMoneyLookback: 30,
+      bbPeriod: 20,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+      slToTpRatio: [1.5, 2.5, 4.0],
+    },
+    "1W": {
+      atrMultiplier: 2.0,
+      rsiPeriod: 14,
+      ma20: 10,
+      ma50: 30,
+      ma200: 100,
+      patternLookback: 4,
+      minCandles: 100,
+      srLookback: 20,
+      smartMoneyLookback: 20,
+      bbPeriod: 20,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+      slToTpRatio: [2.0, 3.0, 5.0],
+    },
+  };
+
+  return configs[timeframe] || configs["1H"];
+}
+
 function toYahooSymbol(pair: string): string {
   const symbols: Record<string, string> = {
     "EUR/USD": "EURUSD=X",
@@ -127,7 +281,7 @@ export function getExnessSpread(pair: string): number {
   return EXNESS_SPREADS[pair] || 2;
 }
 
-// ===== TECHNICAL INDICATORS =====
+// ===== TECHNICAL INDICATORS (with custom periods) =====
 
 function calculateSMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
@@ -150,7 +304,7 @@ function calculateEMA(prices: number[], period: number): number[] {
   return ema;
 }
 
-function calculateRSI(prices: number[], period: number = 14): number {
+function calculateRSI(prices: number[], period: number): number {
   if (prices.length < period + 1) return 50;
 
   let gains = 0;
@@ -169,7 +323,7 @@ function calculateRSI(prices: number[], period: number = 14): number {
   return 100 - 100 / (1 + rs);
 }
 
-function calculateATR(prices: number[], period: number = 14): number {
+function calculateATR(prices: number[], period: number): number {
   if (prices.length < period + 1) return 0;
 
   let totalRange = 0;
@@ -180,22 +334,22 @@ function calculateATR(prices: number[], period: number = 14): number {
   return totalRange / period;
 }
 
-function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
-  if (prices.length < 26) {
+function calculateMACD(prices: number[], fast: number, slow: number, signalPeriod: number): { macd: number; signal: number; histogram: number } {
+  if (prices.length < slow + signalPeriod) {
     return { macd: 0, signal: 0, histogram: 0 };
   }
   
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
+  const emaFast = calculateEMA(prices, fast);
+  const emaSlow = calculateEMA(prices, slow);
   
-  const macdLine = ema12[ema12.length - 1] - ema26[ema26.length - 1];
+  const macdLine = emaFast[emaFast.length - 1] - emaSlow[emaSlow.length - 1];
   
   const macdValues: number[] = [];
-  for (let i = 0; i < ema12.length; i++) {
-    macdValues.push(ema12[i] - ema26[i]);
+  for (let i = 0; i < emaFast.length; i++) {
+    macdValues.push(emaFast[i] - emaSlow[i]);
   }
   
-  const signalEMA = calculateEMA(macdValues, 9);
+  const signalEMA = calculateEMA(macdValues, signalPeriod);
   const signalLine = signalEMA[signalEMA.length - 1];
   
   return {
@@ -205,7 +359,7 @@ function calculateMACD(prices: number[]): { macd: number; signal: number; histog
   };
 }
 
-function calculateBollingerBands(prices: number[], period: number = 20): { upper: number; middle: number; lower: number } {
+function calculateBollingerBands(prices: number[], period: number): { upper: number; middle: number; lower: number } {
   if (prices.length < period) {
     const middle = calculateSMA(prices, prices.length);
     return { upper: middle, middle, lower: middle };
@@ -224,10 +378,10 @@ function calculateBollingerBands(prices: number[], period: number = 20): { upper
   };
 }
 
-function findSupportResistance(prices: number[]): { support: number; resistance: number } {
+function findSupportResistance(prices: number[], lookback: number): { support: number; resistance: number } {
   if (prices.length === 0) return { support: 0, resistance: 0 };
 
-  const recentPrices = prices.slice(-50);
+  const recentPrices = prices.slice(-lookback);
   
   const swings: number[] = [];
   for (let i = 2; i < recentPrices.length - 2; i++) {
@@ -242,9 +396,7 @@ function findSupportResistance(prices: number[]): { support: number; resistance:
   }
 
   if (swings.length === 0) {
-    const support = Math.min(...recentPrices);
-    const resistance = Math.max(...recentPrices);
-    return { support, resistance };
+    return { support: Math.min(...recentPrices), resistance: Math.max(...recentPrices) };
   }
 
   const currentPrice = recentPrices[recentPrices.length - 1];
@@ -275,10 +427,10 @@ function getCurrentSession(): string {
 
 function getSessionAnalysis(session: string, pair: string): string {
   const sessionDetails: Record<string, string> = {
-    "LONDON": `London session active. High liquidity for ${pair}. Best time for EUR/GBP pairs. Expect strong directional moves.`,
-    "NEW YORK": `New York session active. USD volatility high. Best for ${pair} with dollar exposure. Major news releases expected.`,
+    "LONDON": `London session active. High liquidity for ${pair}. Best time for EUR/GBP pairs.`,
+    "NEW YORK": `New York session active. USD volatility high. Best for ${pair} with dollar exposure.`,
     "ASIAN": `Asian session active. Lower volatility. Good for range-bound strategies on ${pair}.`,
-    "OTHER": `Off-peak hours. Reduced liquidity for ${pair}. Use wider stops and smaller position sizes.`,
+    "OTHER": `Off-peak hours. Reduced liquidity for ${pair}. Use wider stops and smaller positions.`,
   };
   return sessionDetails[session] || sessionDetails["OTHER"];
 }
@@ -479,6 +631,9 @@ export async function generateSignalLevels(
   currentPrice: number,
   timeframe: string = "1H",
 ): Promise<SignalLevels> {
+  // Get timeframe-specific configuration
+  const config = getTimeframeConfig(timeframe);
+  
   const pipSize = calculatePipSize(pair);
   const spread = getExnessSpread(pair);
   const [, quote] = pair.split("/");
@@ -495,15 +650,16 @@ export async function generateSignalLevels(
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
   const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
 
-  const ma20 = calculateSMA(priceHistory, 20);
-  const ma50 = calculateSMA(priceHistory, 50);
-  const ma200 = calculateSMA(priceHistory, 200);
-  const rsi = calculateRSI(priceHistory);
-  const atr = calculateATR(priceHistory);
-  const macdData = calculateMACD(priceHistory);
-  const bollinger = calculateBollingerBands(priceHistory);
+  // Use timeframe-scaled periods
+  const ma20 = calculateSMA(priceHistory, config.ma20);
+  const ma50 = calculateSMA(priceHistory, config.ma50);
+  const ma200 = calculateSMA(priceHistory, config.ma200);
+  const rsi = calculateRSI(priceHistory, config.rsiPeriod);
+  const atr = calculateATR(priceHistory, config.rsiPeriod); // Use same period as RSI
+  const macdData = calculateMACD(priceHistory, config.macdFast, config.macdSlow, config.macdSignal);
+  const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod);
 
-  const { support, resistance } = findSupportResistance(priceHistory);
+  const { support, resistance } = findSupportResistance(priceHistory, config.srLookback);
 
   const trendBias = determineTrend(ma20, ma50, ma200);
 
@@ -538,8 +694,18 @@ export async function generateSignalLevels(
     supplyDemandZones,
   );
 
-  const atrBasedStop = Math.max(atr * 1.0, pipSize * 5);
-  const stopLossPips = pair.includes("XAU") ? 50 : pair.includes("BTC") ? 100 : Math.round(atrBasedStop / pipSize);
+  // Timeframe-scaled ATR-based stop loss
+  const atrBasedStop = Math.max(atr * config.atrMultiplier, pipSize * 5);
+  
+  // Pair-specific fixed stop for volatile assets
+  let stopLossPips: number;
+  if (pair.includes("XAU")) {
+    stopLossPips = Math.round(50 * config.atrMultiplier);
+  } else if (pair.includes("BTC")) {
+    stopLossPips = Math.round(100 * config.atrMultiplier);
+  } else {
+    stopLossPips = Math.round(atrBasedStop / pipSize);
+  }
 
   const patterns = detectPatterns(priceHistory, highs, lows);
 
@@ -547,7 +713,7 @@ export async function generateSignalLevels(
     priceHistory,
     direction,
     stopLossPips,
-    Math.round(stopLossPips * 1.5),
+    Math.round(stopLossPips * config.slToTpRatio[0]),
     pipSize,
   );
 
@@ -576,16 +742,19 @@ export async function generateSignalLevels(
   let tp2Price: number;
   let tp3Price: number;
 
+  // Use timeframe-scaled TP ratios
+  const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
+
   if (direction === "long") {
     stopLossPrice = entry - slDistance;
-    tp1Price = entry + slDistance * 1.0;
-    tp2Price = entry + slDistance * 1.5;
-    tp3Price = entry + slDistance * 2.0;
+    tp1Price = entry + slDistance * tp1Ratio;
+    tp2Price = entry + slDistance * tp2Ratio;
+    tp3Price = entry + slDistance * tp3Ratio;
   } else {
     stopLossPrice = entry + slDistance;
-    tp1Price = entry - slDistance * 1.0;
-    tp2Price = entry - slDistance * 1.5;
-    tp3Price = entry - slDistance * 2.0;
+    tp1Price = entry - slDistance * tp1Ratio;
+    tp2Price = entry - slDistance * tp2Ratio;
+    tp3Price = entry - slDistance * tp3Ratio;
   }
 
   const rewardPips1 = Math.round(Math.abs(tp1Price - entry) / pipSize);
