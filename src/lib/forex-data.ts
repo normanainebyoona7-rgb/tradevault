@@ -292,66 +292,48 @@ function calculateSMA(prices: number[], period: number): number {
 function calculateEMA(prices: number[], period: number): number[] {
   const ema: number[] = [];
   const multiplier = 2 / (period + 1);
-  
   const sma = calculateSMA(prices.slice(0, period), period);
   ema.push(sma);
-  
   for (let i = period; i < prices.length; i++) {
     const value = (prices[i] - ema[ema.length - 1]) * multiplier + ema[ema.length - 1];
     ema.push(value);
   }
-  
   return ema;
 }
 
 function calculateRSI(prices: number[], period: number): number {
   if (prices.length < period + 1) return 50;
-
   let gains = 0;
   let losses = 0;
-
   for (let i = prices.length - period; i < prices.length; i++) {
     const change = prices[i] - prices[i - 1];
     if (change > 0) gains += change;
     else losses += Math.abs(change);
   }
-
   if (losses === 0) return 100;
   if (gains === 0) return 0;
-
   const rs = gains / losses;
   return 100 - 100 / (1 + rs);
 }
 
 function calculateATR(prices: number[], period: number): number {
   if (prices.length < period + 1) return 0;
-
   let totalRange = 0;
   for (let i = prices.length - period; i < prices.length; i++) {
     totalRange += Math.abs(prices[i] - prices[i - 1]);
   }
-
   return totalRange / period;
 }
 
 function calculateMACD(prices: number[], fast: number, slow: number, signalPeriod: number): { macd: number; signal: number; histogram: number } {
-  if (prices.length < slow + signalPeriod) {
-    return { macd: 0, signal: 0, histogram: 0 };
-  }
-  
+  if (prices.length < slow + signalPeriod) return { macd: 0, signal: 0, histogram: 0 };
   const emaFast = calculateEMA(prices, fast);
   const emaSlow = calculateEMA(prices, slow);
-  
   const macdLine = emaFast[emaFast.length - 1] - emaSlow[emaSlow.length - 1];
-  
   const macdValues: number[] = [];
-  for (let i = 0; i < emaFast.length; i++) {
-    macdValues.push(emaFast[i] - emaSlow[i]);
-  }
-  
+  for (let i = 0; i < emaFast.length; i++) macdValues.push(emaFast[i] - emaSlow[i]);
   const signalEMA = calculateEMA(macdValues, signalPeriod);
   const signalLine = signalEMA[signalEMA.length - 1];
-  
   return {
     macd: Number(macdLine.toFixed(5)),
     signal: Number(signalLine.toFixed(5)),
@@ -364,13 +346,11 @@ function calculateBollingerBands(prices: number[], period: number): { upper: num
     const middle = calculateSMA(prices, prices.length);
     return { upper: middle, middle, lower: middle };
   }
-  
   const middle = calculateSMA(prices, period);
   const slice = prices.slice(-period);
   const squaredDiffs = slice.map(p => Math.pow(p - middle, 2));
   const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / period;
   const stdDev = Math.sqrt(variance);
-  
   return {
     upper: Number((middle + 2 * stdDev).toFixed(5)),
     middle: Number(middle.toFixed(5)),
@@ -380,9 +360,7 @@ function calculateBollingerBands(prices: number[], period: number): { upper: num
 
 function findSupportResistance(prices: number[], lookback: number): { support: number; resistance: number } {
   if (prices.length === 0) return { support: 0, resistance: 0 };
-
   const recentPrices = prices.slice(-lookback);
-  
   const swings: number[] = [];
   for (let i = 2; i < recentPrices.length - 2; i++) {
     if (recentPrices[i] < recentPrices[i - 1] && recentPrices[i] < recentPrices[i - 2] && 
@@ -394,19 +372,14 @@ function findSupportResistance(prices: number[], lookback: number): { support: n
       swings.push(recentPrices[i]);
     }
   }
-
-  if (swings.length === 0) {
-    return { support: Math.min(...recentPrices), resistance: Math.max(...recentPrices) };
-  }
-
+  if (swings.length === 0) return { support: Math.min(...recentPrices), resistance: Math.max(...recentPrices) };
   const currentPrice = recentPrices[recentPrices.length - 1];
   const supports = swings.filter(s => s < currentPrice);
   const resistances = swings.filter(r => r > currentPrice);
-  
-  const support = supports.length > 0 ? Math.max(...supports) : Math.min(...recentPrices);
-  const resistance = resistances.length > 0 ? Math.min(...resistances) : Math.max(...recentPrices);
-
-  return { support, resistance };
+  return {
+    support: supports.length > 0 ? Math.max(...supports) : Math.min(...recentPrices),
+    resistance: resistances.length > 0 ? Math.min(...resistances) : Math.max(...recentPrices),
+  };
 }
 
 function determineTrend(ma20: number, ma50: number, ma200: number): string {
@@ -427,10 +400,10 @@ function getCurrentSession(): string {
 
 function getSessionAnalysis(session: string, pair: string): string {
   const sessionDetails: Record<string, string> = {
-    "LONDON": `London session active. High liquidity for ${pair}. Best time for EUR/GBP pairs.`,
-    "NEW YORK": `New York session active. USD volatility high. Best for ${pair} with dollar exposure.`,
-    "ASIAN": `Asian session active. Lower volatility. Good for range-bound strategies on ${pair}.`,
-    "OTHER": `Off-peak hours. Reduced liquidity for ${pair}. Use wider stops and smaller positions.`,
+    "LONDON": `London session active. High liquidity for ${pair}.`,
+    "NEW YORK": `New York session active. USD volatility high.`,
+    "ASIAN": `Asian session active. Lower volatility.`,
+    "OTHER": `Off-peak hours. Reduced liquidity.`,
   };
   return sessionDetails[session] || sessionDetails["OTHER"];
 }
@@ -448,34 +421,26 @@ function determineDirection(
 ): "long" | "short" {
   let longScore = 0;
   let shortScore = 0;
-
   if (trendBias === "STRONG UPTREND") longScore += 3;
   else if (trendBias === "UPTREND") longScore += 2;
   else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
   else if (trendBias === "DOWNTREND") shortScore += 2;
-
   if (rsi < 30) longScore += 2;
   if (rsi > 70) shortScore += 2;
   if (rsi >= 30 && rsi <= 50) longScore += 1;
   if (rsi >= 50 && rsi <= 70) shortScore += 1;
-
   if (macdHistogram > 0) longScore += 2;
   if (macdHistogram < 0) shortScore += 2;
-
   if (currentPrice <= bollingerLower) longScore += 2;
   if (currentPrice >= bollingerUpper) shortScore += 2;
-
   const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
   const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
-  
   if (bullishPatterns.length > 0) longScore += bullishPatterns.length * 2;
   if (bearishPatterns.length > 0) shortScore += bearishPatterns.length * 2;
-
   const distanceToSupport = Math.abs(currentPrice - support);
   const distanceToResistance = Math.abs(resistance - currentPrice);
   if (distanceToSupport < distanceToResistance) longScore += 1;
   else shortScore += 1;
-
   return longScore > shortScore ? "long" : "short";
 }
 
@@ -494,95 +459,84 @@ function calculateSignalScore(
   let score = 0;
   const reasons: string[] = [];
   const confluences: string[] = [];
-
   if (trendBias === "STRONG UPTREND" || trendBias === "STRONG DOWNTREND") {
-    score += 30;
-    reasons.push("Strong trend alignment (+30)");
-    confluences.push(`Trend: ${trendBias}`);
+    score += 30; reasons.push("Strong trend (+30)"); confluences.push(`Trend: ${trendBias}`);
   } else if (trendBias === "UPTREND" || trendBias === "DOWNTREND") {
-    score += 20;
-    reasons.push("Moderate trend alignment (+20)");
-    confluences.push(`Trend: ${trendBias}`);
+    score += 20; reasons.push("Moderate trend (+20)"); confluences.push(`Trend: ${trendBias}`);
   } else {
-    score += 10;
-    reasons.push("Neutral trend (+10)");
-    confluences.push(`Trend: ${trendBias}`);
+    score += 10; reasons.push("Neutral trend (+10)"); confluences.push(`Trend: ${trendBias}`);
   }
-
   if (rsi > 30 && rsi < 70) {
-    score += 20;
-    reasons.push("RSI in optimal range (+20)");
-    confluences.push(`RSI: ${rsi} (optimal)`);
+    score += 20; reasons.push("RSI optimal (+20)"); confluences.push(`RSI: ${rsi}`);
   } else if (rsi > 20 && rsi < 80) {
-    score += 10;
-    reasons.push("RSI acceptable (+10)");
-    confluences.push(`RSI: ${rsi} (acceptable)`);
+    score += 10; reasons.push("RSI acceptable (+10)"); confluences.push(`RSI: ${rsi}`);
   } else {
-    reasons.push("RSI extreme - caution (+0)");
     confluences.push(`RSI: ${rsi} (extreme)`);
   }
-
   if (Math.abs(macdHistogram) > 0) {
-    score += 20;
-    reasons.push("MACD confirms momentum (+20)");
-    confluences.push(`MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"} momentum`);
+    score += 20; reasons.push("MACD confirms (+20)");
+    confluences.push(`MACD: ${macdHistogram > 0 ? "Bullish" : "Bearish"}`);
   }
-
   if (chartPatterns.length > 0) {
     score += Math.min(chartPatterns.length * 5, 15);
-    reasons.push(`Chart patterns detected (+${Math.min(chartPatterns.length * 5, 15)})`);
-    chartPatterns.forEach(p => {
-      confluences.push(`Pattern: ${p.name} (${p.type}, Strength: ${p.strength}/10)`);
-    });
+    chartPatterns.forEach(p => confluences.push(`Pattern: ${p.name}`));
   }
-
   if (supplyDemandZones.length > 0) {
     score += Math.min(supplyDemandZones.length * 5, 15);
-    reasons.push(`Supply/Demand zones found (+${Math.min(supplyDemandZones.length * 5, 15)})`);
-    supplyDemandZones.forEach(z => {
-      confluences.push(`${z.type.toUpperCase()} zone: ${z.bottom} - ${z.top}`);
-    });
+    supplyDemandZones.forEach(z => confluences.push(`${z.type.toUpperCase()}: ${z.bottom}-${z.top}`));
   }
-
   if (session === "LONDON" || session === "NEW YORK") {
-    score += 10;
-    confluences.push(`Session: ${session} (high liquidity)`);
+    score += 10; confluences.push(`Session: ${session}`);
   } else {
-    score += 5;
-    confluences.push(`Session: ${session} (moderate liquidity)`);
+    score += 5; confluences.push(`Session: ${session}`);
   }
-
   return { score, reasons, confluences };
 }
 
-// ===== DATA FETCHING =====
+// ===== DATA FETCHING (FCS primary, Yahoo fallback) =====
 
-export async function getRealHistoricalData(pair: string, interval: string = "1d"): Promise<number[]> {
-  const yahooInterval = timeframeToYahooInterval(interval);
-  
+export async function getRealHistoricalData(pair: string, interval: string = "1H"): Promise<number[]> {
+  // Try FCS API first via Render
+  try {
+    const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
+    const response = await fetch(`${pythonUrl}/api/get-history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pair, timeframe: interval, limit: 200 }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.closes && data.closes.length > 30) {
+        console.log(`[FCS] Got ${data.closes.length} candles for ${pair} ${interval}`);
+        return data.closes;
+      }
+    }
+  } catch (error) {
+    console.error(`FCS history failed for ${pair}:`, error);
+  }
+
+  // Fallback to Yahoo
   try {
     const symbol = toYahooSymbol(pair);
-    const queryOptions = {
+    const yahooInterval = timeframeToYahooInterval(interval);
+    const result = await yahooFinance.chart(symbol, {
       period1: new Date(Date.now() - 200 * 24 * 60 * 60 * 1000),
       period2: new Date(),
       interval: yahooInterval as any,
-    };
-
-    const result = await yahooFinance.chart(symbol, queryOptions);
-    
+    });
     if (result.quotes && result.quotes.length > 0) {
       const prices = result.quotes
         .filter((item) => item.close !== null && item.close !== undefined)
         .map((item) => Number(item.close));
-      
-      if (prices.length > 30) {
-        return prices;
-      }
+      if (prices.length > 30) return prices;
     }
   } catch (error) {
-    console.error(`Yahoo Finance failed for ${pair}:`, error);
+    console.error(`Yahoo fallback failed for ${pair}:`, error);
   }
 
+  // Last resort: synthetic
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
@@ -595,6 +549,27 @@ export async function getRealHistoricalData(pair: string, interval: string = "1d
 }
 
 export async function getLivePrice(pair: string, timeframe: string = "1H"): Promise<number> {
+  // Try FCS API first
+  try {
+    const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
+    const response = await fetch(`${pythonUrl}/api/get-price`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pair }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (data.price && data.price > 0) {
+        console.log(`[FCS] Live price for ${pair}: ${data.price}`);
+        return data.price;
+      }
+    }
+  } catch (error) {
+    console.error(`FCS live failed for ${pair}:`, error);
+  }
+
+  // Fallback to Yahoo
   try {
     const symbol = toYahooSymbol(pair);
     const yahooInterval = timeframeToYahooInterval(timeframe);
@@ -603,20 +578,16 @@ export async function getLivePrice(pair: string, timeframe: string = "1H"): Prom
       period2: new Date(),
       interval: yahooInterval as any,
     });
-    
     if (result.quotes && result.quotes.length > 0) {
       const prices = result.quotes
         .filter((q) => q.close !== null && q.close !== undefined)
         .map((q) => Number(q.close));
-      
-      if (prices.length > 0) {
-        return prices[prices.length - 1];
-      }
+      if (prices.length > 0) return prices[prices.length - 1];
     }
   } catch (error) {
-    console.error(`Yahoo live price failed for ${pair}:`, error);
+    console.error(`Yahoo live failed for ${pair}:`, error);
   }
-  
+
   return FALLBACK_PRICES[pair] || 1.0;
 }
 
@@ -632,7 +603,6 @@ export async function generateSignalLevels(
   timeframe: string = "1H",
 ): Promise<SignalLevels> {
   const config = getTimeframeConfig(timeframe);
-  
   const pipSize = calculatePipSize(pair);
   const spread = getExnessSpread(pair);
   const [, quote] = pair.split("/");
@@ -658,9 +628,7 @@ export async function generateSignalLevels(
   const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod);
 
   const { support, resistance } = findSupportResistance(priceHistory, config.srLookback);
-
   const trendBias = determineTrend(ma20, ma50, ma200);
-
   const session = getCurrentSession();
   const sessionAnalysis = getSessionAnalysis(session, pair);
 
@@ -668,76 +636,42 @@ export async function generateSignalLevels(
   const { orderBlocks, fairValueGaps, liquidityLevels } = analyzeSmartMoney(priceHistory, highs, lows);
 
   const direction = determineDirection(
-    trendBias,
-    currentPrice,
-    support,
-    resistance,
-    rsi,
-    macdData.histogram,
-    bollinger.upper,
-    bollinger.lower,
-    chartPatterns,
+    trendBias, currentPrice, support, resistance, rsi,
+    macdData.histogram, bollinger.upper, bollinger.lower, chartPatterns,
   );
 
   const { score, reasons, confluences } = calculateSignalScore(
-    trendBias,
-    rsi,
-    atr,
-    currentPrice,
-    macdData.histogram,
-    session,
-    support,
-    resistance,
-    chartPatterns,
-    supplyDemandZones,
+    trendBias, rsi, atr, currentPrice, macdData.histogram,
+    session, support, resistance, chartPatterns, supplyDemandZones,
   );
 
-  const atrBasedStop = Math.max(atr * config.atrMultiplier, pipSize * 5);
-  
-  let stopLossPips: number;
-  if (pair.includes("XAU")) {
-    stopLossPips = Math.round(50 * config.atrMultiplier);
-  } else if (pair.includes("BTC")) {
-    stopLossPips = Math.round(100 * config.atrMultiplier);
-  } else {
-    stopLossPips = Math.round(atrBasedStop / pipSize);
-  }
+  // ATR from the timeframe data we actually fetched
+  const rawAtrPips = atr / pipSize;
+  const stopLossPips = Math.max(Math.round(rawAtrPips * config.atrMultiplier), 5);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
 
   const backtest = backtestStrategy(
-    priceHistory,
-    direction,
-    stopLossPips,
-    Math.round(stopLossPips * config.slToTpRatio[0]),
-    pipSize,
+    priceHistory, direction, stopLossPips,
+    Math.round(stopLossPips * config.slToTpRatio[0]), pipSize,
   );
 
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
   const orderRecommendation = determineOrderType(
-    direction,
-    currentPrice,
-    support,
-    resistance,
-    rsi,
-    bollinger.upper,
-    bollinger.lower,
-    trendBias,
-    atr,
+    direction, currentPrice, support, resistance, rsi,
+    bollinger.upper, bollinger.lower, trendBias, atr,
   );
 
   const entry = currentPrice;
-
   const slDistance = stopLossPips * pipSize;
-  
+  const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
+
   let stopLossPrice: number;
   let tp1Price: number;
   let tp2Price: number;
   let tp3Price: number;
-
-  const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
 
   if (direction === "long") {
     stopLossPrice = entry - slDistance;
@@ -770,9 +704,7 @@ export async function generateSignalLevels(
     takeProfit2: Number(tp2Price.toFixed(decimals)),
     takeProfit3: Number(tp3Price.toFixed(decimals)),
     riskPips: stopLossPips,
-    rewardPips1,
-    rewardPips2,
-    rewardPips3,
+    rewardPips1, rewardPips2, rewardPips3,
     riskReward1: (rewardPips1 / stopLossPips).toFixed(1),
     riskReward2: (rewardPips2 / stopLossPips).toFixed(1),
     riskReward3: (rewardPips3 / stopLossPips).toFixed(1),
