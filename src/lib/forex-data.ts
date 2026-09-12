@@ -566,44 +566,8 @@ export async function generateSignalLevels(
     atr,
   );
 
-  // Entry based on Supply/Demand zones (institutional levels)
-  let entry: number;
-  
-  if (direction === "long") {
-    const demandZones = supplyDemandZones.filter(z => z.type === "demand" && z.bottom < currentPrice);
-    
-    if (demandZones.length > 0) {
-      const nearestDemand = demandZones.reduce((closest, zone) => 
-        Math.abs(zone.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? zone : closest
-      );
-      entry = nearestDemand.bottom;
-    } else if (orderBlocks.filter(ob => ob.type === "bullish" && ob.bottom < currentPrice).length > 0) {
-      const bullishBlocks = orderBlocks.filter(ob => ob.type === "bullish" && ob.bottom < currentPrice);
-      const nearestBlock = bullishBlocks.reduce((closest, block) => 
-        Math.abs(block.bottom - currentPrice) < Math.abs(closest.bottom - currentPrice) ? block : closest
-      );
-      entry = nearestBlock.bottom;
-    } else {
-      entry = support;
-    }
-  } else {
-    const supplyZones = supplyDemandZones.filter(z => z.type === "supply" && z.top > currentPrice);
-    
-    if (supplyZones.length > 0) {
-      const nearestSupply = supplyZones.reduce((closest, zone) => 
-        Math.abs(zone.top - currentPrice) < Math.abs(closest.top - currentPrice) ? zone : closest
-      );
-      entry = nearestSupply.top;
-    } else if (orderBlocks.filter(ob => ob.type === "bearish" && ob.top > currentPrice).length > 0) {
-      const bearishBlocks = orderBlocks.filter(ob => ob.type === "bearish" && ob.top > currentPrice);
-      const nearestBlock = bearishBlocks.reduce((closest, block) => 
-        Math.abs(block.top - currentPrice) < Math.abs(closest.top - currentPrice) ? block : closest
-      );
-      entry = nearestBlock.top;
-    } else {
-      entry = resistance;
-    }
-  }
+  // IMMEDIATE ENTRY at live market price
+  const entry = currentPrice;
 
   const slDistance = stopLossPips * pipSize;
   
