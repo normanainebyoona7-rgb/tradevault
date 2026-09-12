@@ -10,6 +10,26 @@ function generateProfessionalAnalysis(
 ): string {
   const rsiStatus = signal.rsi > 70 ? "OVERBOUGHT" : signal.rsi < 30 ? "OVERSOLD" : "NEUTRAL";
 
+  if (signal.direction === "neutral") {
+    return `📊 **TradeVault AI Analysis — ${pair} (${timeframe})**
+
+⏸️ **NO TRADE — NEUTRAL SIGNAL**
+
+The AI detected conflicting signals on ${pair} (${timeframe}).
+Waiting for a clearer setup.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 **Current Price:** ${signal.currentPrice}
+📈 **Trend:** ${signal.trendBias}
+📉 **RSI:** ${signal.rsi} (${rsiStatus})
+⚡ **Confidence Score:** ${signal.signalScore}/100
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ **Do not enter a trade yet.** Wait for stronger confirmation.`;
+  }
+
   if (signal.direction === "long") {
     return `📊 **TradeVault AI Analysis — ${pair} (${timeframe})**
 
@@ -107,12 +127,13 @@ export async function POST(request: Request) {
     return NextResponse.json({
       analysis,
       signal: {
-        // Core values (numbers — for admin panel display)
+        // Core signal
         direction: signal.direction,
         orderType: signal.orderType,
         orderTypeDescription: signal.orderTypeDescription,
         orderRecommendation: signal.orderRecommendation,
 
+        // Levels (numeric — for admin/user display)
         currentPrice: signal.currentPrice,
         entryPrice: signal.entry,
         stopLossPrice: signal.stopLoss,
@@ -126,11 +147,11 @@ export async function POST(request: Request) {
         takeProfit1: `${signal.takeProfit1} (${signal.rewardPips1} pips)`,
         takeProfit2: `${signal.takeProfit2} (${signal.rewardPips2} pips)`,
         takeProfit3: `${signal.takeProfit3} (${signal.rewardPips3} pips)`,
-        riskReward: `1:${signal.riskReward1} to 1:${signal.riskReward3}`,
+        riskReward: signal.direction === "neutral" ? "N/A (no trade)" : `1:${signal.riskReward1} to 1:${signal.riskReward3}`,
 
         // Supporting data
         confidence: signal.confidence,
-        confidenceScore: signal.signalScore,
+        confidenceScore: signal.confidenceScore,
         signalScore: signal.signalScore,
         riskPips: signal.riskPips,
         timeframe,

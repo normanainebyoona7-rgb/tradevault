@@ -13,7 +13,7 @@ const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHis
 export interface SignalLevels {
   pair: string;
   currentPrice: number;
-  direction: "long" | "short";
+  direction: "long" | "short" | "neutral";
   orderType: OrderType;
   orderTypeDescription: string;
   orderRecommendation: OrderRecommendation;
@@ -89,33 +89,108 @@ const EXNESS_SPREADS: Record<string, number> = {
 const CRYPTO_PAIRS = ["BTC/USD", "ETH/USD"];
 const METAL_PAIRS = ["XAU/USD", "XAG/USD"];
 
+// ===== TIMEFRAME-AWARE CONFIGURATION =====
+// Every indicator period, SL multiplier, and TP ratio is specific to the timeframe.
+// The selected timeframe's data is the ONLY data used for analysis.
+
 interface TimeframeConfig {
+  // ATR-based SL multiplier (relative to that timeframe's ATR)
   atrMultiplier: number;
+  // Minimum SL as % of price (protects against tight stops on low-volatility TFs)
+  minSlPercent: number;
+  // SL to TP ratios (TP1, TP2, TP3 as multiples of SL distance)
+  slToTpRatio: [number, number, number];
+  // Indicator periods
   rsiPeriod: number;
+  atrPeriod: number;
   ma20: number;
   ma50: number;
   ma200: number;
-  patternLookback: number;
-  minCandles: number;
-  srLookback: number;
-  smartMoneyLookback: number;
   bbPeriod: number;
+  bbStdDev: number;
   macdFast: number;
   macdSlow: number;
   macdSignal: number;
-  slToTpRatio: [number, number, number];
+  // Analysis depth
+  srLookback: number;
+  patternLookback: number;
+  minCandles: number;
 }
 
 function getTimeframeConfig(timeframe: string): TimeframeConfig {
   const configs: Record<string, TimeframeConfig> = {
-    "1m": { atrMultiplier: 1.0, rsiPeriod: 7, ma20: 10, ma50: 25, ma200: 100, patternLookback: 3, minCandles: 50, srLookback: 15, smartMoneyLookback: 10, bbPeriod: 10, macdFast: 6, macdSlow: 13, macdSignal: 5, slToTpRatio: [1.5, 3.0, 5.0] },
-    "5m": { atrMultiplier: 1.0, rsiPeriod: 9, ma20: 15, ma50: 35, ma200: 150, patternLookback: 4, minCandles: 60, srLookback: 20, smartMoneyLookback: 15, bbPeriod: 15, macdFast: 8, macdSlow: 17, macdSignal: 6, slToTpRatio: [1.5, 3.0, 5.0] },
-    "15m": { atrMultiplier: 1.2, rsiPeriod: 11, ma20: 20, ma50: 50, ma200: 150, patternLookback: 5, minCandles: 80, srLookback: 25, smartMoneyLookback: 20, bbPeriod: 20, macdFast: 10, macdSlow: 22, macdSignal: 8, slToTpRatio: [1.5, 3.0, 5.0] },
-    "30m": { atrMultiplier: 1.2, rsiPeriod: 12, ma20: 20, ma50: 50, ma200: 200, patternLookback: 5, minCandles: 100, srLookback: 30, smartMoneyLookback: 25, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, slToTpRatio: [1.5, 3.0, 5.0] },
-    "1H": { atrMultiplier: 1.5, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, patternLookback: 5, minCandles: 150, srLookback: 50, smartMoneyLookback: 30, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, slToTpRatio: [1.5, 3.0, 5.0] },
-    "4H": { atrMultiplier: 1.8, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, patternLookback: 5, minCandles: 150, srLookback: 50, smartMoneyLookback: 30, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, slToTpRatio: [2.0, 3.5, 6.0] },
-    "1D": { atrMultiplier: 2.0, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, patternLookback: 5, minCandles: 150, srLookback: 30, smartMoneyLookback: 30, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, slToTpRatio: [2.0, 4.0, 7.0] },
-    "1W": { atrMultiplier: 2.5, rsiPeriod: 14, ma20: 10, ma50: 30, ma200: 100, patternLookback: 4, minCandles: 100, srLookback: 20, smartMoneyLookback: 20, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, slToTpRatio: [3.0, 5.0, 8.0] },
+    "1m": {
+      atrMultiplier: 1.5, minSlPercent: 0.0008,
+      slToTpRatio: [2.0, 3.5, 6.0],
+      rsiPeriod: 7, atrPeriod: 7,
+      ma20: 10, ma50: 25, ma200: 100,
+      bbPeriod: 10, bbStdDev: 2,
+      macdFast: 6, macdSlow: 13, macdSignal: 5,
+      srLookback: 15, patternLookback: 3, minCandles: 50,
+    },
+    "5m": {
+      atrMultiplier: 1.5, minSlPercent: 0.0012,
+      slToTpRatio: [2.0, 3.5, 6.0],
+      rsiPeriod: 9, atrPeriod: 9,
+      ma20: 15, ma50: 35, ma200: 150,
+      bbPeriod: 15, bbStdDev: 2,
+      macdFast: 8, macdSlow: 17, macdSignal: 6,
+      srLookback: 20, patternLookback: 4, minCandles: 60,
+    },
+    "15m": {
+      atrMultiplier: 1.5, minSlPercent: 0.002,
+      slToTpRatio: [2.0, 3.5, 6.0],
+      rsiPeriod: 11, atrPeriod: 11,
+      ma20: 20, ma50: 50, ma200: 150,
+      bbPeriod: 20, bbStdDev: 2,
+      macdFast: 10, macdSlow: 22, macdSignal: 8,
+      srLookback: 25, patternLookback: 5, minCandles: 80,
+    },
+    "30m": {
+      atrMultiplier: 1.5, minSlPercent: 0.0025,
+      slToTpRatio: [2.0, 3.5, 6.0],
+      rsiPeriod: 12, atrPeriod: 12,
+      ma20: 20, ma50: 50, ma200: 200,
+      bbPeriod: 20, bbStdDev: 2,
+      macdFast: 12, macdSlow: 26, macdSignal: 9,
+      srLookback: 30, patternLookback: 5, minCandles: 100,
+    },
+    "1H": {
+      atrMultiplier: 1.5, minSlPercent: 0.003,
+      slToTpRatio: [2.0, 3.5, 6.0],
+      rsiPeriod: 14, atrPeriod: 14,
+      ma20: 20, ma50: 50, ma200: 200,
+      bbPeriod: 20, bbStdDev: 2,
+      macdFast: 12, macdSlow: 26, macdSignal: 9,
+      srLookback: 50, patternLookback: 5, minCandles: 100,
+    },
+    "4H": {
+      atrMultiplier: 1.8, minSlPercent: 0.006,
+      slToTpRatio: [2.0, 4.0, 7.0],
+      rsiPeriod: 14, atrPeriod: 14,
+      ma20: 20, ma50: 50, ma200: 200,
+      bbPeriod: 20, bbStdDev: 2,
+      macdFast: 12, macdSlow: 26, macdSignal: 9,
+      srLookback: 50, patternLookback: 5, minCandles: 100,
+    },
+    "1D": {
+      atrMultiplier: 2.0, minSlPercent: 0.012,
+      slToTpRatio: [2.5, 5.0, 8.0],
+      rsiPeriod: 14, atrPeriod: 14,
+      ma20: 20, ma50: 50, ma200: 200,
+      bbPeriod: 20, bbStdDev: 2,
+      macdFast: 12, macdSlow: 26, macdSignal: 9,
+      srLookback: 30, patternLookback: 5, minCandles: 80,
+    },
+    "1W": {
+      atrMultiplier: 2.5, minSlPercent: 0.025,
+      slToTpRatio: [3.0, 5.0, 8.0],
+      rsiPeriod: 14, atrPeriod: 14,
+      ma20: 10, ma50: 30, ma200: 100,
+      bbPeriod: 20, bbStdDev: 2,
+      macdFast: 12, macdSlow: 26, macdSignal: 9,
+      srLookback: 20, patternLookback: 4, minCandles: 60,
+    },
   };
   return configs[timeframe] || configs["1H"];
 }
@@ -231,7 +306,7 @@ function calculateMACD(prices: number[], fast: number, slow: number, signalPerio
   };
 }
 
-function calculateBollingerBands(prices: number[], period: number): { upper: number; middle: number; lower: number } {
+function calculateBollingerBands(prices: number[], period: number, stdDevMultiplier: number): { upper: number; middle: number; lower: number } {
   if (prices.length < period) {
     const middle = calculateSMA(prices, prices.length);
     return { upper: middle, middle, lower: middle };
@@ -242,9 +317,9 @@ function calculateBollingerBands(prices: number[], period: number): { upper: num
   const variance = squaredDiffs.reduce((sum, v) => sum + v, 0) / period;
   const stdDev = Math.sqrt(variance);
   return {
-    upper: Number((middle + 2 * stdDev).toFixed(5)),
+    upper: Number((middle + stdDevMultiplier * stdDev).toFixed(5)),
     middle: Number(middle.toFixed(5)),
-    lower: Number((middle - 2 * stdDev).toFixed(5)),
+    lower: Number((middle - stdDevMultiplier * stdDev).toFixed(5)),
   };
 }
 
@@ -298,8 +373,7 @@ function getSessionAnalysis(session: string, pair: string): string {
   return sessionDetails[session] || sessionDetails["OTHER"];
 }
 
-// CRITICAL: Direction is determined by INDICATORS ONLY (not live price)
-// This ensures user and admin see the same signal
+// Direction with confidence threshold - returns NEUTRAL when unclear
 function determineDirection(
   trendBias: string,
   lastClose: number,
@@ -310,35 +384,45 @@ function determineDirection(
   bollingerUpper: number,
   bollingerLower: number,
   chartPatterns: ChartPattern[]
-): "long" | "short" {
+): "long" | "short" | "neutral" {
   let longScore = 0, shortScore = 0;
-  
-  if (trendBias === "STRONG UPTREND") longScore += 3;
-  else if (trendBias === "UPTREND") longScore += 2;
-  else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
-  else if (trendBias === "DOWNTREND") shortScore += 2;
-  
-  if (rsi < 30) longScore += 2;
-  if (rsi > 70) shortScore += 2;
-  if (rsi >= 30 && rsi <= 50) longScore += 1;
-  if (rsi >= 50 && rsi <= 70) shortScore += 1;
-  
-  if (macdHistogram > 0) longScore += 2;
-  if (macdHistogram < 0) shortScore += 2;
-  
+
+  if (trendBias === "STRONG UPTREND") longScore += 4;
+  else if (trendBias === "UPTREND") longScore += 3;
+  else if (trendBias === "STRONG DOWNTREND") shortScore += 4;
+  else if (trendBias === "DOWNTREND") shortScore += 3;
+
+  if (rsi < 25) longScore += 4;
+  else if (rsi < 35) longScore += 2;
+  else if (rsi > 75) shortScore += 4;
+  else if (rsi > 65) shortScore += 2;
+  else if (rsi >= 45 && rsi <= 55) {
+    if (trendBias.includes("UPTREND")) longScore += 1;
+    else if (trendBias.includes("DOWNTREND")) shortScore += 1;
+  }
+
+  if (macdHistogram > 0.0001) longScore += 2;
+  else if (macdHistogram < -0.0001) shortScore += 2;
+
   if (lastClose <= bollingerLower) longScore += 2;
   if (lastClose >= bollingerUpper) shortScore += 2;
-  
+
   const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
   const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
   if (bullishPatterns.length > 0) longScore += bullishPatterns.length * 2;
   if (bearishPatterns.length > 0) shortScore += bearishPatterns.length * 2;
-  
+
   const distanceToSupport = Math.abs(lastClose - support);
   const distanceToResistance = Math.abs(resistance - lastClose);
-  if (distanceToSupport < distanceToResistance) longScore += 1;
-  else shortScore += 1;
+  const totalRange = distanceToSupport + distanceToResistance || 1;
+  const supportRatio = distanceToSupport / totalRange;
   
+  if (supportRatio < 0.3) longScore += 2;
+  else if (supportRatio > 0.7) shortScore += 2;
+
+  const diff = Math.abs(longScore - shortScore);
+  if (diff < 2) return "neutral";
+
   return longScore > shortScore ? "long" : "short";
 }
 
@@ -382,7 +466,7 @@ async function fetchFromFCS(pair: string, timeframe: string): Promise<number[] |
     });
     if (response.ok) {
       const data = await response.json();
-      if (data.closes && data.closes.length > 30) {
+      if (data.closes && data.closes.length >= 50) {
         console.log(`[FCS] ${pair} ${timeframe}: ${data.closes.length} candles`);
         return data.closes;
       }
@@ -402,11 +486,11 @@ async function fetchFromYahoo(pair: string, timeframe: string): Promise<number[]
       period2: new Date(),
       interval: yahooInterval as any,
     });
-    if (result.quotes && result.quotes.length > 30) {
+    if (result.quotes && result.quotes.length >= 50) {
       const prices = result.quotes
         .filter((item) => item.close !== null && item.close !== undefined)
         .map((item) => Number(item.close));
-      if (prices.length > 30) {
+      if (prices.length >= 50) {
         console.log(`[Yahoo] ${pair} ${timeframe}: ${prices.length} candles`);
         return prices;
       }
@@ -432,7 +516,8 @@ export async function getRealHistoricalData(pair: string, interval: string = "1H
     if (yahooData) return { prices: yahooData, source: "yahoo" };
   }
 
-  console.warn(`[Fallback] Using deterministic synthetic data for ${pair} ${interval}`);
+  // Deterministic synthetic fallback — same pair+timeframe = same data
+  console.warn(`[Fallback] Deterministic synthetic data for ${pair} ${interval}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
@@ -481,21 +566,6 @@ export async function getLivePrice(pair: string, timeframe: string = "1H"): Prom
     }
   } catch (error) {}
 
-  try {
-    const symbol = toYahooSymbol(pair);
-    const result = await yahooFinance.chart(symbol, {
-      period1: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-      period2: new Date(),
-      interval: "1h",
-    });
-    if (result.quotes && result.quotes.length > 0) {
-      const prices = result.quotes
-        .filter((q) => q.close !== null && q.close !== undefined)
-        .map((q) => Number(q.close));
-      if (prices.length > 0) return prices[prices.length - 1];
-    }
-  } catch (error) {}
-
   return FALLBACK_PRICES[pair] || 1.0;
 }
 
@@ -522,21 +592,22 @@ export async function generateSignalLevels(
   if (pair.includes("BTC")) decimals = 2;
   if (pair.includes("ETH")) decimals = 2;
 
+  // Fetch data SPECIFIC to the selected timeframe
   const { prices: priceHistory, source: dataSource } = await getRealHistoricalData(pair, timeframe);
 
-  // CRITICAL: Use last CLOSE from history for direction, not live tick price
   const lastClose = priceHistory[priceHistory.length - 1];
 
   const highs = priceHistory.map((p, i) => Math.max(p, priceHistory[i - 1] || p) * 1.001);
   const lows = priceHistory.map((p, i) => Math.min(p, priceHistory[i - 1] || p) * 0.999);
 
+  // All indicators use TIMEFRAME-SPECIFIC periods
   const ma20 = calculateSMA(priceHistory, config.ma20);
   const ma50 = calculateSMA(priceHistory, config.ma50);
   const ma200 = calculateSMA(priceHistory, config.ma200);
   const rsi = calculateRSI(priceHistory, config.rsiPeriod);
-  const atr = calculateATR(priceHistory, config.rsiPeriod);
+  const atr = calculateATR(priceHistory, config.atrPeriod);
   const macdData = calculateMACD(priceHistory, config.macdFast, config.macdSlow, config.macdSignal);
-  const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod);
+  const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod, config.bbStdDev);
 
   const { support, resistance } = findSupportResistance(priceHistory, config.srLookback);
   const trendBias = determineTrend(ma20, ma50, ma200);
@@ -546,31 +617,53 @@ export async function generateSignalLevels(
   const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
   const { orderBlocks, fairValueGaps, liquidityLevels } = analyzeSmartMoney(priceHistory, highs, lows);
 
-  // DIRECTION from indicators only — consistent across user and admin
-  const direction = determineDirection(trendBias, lastClose, support, resistance, rsi, macdData.histogram, bollinger.upper, bollinger.lower, chartPatterns);
+  const direction = determineDirection(
+    trendBias, lastClose, support, resistance, rsi, macdData.histogram,
+    bollinger.upper, bollinger.lower, chartPatterns
+  );
 
-  const { score, reasons, confluences } = calculateSignalScore(trendBias, rsi, atr, lastClose, macdData.histogram, session, support, resistance, chartPatterns, supplyDemandZones);
+  const { score, reasons, confluences } = calculateSignalScore(
+    trendBias, rsi, atr, lastClose, macdData.histogram,
+    session, support, resistance, chartPatterns, supplyDemandZones
+  );
 
+  // SL with proper buffer - derived from the selected timeframe's ATR
   const rawAtrPips = atr / pipSize;
-  const stopLossPips = Math.max(Math.round(rawAtrPips * config.atrMultiplier), 5);
+  let stopLossPips = Math.round(rawAtrPips * config.atrMultiplier);
+  // Enforce minimum SL as % of price
+  const minSlPips = Math.round((currentPrice * config.minSlPercent) / pipSize);
+  stopLossPips = Math.max(stopLossPips, minSlPips);
+  // Cap at 10% of price
+  const maxSlPips = Math.round((currentPrice * 0.10) / pipSize);
+  stopLossPips = Math.min(stopLossPips, maxSlPips);
+  // Absolute floor
+  stopLossPips = Math.max(stopLossPips, 5);
 
   console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} lastClose=${lastClose.toFixed(4)} atr=${atr.toFixed(5)} slPips=${stopLossPips} dir=${direction}`);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
-  const backtest = backtestStrategy(priceHistory, direction, stopLossPips, Math.round(stopLossPips * config.slToTpRatio[0]), pipSize);
+  const backtest = backtestStrategy(priceHistory, direction === "neutral" ? "long" : direction, stopLossPips, Math.round(stopLossPips * config.slToTpRatio[0]), pipSize);
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
-  const orderRecommendation = determineOrderType(direction, lastClose, support, resistance, rsi, bollinger.upper, bollinger.lower, trendBias, atr);
+  const orderRecommendation = determineOrderType(
+    direction === "neutral" ? "long" : direction,
+    lastClose, support, resistance, rsi, bollinger.upper, bollinger.lower, trendBias, atr
+  );
 
-  // Entry at live price (what user sees now)
   const entry = currentPrice;
   const slDistance = stopLossPips * pipSize;
   const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
 
   let stopLossPrice: number, tp1Price: number, tp2Price: number, tp3Price: number;
 
-  if (direction === "long") {
+  if (direction === "neutral") {
+    // No trade — collapse all levels to entry
+    stopLossPrice = entry;
+    tp1Price = entry;
+    tp2Price = entry;
+    tp3Price = entry;
+  } else if (direction === "long") {
     stopLossPrice = entry - slDistance;
     tp1Price = entry + slDistance * tp1Ratio;
     tp2Price = entry + slDistance * tp2Ratio;
@@ -586,7 +679,7 @@ export async function generateSignalLevels(
   const rewardPips2 = Math.round(Math.abs(tp2Price - entry) / pipSize);
   const rewardPips3 = Math.round(Math.abs(tp3Price - entry) / pipSize);
 
-  const confidence = score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
+  const confidence = direction === "neutral" ? "NEUTRAL" : score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
 
   return {
     pair,
@@ -602,11 +695,11 @@ export async function generateSignalLevels(
     takeProfit3: Number(tp3Price.toFixed(decimals)),
     riskPips: stopLossPips,
     rewardPips1, rewardPips2, rewardPips3,
-    riskReward1: (rewardPips1 / stopLossPips).toFixed(1),
-    riskReward2: (rewardPips2 / stopLossPips).toFixed(1),
-    riskReward3: (rewardPips3 / stopLossPips).toFixed(1),
+    riskReward1: direction === "neutral" ? "0" : (rewardPips1 / stopLossPips).toFixed(1),
+    riskReward2: direction === "neutral" ? "0" : (rewardPips2 / stopLossPips).toFixed(1),
+    riskReward3: direction === "neutral" ? "0" : (rewardPips3 / stopLossPips).toFixed(1),
     confidence,
-    confidenceScore: score,
+    confidenceScore: direction === "neutral" ? 0 : score,
     timestamp: Date.now(),
     trendBias,
     supportLevel: Number(support.toFixed(decimals)),
