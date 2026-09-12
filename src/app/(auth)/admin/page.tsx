@@ -6,6 +6,7 @@ import { TradingViewChart } from "@/components/charts/tradingview-chart";
 
 const ADMIN_EMAIL = "normanainebyoona7@gmail.com";
 const ADMIN_PASSWORD = "norman2026";
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
 
 export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -21,6 +22,7 @@ export default function AdminPage() {
   const [showAddSignal, setShowAddSignal] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [autoPair, setAutoPair] = useState("XAU/USD");
+  const [autoTimeframe, setAutoTimeframe] = useState("1H");
   const [autoPrice, setAutoPrice] = useState("");
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoResult, setAutoResult] = useState<any>(null);
@@ -155,7 +157,8 @@ export default function AdminPage() {
       const formData = new FormData();
       formData.append("file", screenshot);
       formData.append("pair", autoPair);
-      formData.append("timeframe", "1H");
+      formData.append("timeframe", autoTimeframe);
+      if (autoPrice) formData.append("userPrice", autoPrice);
 
       const response = await fetch("/api/analyze-chart", { method: "POST", body: formData });
       const data = await response.json();
@@ -198,7 +201,7 @@ export default function AdminPage() {
       const dummyFile = new File([""], "admin-analysis.png", { type: "image/png" });
       formData.append("file", dummyFile);
       formData.append("pair", autoPair);
-      formData.append("timeframe", "1H");
+      formData.append("timeframe", autoTimeframe);
       if (autoPrice) formData.append("userPrice", autoPrice);
 
       const response = await fetch("/api/analyze-chart", { method: "POST", body: formData });
@@ -455,7 +458,40 @@ export default function AdminPage() {
           <h2 style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: "700", marginBottom: "16px" }}>🤖 Auto Signal Analysis</h2>
 
           <div style={{ marginBottom: "20px" }}>
-            <TradingViewChart onPairChange={setAutoPair} />
+            <TradingViewChart 
+              onPairChange={setAutoPair}
+              onTimeframeChange={setAutoTimeframe}
+            />
+          </div>
+
+          {/* Timeframe selector — must match user side */}
+          <div style={{ marginBottom: "20px" }}>
+            <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "8px" }}>
+              ⏱️ Timeframe
+            </label>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {TIMEFRAMES.map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setAutoTimeframe(tf)}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: autoTimeframe === tf ? "#1c69e3" : "#e5e7eb",
+                    color: autoTimeframe === tf ? "#fff" : "#111827",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    fontSize: isMobile ? "12px" : "14px",
+                  }}
+                >
+                  {tf}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "6px" }}>
+              Currently analyzing: <strong>{autoPair}</strong> on <strong>{autoTimeframe}</strong>
+            </p>
           </div>
 
           <div style={{ marginBottom: "20px", padding: isMobile ? "12px" : "16px", background: "#f9fafb", borderRadius: "8px", border: "1px solid #e5e7eb" }}>
@@ -520,7 +556,9 @@ export default function AdminPage() {
 
           {autoResult && (
             <div style={{ marginTop: "16px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
-              <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>✅ Signal Generated! (Expires in 24h)</p>
+              <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>
+                ✅ Signal Generated — {autoPair} ({autoResult.timeframe || autoTimeframe}) (Expires in 24h)
+              </p>
               
               <div style={{
                 padding: "12px",
@@ -539,7 +577,6 @@ export default function AdminPage() {
                 </p>
               </div>
 
-              {/* SL / TP Display - Numeric values */}
               <div style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
@@ -578,7 +615,7 @@ export default function AdminPage() {
                   <p style={{ fontWeight: "700", color: "#d97706", marginBottom: "6px", fontSize: "12px" }}>📐 CHART PATTERNS:</p>
                   <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
                     {autoResult.chartPatterns.map((p: any, i: number) => (
-                      <li key={i} style={{ padding: "2px 0" }}>• {p.name} ({p.type}, Strength: {p.strength}/10) - {p.description}</li>
+                      <li key={i} style={{ padding: "2px 0" }}>• {p.name} ({p.type}, Strength: {p.strength}/10)</li>
                     ))}
                   </ul>
                 </div>
@@ -589,7 +626,7 @@ export default function AdminPage() {
                   <p style={{ fontWeight: "700", color: "#1c69e3", marginBottom: "6px", fontSize: "12px" }}>📦 SUPPLY/DEMAND ZONES:</p>
                   <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
                     {autoResult.supplyDemandZones.map((z: any, i: number) => (
-                      <li key={i} style={{ padding: "2px 0" }}>• {z.type.toUpperCase()} at {z.bottom} - {z.top} (Strength: {z.strength}/10)</li>
+                      <li key={i} style={{ padding: "2px 0" }}>• {z.type.toUpperCase()} at {z.bottom} - {z.top}</li>
                     ))}
                   </ul>
                 </div>
@@ -600,34 +637,11 @@ export default function AdminPage() {
                 <p>ATR: <strong>{autoResult.atr || "N/A"}</strong></p>
                 <p>Trend: <strong>{autoResult.trendBias || "N/A"}</strong></p>
                 <p>MACD: <strong>{autoResult.macd || "N/A"}</strong></p>
-                <p>MACD Signal: <strong>{autoResult.macdSignal || "N/A"}</strong></p>
-                <p>MACD Hist: <strong>{autoResult.macdHistogram || "N/A"}</strong></p>
-                <p>Bollinger Upper: <strong>{autoResult.bollingerUpper || "N/A"}</strong></p>
-                <p>Bollinger Lower: <strong>{autoResult.bollingerLower || "N/A"}</strong></p>
                 <p>Support: <strong>{autoResult.supportLevel || "N/A"}</strong></p>
                 <p>Resistance: <strong>{autoResult.resistanceLevel || "N/A"}</strong></p>
-                <p>MA20: <strong>{autoResult.ma20 || "N/A"}</strong></p>
-                <p>MA50: <strong>{autoResult.ma50 || "N/A"}</strong></p>
                 <p>Session: <strong>{autoResult.session || "N/A"}</strong></p>
-                <p>Multi-TF: <strong>{autoResult.multiTimeframeConsensus || "N/A"} ({autoResult.multiTimeframeStrength}%)</strong></p>
+                <p>Multi-TF: <strong>{autoResult.multiTimeframeConsensus || "N/A"}</strong></p>
               </div>
-
-              {autoResult.sessionAnalysis && (
-                <div style={{ marginTop: "12px", padding: "10px", background: "#fefce8", borderRadius: "8px", border: "1px solid #fde68a" }}>
-                  <p style={{ fontSize: "12px", color: "#854d0e" }}>📅 {autoResult.sessionAnalysis}</p>
-                </div>
-              )}
-
-              {autoResult.patterns && autoResult.patterns.length > 0 && (
-                <div style={{ marginTop: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                  <p style={{ fontWeight: "700", color: "#16a34a", marginBottom: "6px", fontSize: "12px" }}>📊 CANDLESTICK PATTERNS:</p>
-                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
-                    {autoResult.patterns.map((p: any, i: number) => (
-                      <li key={i} style={{ padding: "2px 0" }}>• {p.name} ({p.type}, Strength: {p.strength}/10)</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
           )}
         </div>
