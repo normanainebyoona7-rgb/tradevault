@@ -86,7 +86,6 @@ const EXNESS_SPREADS: Record<string, number> = {
   "GBP/JPY": 2.5,
 };
 
-// Pairs that use Yahoo for higher timeframes
 const CRYPTO_PAIRS = ["BTC/USD", "ETH/USD"];
 const METAL_PAIRS = ["XAU/USD", "XAG/USD"];
 
@@ -157,6 +156,27 @@ export function calculatePipSize(pair: string): number {
 
 export function getExnessSpread(pair: string): number {
   return EXNESS_SPREADS[pair] || 2;
+}
+
+// ===== DETERMINISTIC PRNG (for consistent fallback data) =====
+
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return Math.abs(hash);
+}
+
+function mulberry32(seed: number) {
+  return function () {
+    let t = (seed += 0x6D2B79F5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // ===== TECHNICAL INDICATORS =====
@@ -330,15 +350,14 @@ function calculateSignalScore(trendBias: string, rsi: number, atr: number, curre
 
 // ===== DATA FETCHING =====
 
-// Yahoo works for crypto on 1H+ and metals. For lower crypto TFs, use FCS.
 function shouldUseYahoo(pair: string, timeframe: string): boolean {
   const isCrypto = CRYPTO_PAIRS.includes(pair);
   const isMetal = METAL_PAIRS.includes(pair);
   const isHighTF = ["1H", "4H", "1D", "1W"].includes(timeframe);
   
-  if (isCrypto) return isHighTF; // Crypto: Yahoo only for 1H+
-  if (isMetal) return true; // Metals: Yahoo always
-  return false; // Forex: never use Yahoo
+  if (isCrypto) return isHighTF;
+  if (isMetal) return true;
+  return false;
 }
 
 async function fetchFromFCS(pair: string, timeframe: string): Promise<number[] | null> {
@@ -390,7 +409,6 @@ async function fetchFromYahoo(pair: string, timeframe: string): Promise<number[]
 export async function getRealHistoricalData(pair: string, interval: string = "1H"): Promise<{ prices: number[]; source: string }> {
   const useYahooFirst = shouldUseYahoo(pair, interval);
 
-  // Try primary source
   if (useYahooFirst) {
     const yahooData = await fetchFromYahoo(pair, interval);
     if (yahooData) return { prices: yahooData, source: "yahoo" };
@@ -403,18 +421,21 @@ export async function getRealHistoricalData(pair: string, interval: string = "1H
     if (yahooData) return { prices: yahooData, source: "yahoo" };
   }
 
-  // Realistic synthetic fallback with proper volatility
-  console.warn(`[Fallback] Using synthetic data for ${pair} ${interval}`);
+  // Deterministic synthetic fallback — same pair+timeframe = same data
+  console.warn(`[Fallback] Using deterministic synthetic data for ${pair} ${interval}`);
   const basePrice = FALLBACK_PRICES[pair] || 1.0;
   const prices: number[] = [];
   let price = basePrice;
-  // 1% volatility per candle (realistic for crypto, generous for forex)
   const volatility = basePrice * 0.01;
+  
+  const seed = hashString(`${pair}-${interval}`);
+  const random = mulberry32(seed);
+  
   for (let i = 0; i < 200; i++) {
-    price += (Math.random() - 0.5) * volatility;
+    price += (random() - 0.5) * volatility;
     prices.push(price);
   }
-  return { prices, source: "synthetic" };
+  return { prices, source: "synthetic_deterministic" };
 }
 
 export async function getLivePrice(pair: string, timeframe: string = "1H"): Promise<number> {
@@ -438,7 +459,6 @@ export async function getLivePrice(pair: string, timeframe: string = "1H"): Prom
     } catch (error) {}
   }
 
-  // Try FCS
   try {
     const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
     const response = await fetch(`${pythonUrl}/api/get-price`, {
@@ -453,7 +473,6 @@ export async function getLivePrice(pair: string, timeframe: string = "1H"): Prom
     }
   } catch (error) {}
 
-  // Try Yahoo as last resort
   try {
     const symbol = toYahooSymbol(pair);
     const result = await yahooFinance.chart(symbol, {
@@ -520,11 +539,10 @@ export async function generateSignalLevels(
 
   const { score, reasons, confluences } = calculateSignalScore(trendBias, rsi, atr, currentPrice, macdData.histogram, session, support, resistance, chartPatterns, supplyDemandZones);
 
-  // ATR-based stop loss, scaled per timeframe
   const rawAtrPips = atr / pipSize;
   const stopLossPips = Math.max(Math.round(rawAtrPips * config.atrMultiplier), 5);
 
-  console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} atr=${atr.toFixed(5)} slPips=${stopLossPips}`);
+  console.log(`[Signal] ${pair} ${timeframe}: source=${dataSource} candles=${priceHistory.length} atr=${atr.toFixed(5)} slPips=${stopLossPips} dir=${direction}`);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
   const backtest = backtestStrategy(priceHistory, direction, stopLossPips, Math.round(stopLossPips * config.slToTpRatio[0]), pipSize);
