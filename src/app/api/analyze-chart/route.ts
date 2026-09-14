@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { generateSignalLevels, getExnessSpread, getLivePrice, ImageLevels } from "@/lib/forex-data";
+import { generateSignalLevels, getExnessSpread, getLivePrice } from "@/lib/forex-data";
 
 function buildAnalysis(pair: string, timeframe: string, signal: any): string {
   const rsiStatus = signal.rsi > 70 ? "OVERBOUGHT" : signal.rsi < 30 ? "OVERSOLD" : "NEUTRAL";
@@ -33,11 +33,6 @@ ${emoji} **Direction: ${dir}**
 📉 RSI: ${signal.rsi} (${rsiStatus})
 🕐 Session: ${signal.session}
 
-${signal.imageLevels ? `📸 **Analyzed from chart image:**
-   • Support levels: ${signal.imageLevels.support.length}
-   • Resistance levels: ${signal.imageLevels.resistance.length}
-   • Detected trend: ${signal.imageLevels.trend}` : `📡 Live data analysis`}
-
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 🎯 **ENTRY: ${signal.entryPrice}**
@@ -49,43 +44,6 @@ ${signal.imageLevels ? `📸 **Analyzed from chart image:**
 ⚡ **CONFIDENCE: ${signal.confidence} (${signal.signalScore}/100)**`;
 }
 
-async function analyzeImageWithPython(file: File): Promise<ImageLevels | null> {
-  try {
-    const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const response = await fetch(`${pythonUrl}/api/analyze-image`, {
-      method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(30000),
-    });
-
-    if (!response.ok) {
-      console.error(`Python image analysis failed: ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json();
-    if (data.status !== "success") {
-      console.error(`Python returned error: ${data.message}`);
-      return null;
-    }
-
-    return {
-      support: data.support_levels || [],
-      resistance: data.resistance_levels || [],
-      yMin: data.y_axis_range?.min || 0,
-      yMax: data.y_axis_range?.max || 0,
-      trend: data.trend?.bias || "NEUTRAL",
-      greenPct: data.trend?.green_pct || 50,
-    };
-  } catch (error: any) {
-    console.error(`Image analysis error: ${error?.message}`);
-    return null;
-  }
-}
-
 export async function POST(request: Request) {
   try {
     const session = await getSession();
@@ -93,25 +51,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const formData = await request.formData();
-    const file = formData.get("file") as File;
-    const pair = (formData.get("pair") as string) || "EUR/USD";
-    const timeframe = (formData.get("timeframe") as string) || "1H";
-    const userPrice = formData.get("userPrice") as string;
+    const contentType = request.headers.get("content-type") || "";
 
-    if (!file) {
-      return NextResponse.json({ error: "Image file required" }, { status: 400 });
-    }
+    let pair = "EUR/USD";
+    let timeframe = "1H";
+    let userPrice: string | null = null;
 
-    // 1. Analyze the uploaded image via Python
-    const imageLevels = await analyzeImageWithPython(file);
-    if (imageLevels) {
-      console.log(`[Image] ${pair}: ${imageLevels.support.length} support, ${imageLevels.resistance.length} resistance, trend=${imageLevels.trend}`);
+    // Support both JSON and FormData (for backward compatibility)
+    if (contentType.includes("application/json")) {
+      const body = await request.json();
+      pair = body.pair || "EUR/USD";
+      timeframe = body.timeframe || "1H";
+      userPrice = body.userPrice || null;
     } else {
-      console.log(`[Image] No levels extracted — falling back to ATR-based analysis`);
+      const formData = await request.formData();
+      pair = (formData.get("pair") as string) || "EUR/USD";
+      timeframe = (formData.get("timeframe") as string) || "1H";
+      userPrice = formData.get("userPrice") as string;
     }
 
-    // 2. Get current price
+    // Get current price
     let currentPrice: number;
     if (userPrice && !isNaN(Number(userPrice)) && Number(userPrice) > 0) {
       currentPrice = Number(userPrice);
@@ -119,8 +78,8 @@ export async function POST(request: Request) {
       currentPrice = await getLivePrice(pair, timeframe);
     }
 
-    // 3. Generate signal — image levels drive SL/TP placement
-    const signal = await generateSignalLevels(pair, currentPrice, timeframe, imageLevels);
+    // Generate signal from real candle data
+    const signal = await generateSignalLevels(pair, currentPrice, timeframe);
     const spread = getExnessSpread(pair);
     const analysis = buildAnalysis(pair, timeframe, signal);
 
@@ -172,7 +131,6 @@ export async function POST(request: Request) {
         chartPatterns: signal.chartPatterns,
         supplyDemandZones: signal.supplyDemandZones,
         backtest: signal.backtest,
-        imageLevels: signal.imageLevels,
         dataSource: signal.dataSource,
       },
     });

@@ -1,4 +1,5 @@
 // src/lib/forex-data.ts
+// Strategy: Real candle data only. No image. No SMC. Clean indicator + pattern analysis.
 
 import YahooFinance from "yahoo-finance2";
 import { detectPatterns, CandlestickPattern } from "./patterns";
@@ -8,15 +9,6 @@ import { determineOrderType, OrderType, getOrderTypeDescription, OrderRecommenda
 import { analyzeAllPatterns, ChartPattern, SupplyDemandZone } from "./advanced-patterns";
 
 const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
-
-export interface ImageLevels {
-  support: number[];
-  resistance: number[];
-  yMin: number;
-  yMax: number;
-  trend: string;
-  greenPct: number;
-}
 
 export interface SignalLevels {
   pair: string;
@@ -66,7 +58,6 @@ export interface SignalLevels {
   multiTimeframeConsensus: string;
   multiTimeframeStrength: number;
   confluences: string[];
-  imageLevels: ImageLevels | null;
   dataSource: string;
 }
 
@@ -81,26 +72,36 @@ const EXNESS_SPREADS: Record<string, number> = {
   "XAG/USD": 30, "BTC/USD": 100, "ETH/USD": 20, "GBP/JPY": 2.5,
 };
 
+const CRYPTO_PAIRS = ["BTC/USD", "ETH/USD"];
+const METAL_PAIRS = ["XAU/USD", "XAG/USD"];
+
 interface TimeframeConfig {
   atrMultiplier: number;
   minSlPercent: number;
+  maxSlPercent: number;
+  slToTpRatio: [number, number, number];
   rsiPeriod: number;
-  ma20: number; ma50: number; ma200: number;
+  atrPeriod: number;
+  ma20: number;
+  ma50: number;
+  ma200: number;
   bbPeriod: number;
-  macdFast: number; macdSlow: number; macdSignal: number;
+  macdFast: number;
+  macdSlow: number;
+  macdSignal: number;
   srLookback: number;
 }
 
 function getTimeframeConfig(timeframe: string): TimeframeConfig {
   const configs: Record<string, TimeframeConfig> = {
-    "1m": { atrMultiplier: 1.5, minSlPercent: 0.0008, rsiPeriod: 7, ma20: 10, ma50: 25, ma200: 100, bbPeriod: 10, macdFast: 6, macdSlow: 13, macdSignal: 5, srLookback: 15 },
-    "5m": { atrMultiplier: 1.5, minSlPercent: 0.0012, rsiPeriod: 9, ma20: 15, ma50: 35, ma200: 150, bbPeriod: 15, macdFast: 8, macdSlow: 17, macdSignal: 6, srLookback: 20 },
-    "15m": { atrMultiplier: 1.5, minSlPercent: 0.002, rsiPeriod: 11, ma20: 20, ma50: 50, ma200: 150, bbPeriod: 20, macdFast: 10, macdSlow: 22, macdSignal: 8, srLookback: 25 },
-    "30m": { atrMultiplier: 1.5, minSlPercent: 0.0025, rsiPeriod: 12, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30 },
-    "1H": { atrMultiplier: 1.5, minSlPercent: 0.003, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50 },
-    "4H": { atrMultiplier: 1.8, minSlPercent: 0.006, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50 },
-    "1D": { atrMultiplier: 2.0, minSlPercent: 0.012, rsiPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30 },
-    "1W": { atrMultiplier: 2.5, minSlPercent: 0.025, rsiPeriod: 14, ma20: 10, ma50: 30, ma200: 100, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 20 },
+    "1m": { atrMultiplier: 1.5, minSlPercent: 0.001, maxSlPercent: 0.008, slToTpRatio: [1.5, 3.0, 5.0], rsiPeriod: 7, atrPeriod: 7, ma20: 10, ma50: 25, ma200: 100, bbPeriod: 10, macdFast: 6, macdSlow: 13, macdSignal: 5, srLookback: 15 },
+    "5m": { atrMultiplier: 1.5, minSlPercent: 0.0015, maxSlPercent: 0.012, slToTpRatio: [1.5, 3.0, 5.0], rsiPeriod: 9, atrPeriod: 9, ma20: 15, ma50: 35, ma200: 150, bbPeriod: 15, macdFast: 8, macdSlow: 17, macdSignal: 6, srLookback: 20 },
+    "15m": { atrMultiplier: 1.5, minSlPercent: 0.002, maxSlPercent: 0.02, slToTpRatio: [1.5, 3.0, 5.0], rsiPeriod: 11, atrPeriod: 11, ma20: 20, ma50: 50, ma200: 150, bbPeriod: 20, macdFast: 10, macdSlow: 22, macdSignal: 8, srLookback: 25 },
+    "30m": { atrMultiplier: 1.5, minSlPercent: 0.0025, maxSlPercent: 0.025, slToTpRatio: [1.5, 3.0, 5.0], rsiPeriod: 12, atrPeriod: 12, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30 },
+    "1H": { atrMultiplier: 1.5, minSlPercent: 0.003, maxSlPercent: 0.03, slToTpRatio: [1.5, 3.0, 5.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50 },
+    "4H": { atrMultiplier: 1.8, minSlPercent: 0.005, maxSlPercent: 0.05, slToTpRatio: [1.5, 3.0, 5.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 50 },
+    "1D": { atrMultiplier: 2.0, minSlPercent: 0.01, maxSlPercent: 0.08, slToTpRatio: [2.0, 3.5, 6.0], rsiPeriod: 14, atrPeriod: 14, ma20: 20, ma50: 50, ma200: 200, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 30 },
+    "1W": { atrMultiplier: 2.5, minSlPercent: 0.02, maxSlPercent: 0.12, slToTpRatio: [2.0, 4.0, 6.0], rsiPeriod: 14, atrPeriod: 14, ma20: 10, ma50: 30, ma200: 100, bbPeriod: 20, macdFast: 12, macdSlow: 26, macdSignal: 9, srLookback: 20 },
   };
   return configs[timeframe] || configs["1H"];
 }
@@ -273,143 +274,66 @@ function getSessionAnalysis(session: string, pair: string): string {
   return map[session] || map["OTHER"];
 }
 
-// ===== DIRECTION: image trend dominates when provided =====
+// ===== DIRECTION =====
 
 function determineDirection(
-  imageLevels: ImageLevels | null,
   trendBias: string,
   lastClose: number,
   support: number,
   resistance: number,
   rsi: number,
   macdHistogram: number,
+  bollingerUpper: number,
+  bollingerLower: number,
+  chartPatterns: ChartPattern[],
 ): "long" | "short" | "neutral" {
   let longScore = 0, shortScore = 0;
 
-  // Image trend has strong weight (uploaded chart is the actual market)
-  if (imageLevels) {
-    if (imageLevels.trend === "BULLISH") longScore += 4;
-    else if (imageLevels.trend === "BEARISH") shortScore += 4;
+  // Trend
+  if (trendBias === "STRONG UPTREND") longScore += 4;
+  else if (trendBias === "UPTREND") longScore += 3;
+  else if (trendBias === "STRONG DOWNTREND") shortScore += 4;
+  else if (trendBias === "DOWNTREND") shortScore += 3;
 
-    // Green percentage
-    if (imageLevels.greenPct >= 65) longScore += 2;
-    else if (imageLevels.greenPct <= 35) shortScore += 2;
-  }
+  // RSI
+  if (rsi < 25) longScore += 3;
+  else if (rsi < 35) longScore += 2;
+  else if (rsi > 75) shortScore += 3;
+  else if (rsi > 65) shortScore += 2;
 
-  // Indicator-based scoring
-  if (trendBias === "STRONG UPTREND") longScore += 3;
-  else if (trendBias === "UPTREND") longScore += 2;
-  else if (trendBias === "STRONG DOWNTREND") shortScore += 3;
-  else if (trendBias === "DOWNTREND") shortScore += 2;
+  // MACD
+  if (macdHistogram > 0) longScore += 2;
+  else if (macdHistogram < 0) shortScore += 2;
 
-  if (rsi < 30) longScore += 2;
-  else if (rsi > 70) shortScore += 2;
-  if (macdHistogram > 0) longScore += 1;
-  else if (macdHistogram < 0) shortScore += 1;
+  // Bollinger
+  if (lastClose <= bollingerLower) longScore += 2;
+  if (lastClose >= bollingerUpper) shortScore += 2;
 
-  if (longScore > shortScore) return "long";
-  if (shortScore > longScore) return "short";
-  return "neutral";
-}
+  // Chart patterns
+  const bullishPatterns = chartPatterns.filter(p => p.type === "bullish");
+  const bearishPatterns = chartPatterns.filter(p => p.type === "bearish");
+  if (bullishPatterns.length > 0) longScore += bullishPatterns.length * 2;
+  if (bearishPatterns.length > 0) shortScore += bearishPatterns.length * 2;
 
-// ===== SL/TP: image levels drive placement, ATR fallback =====
+  // S/R proximity
+  const distanceToSupport = Math.abs(lastClose - support);
+  const distanceToResistance = Math.abs(resistance - lastClose);
+  const totalRange = distanceToSupport + distanceToResistance || 1;
+  const supportRatio = distanceToSupport / totalRange;
+  if (supportRatio < 0.3) longScore += 1;
+  else if (supportRatio > 0.7) shortScore += 1;
 
-function placeSlTp(
-  direction: "long" | "short",
-  entry: number,
-  imageLevels: ImageLevels | null,
-  atr: number,
-  pipSize: number,
-  config: TimeframeConfig,
-): { sl: number; tp1: number; tp2: number; tp3: number; source: string } {
-  // Default ATR-based plan
-  const atrPips = atr / pipSize;
-  let slPips = Math.max(Math.round(atrPips * config.atrMultiplier), 5);
-  const minPips = Math.round((entry * config.minSlPercent) / pipSize);
-  slPips = Math.max(slPips, minPips);
+  const diff = Math.abs(longScore - shortScore);
+  if (diff < 2) return "neutral";
 
-  const slDist = slPips * pipSize;
-
-  let sl: number, tp1: number, tp2: number, tp3: number;
-  if (direction === "long") {
-    sl = entry - slDist;
-    tp1 = entry + slDist * 1.0;
-    tp2 = entry + slDist * 2.0;
-    tp3 = entry + slDist * 3.0;
-  } else {
-    sl = entry + slDist;
-    tp1 = entry - slDist * 1.0;
-    tp2 = entry - slDist * 2.0;
-    tp3 = entry - slDist * 3.0;
-  }
-
-  if (!imageLevels) {
-    return { sl, tp1, tp2, tp3, source: "atr" };
-  }
-
-  // ===== IMAGE-BASED PLACEMENT =====
-  const { support, resistance } = imageLevels;
-
-  if (direction === "long") {
-    // SL: just below nearest support below entry
-    const supportBelow = support.filter(s => s < entry).sort((a, b) => b - a);
-    if (supportBelow.length > 0) {
-      sl = supportBelow[0] - slDist * 0.2;
-    }
-
-    // TPs: use resistance levels above entry
-    const resistAbove = resistance.filter(r => r > entry).sort((a, b) => a - b);
-    if (resistAbove.length >= 3) {
-      tp1 = resistAbove[0];
-      tp2 = resistAbove[1];
-      tp3 = resistAbove[2];
-    } else if (resistAbove.length === 2) {
-      tp1 = resistAbove[0];
-      tp2 = resistAbove[1];
-      tp3 = entry + (entry - sl) * 3;
-    } else if (resistAbove.length === 1) {
-      tp1 = resistAbove[0];
-      tp2 = entry + (entry - sl) * 2;
-      tp3 = entry + (entry - sl) * 3;
-    }
-  } else {
-    // Short
-    const resistAbove = resistance.filter(r => r > entry).sort((a, b) => a - b);
-    if (resistAbove.length > 0) {
-      sl = resistAbove[0] + slDist * 0.2;
-    }
-
-    const supportBelow = support.filter(s => s < entry).sort((a, b) => b - a);
-    if (supportBelow.length >= 3) {
-      tp1 = supportBelow[0];
-      tp2 = supportBelow[1];
-      tp3 = supportBelow[2];
-    } else if (supportBelow.length === 2) {
-      tp1 = supportBelow[0];
-      tp2 = supportBelow[1];
-      tp3 = entry - (sl - entry) * 3;
-    } else if (supportBelow.length === 1) {
-      tp1 = supportBelow[0];
-      tp2 = entry - (sl - entry) * 2;
-      tp3 = entry - (sl - entry) * 3;
-    }
-  }
-
-  // Sanity: TPs must be on the profitable side
-  const risk = Math.abs(entry - sl);
-  if (risk < pipSize * 5) {
-    // too tight, fallback
-    return { sl, tp1, tp2, tp3, source: "atr_fallback" };
-  }
-
-  return { sl, tp1, tp2, tp3, source: "image" };
+  return longScore > shortScore ? "long" : "short";
 }
 
 // ===== DATA FETCHING =====
 
 function shouldUseYahoo(pair: string, timeframe: string): boolean {
-  if (pair === "BTC/USD" || pair === "ETH/USD") return ["1H", "4H", "1D", "1W"].includes(timeframe);
-  if (pair === "XAU/USD" || pair === "XAG/USD") return true;
+  if (CRYPTO_PAIRS.includes(pair)) return ["1H", "4H", "1D", "1W"].includes(timeframe);
+  if (METAL_PAIRS.includes(pair)) return true;
   return false;
 }
 
@@ -518,13 +442,12 @@ export async function getLivePrice(pair: string, timeframe: string = "1H"): Prom
   return FALLBACK_PRICES[pair] || 1.0;
 }
 
-// ===== MAIN =====
+// ===== MAIN SIGNAL GENERATION =====
 
 export async function generateSignalLevels(
   pair: string,
   currentPrice: number,
   timeframe: string = "1H",
-  imageLevels: ImageLevels | null = null,
 ): Promise<SignalLevels> {
   const config = getTimeframeConfig(timeframe);
   const pipSize = calculatePipSize(pair);
@@ -548,7 +471,7 @@ export async function generateSignalLevels(
   const ma50 = calculateSMA(priceHistory, config.ma50);
   const ma200 = calculateSMA(priceHistory, config.ma200);
   const rsi = calculateRSI(priceHistory, config.rsiPeriod);
-  const atr = calculateATR(priceHistory, config.rsiPeriod);
+  const atr = calculateATR(priceHistory, config.atrPeriod);
   const macdData = calculateMACD(priceHistory, config.macdFast, config.macdSlow, config.macdSignal);
   const bollinger = calculateBollingerBands(priceHistory, config.bbPeriod);
 
@@ -560,58 +483,86 @@ export async function generateSignalLevels(
   const { chartPatterns, supplyDemandZones } = analyzeAllPatterns(priceHistory, highs, lows);
 
   const direction = determineDirection(
-    imageLevels, trendBias, lastClose, support, resistance, rsi, macdData.histogram
+    trendBias, lastClose, support, resistance, rsi,
+    macdData.histogram, bollinger.upper, bollinger.lower, chartPatterns
   );
 
-  // Signal score
+  // ==== SCORING ====
   let score = 0;
   const reasons: string[] = [];
   const confluences: string[] = [];
 
-  if (imageLevels) {
-    if (imageLevels.trend === "BULLISH" && direction === "long") { score += 25; confluences.push("✅ Image shows bullish structure"); }
-    if (imageLevels.trend === "BEARISH" && direction === "short") { score += 25; confluences.push("✅ Image shows bearish structure"); }
-    if (imageLevels.support.length > 0) { score += 10; confluences.push(`📍 ${imageLevels.support.length} support levels in image`); }
-    if (imageLevels.resistance.length > 0) { score += 10; confluences.push(`📍 ${imageLevels.resistance.length} resistance levels in image`); }
+  if (trendBias.includes("UPTREND") && direction === "long") { score += 25; confluences.push(`✅ ${trendBias}`); }
+  else if (trendBias.includes("DOWNTREND") && direction === "short") { score += 25; confluences.push(`✅ ${trendBias}`); }
+  else if (trendBias === "NEUTRAL") { score += 5; confluences.push(`⚠️ Neutral trend`); }
+
+  if (macdData.histogram > 0 && direction === "long") { score += 15; confluences.push("✅ MACD bullish"); }
+  else if (macdData.histogram < 0 && direction === "short") { score += 15; confluences.push("✅ MACD bearish"); }
+
+  if (rsi > 30 && rsi < 70) { score += 15; confluences.push(`✅ RSI healthy (${rsi.toFixed(1)})`); }
+  else if (rsi >= 70 && direction === "short") { score += 10; confluences.push("✅ RSI overbought supports short"); }
+  else if (rsi <= 30 && direction === "long") { score += 10; confluences.push("✅ RSI oversold supports long"); }
+
+  if (chartPatterns.length > 0) {
+    score += Math.min(chartPatterns.length * 5, 15);
+    chartPatterns.forEach(p => confluences.push(`📐 ${p.name} (${p.type})`));
   }
 
-  if (trendBias.includes("UPTREND") && direction === "long") { score += 15; confluences.push(`✅ ${trendBias}`); }
-  if (trendBias.includes("DOWNTREND") && direction === "short") { score += 15; confluences.push(`✅ ${trendBias}`); }
-  if (macdData.histogram > 0 && direction === "long") { score += 10; confluences.push("✅ MACD bullish"); }
-  if (macdData.histogram < 0 && direction === "short") { score += 10; confluences.push("✅ MACD bearish"); }
-  if (rsi > 30 && rsi < 70) { score += 10; confluences.push(`✅ RSI healthy (${rsi})`); }
+  if (supplyDemandZones.length > 0) {
+    score += Math.min(supplyDemandZones.length * 3, 10);
+  }
+
+  if (session === "LONDON" || session === "NEW YORK") {
+    score += 10;
+    confluences.push(`🕐 ${session} session`);
+  }
 
   score = Math.min(score, 100);
 
-  // Place SL/TP
-  let sl: number, tp1: number, tp2: number, tp3: number, placementSource: string;
+  // ==== SL / TP PLACEMENT ====
+  // SL = ATR × multiplier, clamped to min/max % of price
+  const rawSlPips = Math.round((atr * config.atrMultiplier) / pipSize);
+  const minSlPips = Math.round((currentPrice * config.minSlPercent) / pipSize);
+  const maxSlPips = Math.round((currentPrice * config.maxSlPercent) / pipSize);
+
+  let stopLossPips = Math.max(rawSlPips, minSlPips);
+  stopLossPips = Math.min(stopLossPips, maxSlPips);
+  stopLossPips = Math.max(stopLossPips, 5);
+
   const entry = currentPrice;
+  const slDistance = stopLossPips * pipSize;
+  const [tp1Ratio, tp2Ratio, tp3Ratio] = config.slToTpRatio;
+
+  let stopLossPrice: number, tp1Price: number, tp2Price: number, tp3Price: number;
 
   if (direction === "neutral") {
-    sl = entry; tp1 = entry; tp2 = entry; tp3 = entry;
-    placementSource = "neutral";
+    stopLossPrice = entry; tp1Price = entry; tp2Price = entry; tp3Price = entry;
+  } else if (direction === "long") {
+    stopLossPrice = entry - slDistance;
+    tp1Price = entry + slDistance * tp1Ratio;
+    tp2Price = entry + slDistance * tp2Ratio;
+    tp3Price = entry + slDistance * tp3Ratio;
   } else {
-    const placed = placeSlTp(direction, entry, imageLevels, atr, pipSize, config);
-    sl = placed.sl; tp1 = placed.tp1; tp2 = placed.tp2; tp3 = placed.tp3;
-    placementSource = placed.source;
-    confluences.push(`🎯 SL/TP placed from ${placementSource === "image" ? "chart image levels" : "ATR"}`);
+    stopLossPrice = entry + slDistance;
+    tp1Price = entry - slDistance * tp1Ratio;
+    tp2Price = entry - slDistance * tp2Ratio;
+    tp3Price = entry - slDistance * tp3Ratio;
   }
 
-  const riskPips = Math.round(Math.abs(entry - sl) / pipSize);
-  const rewardPips1 = Math.round(Math.abs(tp1 - entry) / pipSize);
-  const rewardPips2 = Math.round(Math.abs(tp2 - entry) / pipSize);
-  const rewardPips3 = Math.round(Math.abs(tp3 - entry) / pipSize);
+  const rewardPips1 = Math.round(Math.abs(tp1Price - entry) / pipSize);
+  const rewardPips2 = Math.round(Math.abs(tp2Price - entry) / pipSize);
+  const rewardPips3 = Math.round(Math.abs(tp3Price - entry) / pipSize);
 
-  const rr1 = riskPips > 0 ? (rewardPips1 / riskPips).toFixed(1) : "0";
-  const rr2 = riskPips > 0 ? (rewardPips2 / riskPips).toFixed(1) : "0";
-  const rr3 = riskPips > 0 ? (rewardPips3 / riskPips).toFixed(1) : "0";
+  const riskReward1 = stopLossPips > 0 ? (rewardPips1 / stopLossPips).toFixed(1) : "0";
+  const riskReward2 = stopLossPips > 0 ? (rewardPips2 / stopLossPips).toFixed(1) : "0";
+  const riskReward3 = stopLossPips > 0 ? (rewardPips3 / stopLossPips).toFixed(1) : "0";
 
   const confidence = direction === "neutral" ? "NEUTRAL" : score >= 70 ? "HIGH" : score >= 50 ? "MEDIUM" : "LOW";
 
-  console.log(`[Signal] ${pair} ${timeframe}: dir=${direction} src=${placementSource} entry=${entry.toFixed(4)} sl=${sl.toFixed(4)} tp1=${tp1.toFixed(4)} score=${score}`);
+  console.log(`[Signal] ${pair} ${timeframe}: dir=${direction} entry=${entry.toFixed(4)} sl=${stopLossPrice.toFixed(4)} tp1=${tp1Price.toFixed(4)} slPips=${stopLossPips} score=${score} src=${dataSource}`);
 
   const patterns = detectPatterns(priceHistory, highs, lows);
-  const backtest = backtestStrategy(priceHistory, direction === "neutral" ? "long" : direction, riskPips, rewardPips1, pipSize);
+  const backtest = backtestStrategy(priceHistory, direction === "neutral" ? "long" : direction, stopLossPips, rewardPips1, pipSize);
   const timeframeAnalyses = await analyzeMultipleTimeframes(pair);
   const mtfConsensus = getMultiTimeframeConsensus(timeframeAnalyses);
 
@@ -628,15 +579,15 @@ export async function generateSignalLevels(
     orderTypeDescription: getOrderTypeDescription(orderRecommendation.orderType),
     orderRecommendation,
     entry: Number(entry.toFixed(decimals)),
-    stopLoss: Number(sl.toFixed(decimals)),
-    takeProfit1: Number(tp1.toFixed(decimals)),
-    takeProfit2: Number(tp2.toFixed(decimals)),
-    takeProfit3: Number(tp3.toFixed(decimals)),
-    riskPips,
+    stopLoss: Number(stopLossPrice.toFixed(decimals)),
+    takeProfit1: Number(tp1Price.toFixed(decimals)),
+    takeProfit2: Number(tp2Price.toFixed(decimals)),
+    takeProfit3: Number(tp3Price.toFixed(decimals)),
+    riskPips: stopLossPips,
     rewardPips1, rewardPips2, rewardPips3,
-    riskReward1: rr1,
-    riskReward2: rr2,
-    riskReward3: rr3,
+    riskReward1,
+    riskReward2,
+    riskReward3,
     confidence,
     confidenceScore: direction === "neutral" ? 0 : score,
     timestamp: Date.now(),
@@ -666,7 +617,6 @@ export async function generateSignalLevels(
     multiTimeframeConsensus: mtfConsensus.consensus,
     multiTimeframeStrength: mtfConsensus.strength,
     confluences,
-    imageLevels,
     dataSource,
   };
 }
