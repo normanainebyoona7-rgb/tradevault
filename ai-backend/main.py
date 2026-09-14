@@ -64,7 +64,7 @@ def get_fcs_price(pair: str) -> dict:
     ask = float(active.get("a", 0))
     bid = float(active.get("b", 0))
     price = (ask + bid) / 2 if ask and bid else (ask or bid)
-    return {"pair": pair, "price": price, "ask": ask, "bid": bid, "source": "fcs_api"}
+    return {"pair": pair, "price": price, "source": "fcs_api"}
 
 
 def get_fcs_history(pair: str, timeframe: str, limit: int = 200) -> dict:
@@ -110,133 +110,143 @@ async def get_history(request: HistoryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ===== CHART IMAGE READER =====
+# ===== Y-AXIS READER (Multi-Strategy) =====
 
-def crop_to_plot_area(image_np: np.ndarray) -> tuple:
+def clean_price_number(text: str) -> Optional[float]:
+    """Clean OCR text and return a float if it looks like a price."""
+    if not text:
+        return None
+    # Remove everything except digits, dots, commas, minus
+    cleaned = re.sub(r'[^\d.,\-]', '', text)
+    if not cleaned:
+        return None
+    # Handle cases like "2,400.50" -> 2400.50
+    # Handle cases like "2400,50" -> 2400.50 (European)
+    if ',' in cleaned and '.' in cleaned:
+        # Both present - figure out which is decimal
+        if cleaned.rfind('.') > cleaned.rfind(','):
+            cleaned = cleaned.replace(',', '')  # comma is thousands
+        else:
+            cleaned = cleaned.replace('.', '').replace(',', '.')  # swap
+    elif ',' in cleaned:
+        # Only comma - could be decimal or thousands
+        parts = cleaned.split(',')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            cleaned = cleaned.replace(',', '.')  # decimal comma
+        else:
+            cleaned = cleaned.replace(',', '')
+
+    try:
+        val = float(cleaned)
+        if 0.001 < val < 10_000_000:
+            return val
+    except ValueError:
+        pass
+    return None
+
+
+def read_y_axis_labels_v2(image_np: np.ndarray) -> list:
     """
-    Find the chart plot area (largest region with candles).
-    Returns (cropped_image, offset_x, offset_y).
-    """
-    h, w = image_np.shape[:2]
-
-    # Convert to grayscale and detect edges
-    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
-
-    # Find contours (potential chart areas)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if not contours:
-        return image_np, 0, 0
-
-    # Largest rectangular contour = plot area
-    largest = max(contours, key=cv2.contourArea)
-    x, y, cw, ch = cv2.boundingRect(largest)
-
-    # Pad slightly to be safe
-    x = max(0, x - 5)
-    y = max(0, y - 5)
-    cw = min(w - x, cw + 10)
-    ch = min(h - y, ch + 10)
-
-    # Crop
-    return image_np[y:y+ch, x:x+cw], x, y
-
-
-def read_y_axis_labels(image_np: np.ndarray) -> list:
-    """
-    Read y-axis price labels from the right side of the chart.
+    Robust y-axis reader. Tries multiple strips, themes, and OCR configs.
     Returns list of {price, y_pixel} sorted by y_pixel ascending.
     """
     h, w = image_np.shape[:2]
+    all_labels = []
 
-    # Right 12% of image contains y-axis
-    strip_x_start = int(w * 0.88)
-    right_strip = image_np[:, strip_x_start:]
+    # Try different strip widths
+    for strip_pct in [0.06, 0.10, 0.15, 0.20]:
+        strip_x_start = int(w * (1 - strip_pct))
+        strip = image_np[:, strip_x_start:]
 
-    # Upscale for better OCR
-    scale = 3
-    strip_resized = cv2.resize(right_strip, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-    gray = cv2.cvtColor(strip_resized, cv2.COLOR_RGB2GRAY)
+        # Upscale for OCR
+        scale = 4
+        big = cv2.resize(strip, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(big, cv2.COLOR_RGB2GRAY)
 
-    # Try both dark-on-light and light-on-dark
-    _, thresh1 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    thresh2 = cv2.bitwise_not(thresh1)
+        # Try multiple thresholding methods
+        attempts = []
+        # Method 1: Otsu on dark text
+        _, t1 = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        attempts.append(t1)
+        # Method 2: Inverted (light text on dark bg)
+        attempts.append(cv2.bitwise_not(t1))
+        # Method 3: Adaptive threshold
+        t3 = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        attempts.append(t3)
 
-    labels = []
+        for thresh in attempts:
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    for thresh in [thresh1, thresh2]:
-        # Get bounding boxes for each text region
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for contour in contours:
+                x, y, cw, ch = cv2.boundingRect(contour)
+                # Filter text-like boxes
+                if ch < 12 or ch > 100 or cw < 15 or cw > 250:
+                    continue
+                if ch / max(cw, 1) > 1.8:
+                    continue
+                if cw * ch < 100:
+                    continue
 
-        for contour in contours:
-            x, y, cw, ch = cv2.boundingRect(contour)
-            if ch < 15 or ch > 80 or cw < 20 or cw > 200:
-                continue
-            if ch / max(cw, 1) > 1.5:
-                continue
+                # OCR this specific box
+                roi = thresh[y:y+ch, x:x+cw]
+                for psm in [8, 7, 13, 6]:
+                    text = pytesseract.image_to_string(
+                        roi,
+                        config=f"--psm {psm} -c tessedit_char_whitelist=0123456789.,-"
+                    ).strip()
 
-            # Extract the region and OCR just this text
-            roi = thresh[y:y+ch, x:x+cw]
-            text = pytesseract.image_to_string(roi, config="--psm 8 -c tessedit_char_whitelist=0123456789.,-").strip()
+                    price = clean_price_number(text)
+                    if price is not None:
+                        # Convert to original pixel coords
+                        orig_y = (y + ch / 2) / scale
+                        all_labels.append({
+                            "price": price,
+                            "y_pixel": orig_y,
+                            "strip_pct": strip_pct,
+                        })
+                        break  # Got one from this box, move on
 
-            if not text:
-                continue
+        if len(all_labels) >= 3:
+            break  # Enough labels from this strip
 
-            # Clean up
-            cleaned = re.sub(r'[^\d.\-]', '', text)
-            if not cleaned or cleaned in (".", "-", ".."):
-                continue
+    if not all_labels:
+        return []
 
-            try:
-                price = float(cleaned)
-                if 0.00001 < price < 1_000_000:
-                    # Convert y-coordinate back to original image scale
-                    orig_y = (y + ch / 2) / scale
-                    labels.append({"price": price, "y_pixel": orig_y})
-            except ValueError:
-                continue
-
-        if labels:
-            break
-
-    # Deduplicate by y_pixel (keep unique y positions)
+    # Deduplicate by y position (keep unique y within 3px)
+    all_labels.sort(key=lambda l: l["y_pixel"])
     unique = []
-    seen_y = set()
-    for label in sorted(labels, key=lambda l: l["y_pixel"]):
-        y_int = int(label["y_pixel"])
-        if y_int not in seen_y:
-            seen_y.add(y_int)
+    for label in all_labels:
+        is_duplicate = False
+        for u in unique:
+            if abs(u["y_pixel"] - label["y_pixel"]) < 5 and abs(u["price"] - label["price"]) < 0.01:
+                is_duplicate = True
+                break
+        if not is_duplicate:
             unique.append(label)
 
     return unique
 
 
 def calibrate_price_mapping(labels: list, chart_height: int) -> Optional[dict]:
-    """
-    Build a linear mapping from y_pixel → price.
-    Returns {slope, intercept, min_price, max_price} or None if insufficient labels.
-    """
+    """Build a linear price mapping from y-axis labels."""
     if len(labels) < 2:
         return None
 
-    # Sort by y (top = highest price)
-    sorted_labels = sorted(labels, key=lambda l: l["y_pixel"])
-
-    # Linear regression: price = slope * y_pixel + intercept
-    ys = np.array([l["y_pixel"] for l in sorted_labels])
-    prices = np.array([l["price"] for l in sorted_labels])
+    ys = np.array([l["y_pixel"] for l in labels])
+    prices = np.array([l["price"] for l in labels])
 
     # Fit line
-    slope, intercept = np.polyfit(ys, prices, 1)
+    try:
+        slope, intercept = np.polyfit(ys, prices, 1)
+    except Exception:
+        return None
 
-    # Sanity: slope should be negative (lower on screen = lower price)
     if slope >= 0:
         return None
 
-    # Validate: top of chart = highest price, bottom = lowest
-    top_price = slope * 0 + intercept
-    bottom_price = slope * chart_height + intercept
+    # Validate top > bottom
+    top_price = float(intercept)
+    bottom_price = float(slope * chart_height + intercept)
 
     if top_price <= bottom_price:
         return None
@@ -244,8 +254,8 @@ def calibrate_price_mapping(labels: list, chart_height: int) -> Optional[dict]:
     return {
         "slope": float(slope),
         "intercept": float(intercept),
-        "min_price": float(bottom_price),
-        "max_price": float(top_price),
+        "min_price": bottom_price,
+        "max_price": top_price,
     }
 
 
@@ -253,84 +263,63 @@ def pixel_to_price(y_pixel: float, mapping: dict) -> float:
     return mapping["slope"] * y_pixel + mapping["intercept"]
 
 
-def detect_candles_from_image(image_np: np.ndarray, mapping: dict) -> list:
-    """
-    Detect candle bodies and wicks from the chart area.
-    Returns list of {open, high, low, close, x_pixel, y_center}.
-    """
-    h, w = image_np.shape[:2]
+# ===== CANDLE DETECTION =====
 
-    # Use only the chart area (exclude y-axis on right)
-    chart = image_np[:, :int(w * 0.88)]
+def detect_candles_from_image(image_np: np.ndarray, mapping: dict) -> list:
+    """Detect candle bodies + wicks from chart area."""
+    h, w = image_np.shape[:2]
+    chart = image_np[:, :int(w * 0.85)]
     ch, cw = chart.shape[:2]
 
-    # Detect candle colors (green = bullish, red = bearish)
     hsv = cv2.cvtColor(chart, cv2.COLOR_RGB2HSV)
 
-    # Green mask
-    lower_green = np.array([40, 40, 40])
-    upper_green = np.array([85, 255, 255])
-    green_mask = cv2.inRange(hsv, lower_green, upper_green)
+    # Broad green range
+    green_mask = cv2.inRange(hsv, np.array([35, 30, 30]), np.array([90, 255, 255]))
 
-    # Red mask (two hue ranges)
-    lower_red1 = np.array([0, 40, 40])
-    upper_red1 = np.array([10, 255, 255])
-    lower_red2 = np.array([170, 40, 40])
-    upper_red2 = np.array([180, 255, 255])
+    # Broad red range (two hues)
     red_mask = cv2.bitwise_or(
-        cv2.inRange(hsv, lower_red1, upper_red1),
-        cv2.inRange(hsv, lower_red2, upper_red2)
+        cv2.inRange(hsv, np.array([0, 30, 30]), np.array([15, 255, 255])),
+        cv2.inRange(hsv, np.array([165, 30, 30]), np.array([180, 255, 255]))
     )
 
-    # Combine candle bodies
     candle_mask = cv2.bitwise_or(green_mask, red_mask)
 
-    # Clean small noise
+    # Clean
     kernel = np.ones((2, 2), np.uint8)
     candle_mask = cv2.morphologyEx(candle_mask, cv2.MORPH_OPEN, kernel)
     candle_mask = cv2.morphologyEx(candle_mask, cv2.MORPH_CLOSE, kernel)
 
-    # Find contours (each candle is a contour)
     contours, _ = cv2.findContours(candle_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     candles = []
     for contour in contours:
         x, y, cw2, ch2 = cv2.boundingRect(contour)
 
-        # Filter: candle width should be 1-20 px, height 3-300 px
-        if cw2 < 1 or cw2 > 20 or ch2 < 3 or ch2 > 300:
+        if cw2 < 1 or cw2 > 30 or ch2 < 3 or ch2 > 400:
             continue
 
-        # Candle body extends from (x, y) to (x + cw2, y + ch2)
-        # Top of body = close (if bullish) or open (if bearish)
-        # Bottom of body = open (if bullish) or close (if bearish)
         top_y = y
         bottom_y = y + ch2
 
-        # Convert to price
         top_price = pixel_to_price(top_y, mapping)
         bottom_price = pixel_to_price(bottom_y, mapping)
 
-        # Determine if bullish or bearish by checking color in center
         center_x = x + cw2 // 2
         center_y = y + ch2 // 2
 
-        # Sample a small region
         sample = chart[max(0, center_y - 2):center_y + 3, max(0, center_x - 1):center_x + 2]
         if sample.size == 0:
             continue
 
         sample_hsv = cv2.cvtColor(sample, cv2.COLOR_RGB2HSV)
-        avg_hue = np.median(sample_hsv[:, :, 0])
+        avg_hue = float(np.median(sample_hsv[:, :, 0]))
 
-        is_green = 40 <= avg_hue <= 85
-        is_red = avg_hue <= 10 or avg_hue >= 170
+        is_green = 35 <= avg_hue <= 90
+        is_red = avg_hue <= 15 or avg_hue >= 165
 
         if not (is_green or is_red):
             continue
 
-        # Bullish = open at bottom, close at top
-        # Bearish = open at top, close at bottom
         if is_green:
             open_price = bottom_price
             close_price = top_price
@@ -338,8 +327,6 @@ def detect_candles_from_image(image_np: np.ndarray, mapping: dict) -> list:
             open_price = top_price
             close_price = bottom_price
 
-        # High/Low: check wicks above/below body
-        # Look at the column above and below the body for thin wick pixels
         candle_col = candle_mask[:, center_x]
         wick_pixels = np.where(candle_col > 0)[0]
 
@@ -361,12 +348,11 @@ def detect_candles_from_image(image_np: np.ndarray, mapping: dict) -> list:
             "is_green": bool(is_green),
         })
 
-    # Sort by x_pixel (left to right = time order)
     candles.sort(key=lambda c: c["x_pixel"])
     return candles
 
 
-# ===== SMC ANALYSIS FROM CANDLES =====
+# ===== SMC DETECTION =====
 
 def detect_swing_points(candles: list, lookback: int = 3) -> dict:
     swing_highs = []
@@ -383,19 +369,13 @@ def detect_swing_points(candles: list, lookback: int = 3) -> dict:
 
 
 def detect_liquidity(candles: list, tolerance_pct: float = 0.0015) -> list:
-    """
-    Find liquidity zones (equal highs/lows where stops cluster).
-    """
     if len(candles) < 10:
         return []
-
     swings = detect_swing_points(candles, 3)
     avg_price = sum(c["close"] for c in candles) / len(candles)
     tolerance = avg_price * tolerance_pct
 
     liquidity = []
-
-    # Buy-side liquidity (above equal highs)
     for i, h1 in enumerate(swings["swing_highs"]):
         touches = 1
         highest = h1["price"]
@@ -403,19 +383,10 @@ def detect_liquidity(candles: list, tolerance_pct: float = 0.0015) -> list:
             if abs(h2["price"] - h1["price"]) <= tolerance:
                 touches += 1
                 highest = max(highest, h2["price"])
-
-        # Check if swept
         swept = any(c["high"] > highest + tolerance for c in candles[h1["index"] + 1:])
-
         if not swept:
-            liquidity.append({
-                "type": "buy_side",
-                "price": highest,
-                "touches": touches,
-                "index": h1["index"],
-            })
+            liquidity.append({"type": "buy_side", "price": highest, "touches": touches, "index": h1["index"]})
 
-    # Sell-side liquidity (below equal lows)
     for i, l1 in enumerate(swings["swing_lows"]):
         touches = 1
         lowest = l1["price"]
@@ -423,27 +394,16 @@ def detect_liquidity(candles: list, tolerance_pct: float = 0.0015) -> list:
             if abs(l2["price"] - l1["price"]) <= tolerance:
                 touches += 1
                 lowest = min(lowest, l2["price"])
-
         swept = any(c["low"] < lowest - tolerance for c in candles[l1["index"] + 1:])
-
         if not swept:
-            liquidity.append({
-                "type": "sell_side",
-                "price": lowest,
-                "touches": touches,
-                "index": l1["index"],
-            })
+            liquidity.append({"type": "sell_side", "price": lowest, "touches": touches, "index": l1["index"]})
 
     return liquidity
 
 
 def detect_order_blocks(candles: list) -> list:
-    """
-    Order blocks: last opposite candle before an impulsive move.
-    """
     if len(candles) < 5:
         return []
-
     obs = []
     avg_range = sum(c["high"] - c["low"] for c in candles[-30:]) / min(30, len(candles))
 
@@ -452,38 +412,22 @@ def detect_order_blocks(candles: list) -> list:
         curr = candles[i]
         nxt = candles[i + 1]
 
-        # Bullish OB: last bearish candle before strong bullish move
         if not prev["is_green"] and nxt["close"] > curr["high"]:
-            move_size = nxt["close"] - nxt["open"]
-            if move_size > avg_range * 1.2:
-                obs.append({
-                    "type": "bullish",
-                    "top": max(prev["high"], curr["high"]),
-                    "bottom": min(prev["low"], curr["low"]),
-                    "index": i,
-                })
+            move = nxt["close"] - nxt["open"]
+            if move > avg_range * 1.2:
+                obs.append({"type": "bullish", "top": max(prev["high"], curr["high"]), "bottom": min(prev["low"], curr["low"]), "index": i})
 
-        # Bearish OB: last bullish candle before strong bearish move
         if prev["is_green"] and nxt["close"] < curr["low"]:
-            move_size = nxt["open"] - nxt["close"]
-            if move_size > avg_range * 1.2:
-                obs.append({
-                    "type": "bearish",
-                    "top": max(prev["high"], curr["high"]),
-                    "bottom": min(prev["low"], curr["low"]),
-                    "index": i,
-                })
+            move = nxt["open"] - nxt["close"]
+            if move > avg_range * 1.2:
+                obs.append({"type": "bearish", "top": max(prev["high"], curr["high"]), "bottom": min(prev["low"], curr["low"]), "index": i})
 
-    return obs[-10:]  # Last 10 order blocks
+    return obs[-10:]
 
 
 def detect_fvgs(candles: list) -> list:
-    """
-    Fair Value Gaps: gap between candle 1 and candle 3.
-    """
     if len(candles) < 3:
         return []
-
     fvgs = []
     avg_range = sum(c["high"] - c["low"] for c in candles[-30:]) / min(30, len(candles))
 
@@ -491,27 +435,15 @@ def detect_fvgs(candles: list) -> list:
         c1 = candles[i - 2]
         c3 = candles[i]
 
-        # Bullish FVG: gap between c1.high and c3.low
         if c3["low"] > c1["high"]:
             gap = c3["low"] - c1["high"]
             if gap > avg_range * 0.3:
-                fvgs.append({
-                    "type": "bullish",
-                    "top": c3["low"],
-                    "bottom": c1["high"],
-                    "index": i,
-                })
+                fvgs.append({"type": "bullish", "top": c3["low"], "bottom": c1["high"], "index": i})
 
-        # Bearish FVG: gap between c3.high and c1.low
         if c3["high"] < c1["low"]:
             gap = c1["low"] - c3["high"]
             if gap > avg_range * 0.3:
-                fvgs.append({
-                    "type": "bearish",
-                    "top": c1["low"],
-                    "bottom": c3["high"],
-                    "index": i,
-                })
+                fvgs.append({"type": "bearish", "top": c1["low"], "bottom": c3["high"], "index": i})
 
     return fvgs[-10:]
 
@@ -520,10 +452,6 @@ def detect_fvgs(candles: list) -> list:
 
 @app.post("/api/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
-    """
-    Full SMC analysis from a chart screenshot.
-    Returns candles, liquidity, order blocks, FVGs.
-    """
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
@@ -534,40 +462,38 @@ async def analyze_image(file: UploadFile = File(...)):
         elif image_np.shape[2] == 4:
             image_np = cv2.cvtColor(image_np, cv2.COLOR_RGBA2RGB)
 
-        # Step 1: Crop to plot area
-        cropped, ox, oy = crop_to_plot_area(image_np)
+        h, w = image_np.shape[:2]
 
-        # Step 2: Read y-axis labels
-        labels = read_y_axis_labels(cropped)
+        # Read y-axis labels with the robust multi-strategy reader
+        labels = read_y_axis_labels_v2(image_np)
 
         if len(labels) < 2:
             return {
                 "status": "error",
-                "message": "Could not read y-axis prices from the image. Make sure the price scale is visible.",
+                "message": f"Could not read y-axis prices from the image. Found {len(labels)} labels. Make sure the price scale is visible on the right.",
                 "labels_found": len(labels),
+                "image_size": f"{w}x{h}",
             }
 
-        # Step 3: Build price mapping
-        mapping = calibrate_price_mapping(labels, cropped.shape[0])
+        mapping = calibrate_price_mapping(labels, h)
 
         if not mapping:
             return {
                 "status": "error",
-                "message": "Could not calibrate price scale. Please upload a clearer chart.",
+                "message": f"Found {len(labels)} price labels but could not build price scale. Upload a clearer chart.",
                 "labels_found": len(labels),
             }
 
-        # Step 4: Detect candles
-        candles = detect_candles_from_image(cropped, mapping)
+        candles = detect_candles_from_image(image_np, mapping)
 
         if len(candles) < 20:
             return {
                 "status": "error",
-                "message": f"Only {len(candles)} candles detected. Please upload a clearer chart.",
+                "message": f"Only {len(candles)} candles detected. Please upload a larger, clearer chart.",
                 "candles_found": len(candles),
+                "labels_found": len(labels),
             }
 
-        # Step 5: SMC analysis
         liquidity = detect_liquidity(candles)
         order_blocks = detect_order_blocks(candles)
         fvgs = detect_fvgs(candles)
@@ -592,4 +518,4 @@ async def analyze_image(file: UploadFile = File(...)):
         }
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": f"Image analysis error: {str(e)}"}
