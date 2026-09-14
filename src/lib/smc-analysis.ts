@@ -1,9 +1,9 @@
-// src/lib/smc-from-image.ts
-// Converts Python SMC output (candles + liquidity + OB + FVG) into a trading signal.
-// Pure SMC: no indicators, no ADX filter, no MACD, no RSI.
+// src/lib/smc-analysis.ts
+// Pure SMC signal builder.
+// Input: OHLC candles from Python (FCS API).
+// Output: direction, entry, SL, TP1-3, liquidity-based.
 
 export interface SMCCandle {
-  x_pixel: number;
   open: number;
   high: number;
   low: number;
@@ -32,19 +32,6 @@ export interface SMCFVG {
   index: number;
 }
 
-export interface PythonSMCResponse {
-  status: "success" | "error";
-  message?: string;
-  candles?: SMCCandle[];
-  liquidity?: SMCLiquidity[];
-  order_blocks?: SMCOrderBlock[];
-  fvgs?: SMCFVG[];
-  current_price?: number;
-  trend?: "bullish" | "bearish";
-  y_axis?: { min: number; max: number; labels_read: number };
-  candle_count?: number;
-}
-
 export interface SMCSignal {
   direction: "long" | "short" | "neutral";
   entry: number;
@@ -63,15 +50,13 @@ export interface SMCSignal {
   score: number;
   confluences: string[];
   smcSource: string;
-  // Data that goes to admin only
   liquidityZones: SMCLiquidity[];
   orderBlocks: SMCOrderBlock[];
   fvgs: SMCFVG[];
   candleCount: number;
-  yAxisRange: { min: number; max: number };
 }
 
-// ===== HELPERS =====
+// ===== PIP SIZE =====
 
 function calcPipSize(pair: string): number {
   if (pair.includes("XAU")) return 0.10;
@@ -89,7 +74,153 @@ function avgCandleRange(candles: SMCCandle[]): number {
   return total / sample.length;
 }
 
-// ===== STRUCTURE: Which direction is SMC pointing? =====
+// ===== SWING DETECTION =====
+
+function detectSwings(candles: SMCCandle[], lookback: number = 3) {
+  const swingHighs: { price: number; index: number }[] = [];
+  const swingLows: { price: number; index: number }[] = [];
+
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const c = candles[i];
+    let isHigh = true;
+    let isLow = true;
+
+    for (let j = 1; j <= lookback; j++) {
+      if (c.high <= candles[i - j].high || c.high <= candles[i + j].high) isHigh = false;
+      if (c.low >= candles[i - j].low || c.low >= candles[i + j].low) isLow = false;
+    }
+
+    if (isHigh) swingHighs.push({ price: c.high, index: i });
+    if (isLow) swingLows.push({ price: c.low, index: i });
+  }
+
+  return { swingHighs, swingLows };
+}
+
+// ===== LIQUIDITY =====
+
+function detectLiquidity(candles: SMCCandle[]): SMCLiquidity[] {
+  if (candles.length < 10) return [];
+
+  const swings = detectSwings(candles, 3);
+  const avgPrice = candles.reduce((s, c) => s + c.close, 0) / candles.length;
+  const tolerance = avgPrice * 0.0015;
+
+  const liquidity: SMCLiquidity[] = [];
+
+  for (let i = 0; i < swings.swingHighs.length; i++) {
+    const h1 = swings.swingHighs[i];
+    let touches = 1;
+    let highest = h1.price;
+
+    for (let j = i + 1; j < swings.swingHighs.length; j++) {
+      if (Math.abs(swings.swingHighs[j].price - h1.price) <= tolerance) {
+        touches++;
+        highest = Math.max(highest, swings.swingHighs[j].price);
+      }
+    }
+
+    const swept = candles.slice(h1.index + 1).some(c => c.high > highest + tolerance);
+
+    if (!swept) {
+      liquidity.push({ type: "buy_side", price: highest, touches, index: h1.index });
+    }
+  }
+
+  for (let i = 0; i < swings.swingLows.length; i++) {
+    const l1 = swings.swingLows[i];
+    let touches = 1;
+    let lowest = l1.price;
+
+    for (let j = i + 1; j < swings.swingLows.length; j++) {
+      if (Math.abs(swings.swingLows[j].price - l1.price) <= tolerance) {
+        touches++;
+        lowest = Math.min(lowest, swings.swingLows[j].price);
+      }
+    }
+
+    const swept = candles.slice(l1.index + 1).some(c => c.low < lowest - tolerance);
+
+    if (!swept) {
+      liquidity.push({ type: "sell_side", price: lowest, touches, index: l1.index });
+    }
+  }
+
+  return liquidity;
+}
+
+// ===== ORDER BLOCKS =====
+
+function detectOrderBlocks(candles: SMCCandle[]): SMCOrderBlock[] {
+  if (candles.length < 5) return [];
+
+  const obs: SMCOrderBlock[] = [];
+  const avgRange = avgCandleRange(candles);
+
+  for (let i = 1; i < candles.length - 2; i++) {
+    const prev = candles[i - 1];
+    const curr = candles[i];
+    const next = candles[i + 1];
+
+    if (!prev.is_green && next.close > curr.high) {
+      const move = next.close - next.open;
+      if (move > avgRange * 1.2) {
+        obs.push({
+          type: "bullish",
+          top: Math.max(prev.high, curr.high),
+          bottom: Math.min(prev.low, curr.low),
+          index: i,
+        });
+      }
+    }
+
+    if (prev.is_green && next.close < curr.low) {
+      const move = next.open - next.close;
+      if (move > avgRange * 1.2) {
+        obs.push({
+          type: "bearish",
+          top: Math.max(prev.high, curr.high),
+          bottom: Math.min(prev.low, curr.low),
+          index: i,
+        });
+      }
+    }
+  }
+
+  return obs.slice(-10);
+}
+
+// ===== FVG =====
+
+function detectFVGs(candles: SMCCandle[]): SMCFVG[] {
+  if (candles.length < 3) return [];
+
+  const fvgs: SMCFVG[] = [];
+  const avgRange = avgCandleRange(candles);
+
+  for (let i = 2; i < candles.length; i++) {
+    const c1 = candles[i - 2];
+    const c3 = candles[i];
+
+    if (c3.low > c1.high) {
+      const gap = c3.low - c1.high;
+      if (gap > avgRange * 0.3) {
+        fvgs.push({ type: "bullish", top: c3.low, bottom: c1.high, index: i });
+      }
+    }
+
+    if (c3.high < c1.low) {
+      const gap = c1.low - c3.high;
+      if (gap > avgRange * 0.3) {
+        fvgs.push({ type: "bearish", top: c1.low, bottom: c3.high, index: i });
+      }
+    }
+  }
+
+  return fvgs.slice(-10);
+}
+
+// ===== DIRECTION =====
 
 function determineDirection(
   candles: SMCCandle[],
@@ -102,48 +233,43 @@ function determineDirection(
   let longScore = 0;
   let shortScore = 0;
 
-  // 1. Liquidity draw: nearest untouched liquidity pools
-  const buySideAbove = liquidity
+  const buyAbove = liquidity
     .filter(l => l.type === "buy_side" && l.price > currentPrice)
     .sort((a, b) => a.price - b.price);
-  const sellSideBelow = liquidity
+  const sellBelow = liquidity
     .filter(l => l.type === "sell_side" && l.price < currentPrice)
     .sort((a, b) => b.price - a.price);
 
-  const nearestBuyAbove = buySideAbove[0];
-  const nearestSellBelow = sellSideBelow[0];
+  const nearestBuy = buyAbove[0];
+  const nearestSell = sellBelow[0];
 
-  const distToBuy = nearestBuyAbove ? Math.abs(nearestBuyAbove.price - currentPrice) : Infinity;
-  const distToSell = nearestSellBelow ? Math.abs(nearestSellBelow.price - currentPrice) : Infinity;
+  const distToBuy = nearestBuy ? Math.abs(nearestBuy.price - currentPrice) : Infinity;
+  const distToSell = nearestSell ? Math.abs(nearestSell.price - currentPrice) : Infinity;
 
-  // Price is drawn to the nearest liquidity pool
   if (distToBuy < distToSell) {
     longScore += 20;
-    confluences.push(`✅ Buy-side liquidity closer (${nearestBuyAbove!.price.toFixed(5)})`);
+    confluences.push(`✅ Buy-side liquidity closer (${nearestBuy!.price.toFixed(5)})`);
   } else if (distToSell < distToBuy) {
     shortScore += 20;
-    confluences.push(`✅ Sell-side liquidity closer (${nearestSellBelow!.price.toFixed(5)})`);
+    confluences.push(`✅ Sell-side liquidity closer (${nearestSell!.price.toFixed(5)})`);
   } else {
     confluences.push(`⚠️ No clear liquidity draw`);
   }
 
-  // 2. Recent structure: last 5 candles
   const recent = candles.slice(-5);
   const greenCount = recent.filter(c => c.is_green).length;
   const redCount = recent.length - greenCount;
 
   if (greenCount >= 4) {
     longScore += 15;
-    confluences.push(`✅ Recent structure bullish (${greenCount}/${recent.length} green)`);
+    confluences.push(`✅ Recent structure bullish (${greenCount}/${recent.length})`);
   } else if (redCount >= 4) {
     shortScore += 15;
-    confluences.push(`✅ Recent structure bearish (${redCount}/${recent.length} red)`);
+    confluences.push(`✅ Recent structure bearish (${redCount}/${recent.length})`);
   }
 
-  // 3. Unmitigated order blocks in the direction of price
   const bullishOBs = obs.filter(o => o.type === "bullish" && o.top < currentPrice);
   const bearishOBs = obs.filter(o => o.type === "bearish" && o.bottom > currentPrice);
-
   if (bullishOBs.length > 0) {
     longScore += 10;
     confluences.push(`✅ Bullish OB below price (${bullishOBs.length})`);
@@ -153,10 +279,8 @@ function determineDirection(
     confluences.push(`✅ Bearish OB above price (${bearishOBs.length})`);
   }
 
-  // 4. FVGs in the direction of price
   const bullishFVGs = fvgs.filter(f => f.type === "bullish" && f.bottom < currentPrice);
   const bearishFVGs = fvgs.filter(f => f.type === "bearish" && f.top > currentPrice);
-
   if (bullishFVGs.length > 0) {
     longScore += 10;
     confluences.push(`✅ Bullish FVG below price (${bullishFVGs.length})`);
@@ -166,45 +290,42 @@ function determineDirection(
     confluences.push(`✅ Bearish FVG above price (${bearishFVGs.length})`);
   }
 
-  // 5. Liquidity touches: stronger zones = stronger draw
-  if (nearestBuyAbove && nearestBuyAbove.touches >= 2) {
+  if (nearestBuy && nearestBuy.touches >= 2) {
     longScore += 5;
-    confluences.push(`✅ Strong buy-side liquidity (${nearestBuyAbove.touches} touches)`);
+    confluences.push(`✅ Strong buy-side liquidity (${nearestBuy.touches} touches)`);
   }
-  if (nearestSellBelow && nearestSellBelow.touches >= 2) {
+  if (nearestSell && nearestSell.touches >= 2) {
     shortScore += 5;
-    confluences.push(`✅ Strong sell-side liquidity (${nearestSellBelow.touches} touches)`);
+    confluences.push(`✅ Strong sell-side liquidity (${nearestSell.touches} touches)`);
   }
 
-  // Decision
   const diff = Math.abs(longScore - shortScore);
   if (diff < 5) {
-    return { direction: "neutral", score: 0, confluences: [...confluences, "⚠️ Long/short scores too close"] };
+    return {
+      direction: "neutral",
+      score: 0,
+      confluences: [...confluences, "⚠️ Long/short scores too close"],
+    };
   }
 
-  const finalDirection = longScore > shortScore ? "long" : "short";
-  const finalScore = Math.min(Math.max(longScore, shortScore), 100);
-
-  return { direction: finalDirection, score: finalScore, confluences };
+  const direction = longScore > shortScore ? "long" : "short";
+  return {
+    direction,
+    score: Math.min(Math.max(longScore, shortScore), 100),
+    confluences,
+  };
 }
 
-// ===== SL / TP PLACEMENT (PURE LIQUIDITY) =====
+// ===== SL / TP =====
 
 function placeSLTP(
   direction: "long" | "short",
   entry: number,
   liquidity: SMCLiquidity[],
   obs: SMCOrderBlock[],
-  fvgs: SMCFVG[],
   candles: SMCCandle[],
   pipSize: number,
-): {
-  stopLoss: number;
-  tp1: number;
-  tp2: number;
-  tp3: number;
-  notes: string[];
-} {
+): { stopLoss: number; tp1: number; tp2: number; tp3: number; notes: string[] } {
   const notes: string[] = [];
   const atrRange = avgCandleRange(candles);
   const buffer = atrRange * 0.5;
@@ -213,7 +334,6 @@ function placeSLTP(
   let tp1: number, tp2: number, tp3: number;
 
   if (direction === "long") {
-    // === SL: below nearest sell-side liquidity OR below last bullish OB ===
     const sellBelow = liquidity
       .filter(l => l.type === "sell_side" && l.price < entry)
       .sort((a, b) => b.price - a.price);
@@ -232,7 +352,6 @@ function placeSLTP(
       notes.push(`SL from ATR (no liquidity or OB below)`);
     }
 
-    // === TPs: at buy-side liquidity zones above ===
     const buyAbove = liquidity
       .filter(l => l.type === "buy_side" && l.price > entry)
       .sort((a, b) => a.price - b.price);
@@ -259,7 +378,6 @@ function placeSLTP(
       notes.push(`TPs from ratio (no liquidity above)`);
     }
   } else {
-    // SHORT
     const buyAbove = liquidity
       .filter(l => l.type === "buy_side" && l.price > entry)
       .sort((a, b) => a.price - b.price);
@@ -305,7 +423,7 @@ function placeSLTP(
     }
   }
 
-  // Sanity check: TPs must be on profit side
+  // Sanity
   if (direction === "long") {
     if (tp1 <= entry || tp2 <= tp1 || tp3 <= tp2) {
       const risk = entry - stopLoss;
@@ -327,26 +445,21 @@ function placeSLTP(
   return { stopLoss, tp1, tp2, tp3, notes };
 }
 
-// ===== MAIN ENTRY POINT =====
+// ===== MAIN =====
 
 export function buildSMCSignal(
   pair: string,
-  pythonResponse: PythonSMCResponse,
+  candles: SMCCandle[],
 ): SMCSignal | null {
-  if (pythonResponse.status !== "success" ||
-      !pythonResponse.candles ||
-      pythonResponse.candles.length < 20) {
-    return null;
-  }
+  if (!candles || candles.length < 20) return null;
 
-  const candles = pythonResponse.candles;
-  const liquidity = pythonResponse.liquidity || [];
-  const obs = pythonResponse.order_blocks || [];
-  const fvgs = pythonResponse.fvgs || [];
-  const currentPrice = pythonResponse.current_price ?? candles[candles.length - 1].close;
+  const currentPrice = candles[candles.length - 1].close;
   const pipSize = calcPipSize(pair);
 
-  // Determine direction from SMC
+  const liquidity = detectLiquidity(candles);
+  const obs = detectOrderBlocks(candles);
+  const fvgs = detectFVGs(candles);
+
   const decision = determineDirection(candles, liquidity, obs, fvgs, currentPrice);
 
   if (decision.direction === "neutral") {
@@ -359,27 +472,15 @@ export function buildSMCSignal(
       confidence: "NEUTRAL",
       score: 0,
       confluences: decision.confluences,
-      smcSource: "image_smc",
+      smcSource: "live_data",
       liquidityZones: liquidity,
       orderBlocks: obs,
       fvgs,
       candleCount: candles.length,
-      yAxisRange: pythonResponse.y_axis
-        ? { min: pythonResponse.y_axis.min, max: pythonResponse.y_axis.max }
-        : { min: 0, max: 0 },
     };
   }
 
-  // Place SL / TP using liquidity
-  const levels = placeSLTP(
-    decision.direction,
-    currentPrice,
-    liquidity,
-    obs,
-    fvgs,
-    candles,
-    pipSize,
-  );
+  const levels = placeSLTP(decision.direction, currentPrice, liquidity, obs, candles, pipSize);
 
   const riskPips = Math.round(Math.abs(currentPrice - levels.stopLoss) / pipSize);
   const rewardPips1 = Math.round(Math.abs(levels.tp1 - currentPrice) / pipSize);
@@ -390,7 +491,6 @@ export function buildSMCSignal(
   const rr2 = riskPips > 0 ? (rewardPips2 / riskPips).toFixed(1) : "0";
   const rr3 = riskPips > 0 ? (rewardPips3 / riskPips).toFixed(1) : "0";
 
-  // Reject weak signals: R:R < 1.2 for TP1
   if (parseFloat(rr1) < 1.2) {
     return {
       direction: "neutral",
@@ -401,20 +501,15 @@ export function buildSMCSignal(
       confidence: "NEUTRAL",
       score: 0,
       confluences: [...decision.confluences, `❌ Rejected: TP1 R:R 1:${rr1} < 1.2`],
-      smcSource: "image_smc",
+      smcSource: "live_data",
       liquidityZones: liquidity,
       orderBlocks: obs,
       fvgs,
       candleCount: candles.length,
-      yAxisRange: pythonResponse.y_axis
-        ? { min: pythonResponse.y_axis.min, max: pythonResponse.y_axis.max }
-        : { min: 0, max: 0 },
     };
   }
 
   const confidence = decision.score >= 70 ? "HIGH" : decision.score >= 50 ? "MEDIUM" : "LOW";
-
-  // Add SL/TP placement notes to confluences
   const allConfluences = [...decision.confluences, ...levels.notes.map(n => `🎯 ${n}`)];
 
   return {
@@ -434,13 +529,10 @@ export function buildSMCSignal(
     confidence,
     score: decision.score,
     confluences: allConfluences,
-    smcSource: "image_smc",
+    smcSource: "live_data",
     liquidityZones: liquidity,
     orderBlocks: obs,
     fvgs,
     candleCount: candles.length,
-    yAxisRange: pythonResponse.y_axis
-      ? { min: pythonResponse.y_axis.min, max: pythonResponse.y_axis.max }
-      : { min: 0, max: 0 },
   };
 }

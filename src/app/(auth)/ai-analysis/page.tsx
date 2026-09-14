@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { TradingViewChart } from "@/components/charts/tradingview-chart";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
@@ -8,15 +8,11 @@ const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
 export default function AIAnalysisPage() {
   const [currentPair, setCurrentPair] = useState("XAU/USD");
   const [currentTimeframe, setCurrentTimeframe] = useState("1H");
-  const [manualPrice, setManualPrice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [signal, setSignal] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [userTier, setUserTier] = useState("free");
-  const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -35,44 +31,19 @@ export default function AIAnalysisPage() {
 
   const canSeeAllTPs = userTier === "vip" || userTier === "vvip";
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setScreenshot(file);
-    const reader = new FileReader();
-    reader.onload = (event) => setScreenshotPreview(event.target?.result as string);
-    reader.readAsDataURL(file);
-    setSignal(null);
-    setError("");
-  };
-
-  const clearScreenshot = () => {
-    setScreenshot(null);
-    setScreenshotPreview(null);
-    setSignal(null);
-    setError("");
-  };
-
   const handleAnalyze = async () => {
-    if (!screenshot) {
-      setError("Please upload a chart screenshot first");
-      return;
-    }
-
     setLoading(true);
     setError("");
     setSignal(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", screenshot);
-      formData.append("pair", currentPair);
-      formData.append("timeframe", currentTimeframe);
-      if (manualPrice) formData.append("userPrice", manualPrice);
-
       const response = await fetch("/api/analyze-chart", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pair: currentPair,
+          timeframe: currentTimeframe,
+        }),
       });
 
       const data = await response.json();
@@ -108,13 +79,12 @@ export default function AIAnalysisPage() {
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: isMobile ? "12px" : "24px" }}>
       <h1 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "800", marginBottom: "8px" }}>
-        📸 Chart Signal Analysis
+        🎯 Signal Analysis
       </h1>
       <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "20px" }}>
-        Upload a chart screenshot to get an AI-powered trading signal.
+        Select a pair and timeframe. Get an AI-powered SMC signal.
       </p>
 
-      {/* Optional TradingView for reference */}
       <div style={{ marginBottom: "20px" }}>
         <TradingViewChart
           onPairChange={setCurrentPair}
@@ -122,7 +92,6 @@ export default function AIAnalysisPage() {
         />
       </div>
 
-      {/* Pair + Timeframe selects */}
       <div style={{
         display: "grid",
         gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
@@ -145,106 +114,24 @@ export default function AIAnalysisPage() {
         </div>
       </div>
 
-      {/* Screenshot upload */}
-      <div style={{
-        background: "#fff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "12px",
-        padding: isMobile ? "16px" : "20px",
-        marginBottom: "20px",
-      }}>
-        <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "10px" }}>
-          📸 Chart Screenshot (Required)
-        </label>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileSelect}
-          style={{ display: "none" }}
-        />
-
-        {screenshotPreview ? (
-          <div>
-            <img
-              src={screenshotPreview}
-              alt="Chart screenshot"
-              style={{
-                maxHeight: isMobile ? "200px" : "300px",
-                margin: "0 auto 12px",
-                display: "block",
-                borderRadius: "8px",
-                border: "1px solid #e5e7eb",
-              }}
-            />
-            <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
-              <button
-                onClick={handleAnalyze}
-                disabled={loading}
-                style={{
-                  padding: "12px 24px",
-                  background: loading ? "#9ca3af" : "#7c3aed",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontWeight: "700",
-                  cursor: loading ? "wait" : "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                {loading ? "Analyzing..." : "🔍 Analyze Chart"}
-              </button>
-              <button
-                onClick={clearScreenshot}
-                style={{
-                  padding: "12px 24px",
-                  background: "#e5e7eb",
-                  color: "#111827",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontWeight: "600",
-                  cursor: "pointer",
-                  fontSize: "14px",
-                }}
-              >
-                Remove
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              width: "100%",
-              padding: isMobile ? "24px" : "32px",
-              border: "2px dashed #d1d5db",
-              borderRadius: "8px",
-              background: "#fff",
-              cursor: "pointer",
-              fontSize: isMobile ? "13px" : "14px",
-              color: "#6b7280",
-            }}
-          >
-            📸 Click to upload chart screenshot
-            <br />
-            <span style={{ fontSize: "12px", color: "#9ca3af" }}>Make sure the price scale is visible on the right</span>
-          </button>
-        )}
-      </div>
-
-      {/* Optional manual price */}
-      <div style={{ marginBottom: "20px" }}>
-        <label style={labelStyle}>Current Price (optional)</label>
-        <input
-          type="number"
-          step="any"
-          value={manualPrice}
-          onChange={(e) => setManualPrice(e.target.value)}
-          placeholder="Leave empty to read from image"
-          style={inputStyle}
-        />
-      </div>
+      <button
+        onClick={handleAnalyze}
+        disabled={loading}
+        style={{
+          width: "100%",
+          padding: "14px",
+          background: loading ? "#9ca3af" : "#7c3aed",
+          color: "#fff",
+          border: "none",
+          borderRadius: "8px",
+          fontWeight: "700",
+          cursor: loading ? "wait" : "pointer",
+          fontSize: "15px",
+          marginBottom: "20px",
+        }}
+      >
+        {loading ? "Analyzing..." : "🔍 Analyze"}
+      </button>
 
       {error && (
         <div style={{
@@ -260,7 +147,6 @@ export default function AIAnalysisPage() {
         </div>
       )}
 
-      {/* Signal display */}
       {signal && (
         <div style={{
           background: "#fff",
@@ -304,10 +190,10 @@ export default function AIAnalysisPage() {
               textAlign: "center",
             }}>
               <p style={{ fontSize: "14px", color: "#854d0e", fontWeight: "600" }}>
-                No clear setup detected on this chart.
+                No clear setup detected right now.
               </p>
               <p style={{ fontSize: "13px", color: "#854d0e", marginTop: "6px" }}>
-                Try a different timeframe or upload a clearer chart.
+                Try a different timeframe or pair.
               </p>
             </div>
           )}
@@ -315,7 +201,6 @@ export default function AIAnalysisPage() {
           {/* Signal levels */}
           {signal.direction !== "neutral" && (
             <>
-              {/* Entry + SL */}
               <div style={{
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
@@ -336,7 +221,6 @@ export default function AIAnalysisPage() {
                 </div>
               </div>
 
-              {/* TPs */}
               <div style={{
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr" : canSeeAllTPs ? "repeat(3, 1fr)" : "1fr",
@@ -377,7 +261,6 @@ export default function AIAnalysisPage() {
                 )}
               </div>
 
-              {/* Upgrade prompt for free tier */}
               {!canSeeAllTPs && (
                 <div style={{
                   padding: "14px",
@@ -396,7 +279,6 @@ export default function AIAnalysisPage() {
                 </div>
               )}
 
-              {/* Risk info */}
               <div style={{
                 padding: "10px",
                 background: "#f9fafb",

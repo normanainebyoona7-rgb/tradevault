@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { TradingViewChart } from "@/components/charts/tradingview-chart";
 
@@ -23,17 +23,12 @@ export default function AdminPage() {
   const [showAddUser, setShowAddUser] = useState(false);
   const [autoPair, setAutoPair] = useState("XAU/USD");
   const [autoTimeframe, setAutoTimeframe] = useState("1H");
-  const [autoPrice, setAutoPrice] = useState("");
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoResult, setAutoResult] = useState<any>(null);
   const [autoError, setAutoError] = useState("");
   const [loadingSignals, setLoadingSignals] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-
-  const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
-  const screenshotInputRef = useRef<HTMLInputElement>(null);
 
   const [newSignal, setNewSignal] = useState({
     pair: "EUR/USD",
@@ -127,35 +122,20 @@ export default function AdminPage() {
     }
   };
 
-  const handleScreenshotSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setScreenshot(file);
-    const reader = new FileReader();
-    reader.onload = (event) => setScreenshotPreview(event.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
+  // ===== Generate SMC signal from live data =====
   const handleSMC = async () => {
-    if (!screenshot) {
-      setAutoError("Please upload a chart screenshot");
-      return;
-    }
-
     setAutoLoading(true);
     setAutoResult(null);
     setAutoError("");
 
     try {
-      const formData = new FormData();
-      formData.append("file", screenshot);
-      formData.append("pair", autoPair);
-      formData.append("timeframe", autoTimeframe);
-      if (autoPrice) formData.append("userPrice", autoPrice);
-
       const response = await fetch("/api/analyze-chart", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pair: autoPair,
+          timeframe: autoTimeframe,
+        }),
       });
 
       const data = await response.json();
@@ -167,7 +147,7 @@ export default function AdminPage() {
 
       setAutoResult(data.signal);
 
-      // Save signal (skip if neutral)
+      // Save non-neutral signals
       if (data.signal.direction !== "neutral") {
         const signalToSave = {
           pair: autoPair,
@@ -200,9 +180,7 @@ export default function AdminPage() {
     }
   };
 
-  const clearScreenshot = () => {
-    setScreenshot(null);
-    setScreenshotPreview(null);
+  const clearResult = () => {
     setAutoResult(null);
     setAutoError("");
   };
@@ -346,7 +324,7 @@ export default function AdminPage() {
 
       <div style={{ display: "flex", gap: isMobile ? "6px" : "12px", marginBottom: isMobile ? "16px" : "24px", flexWrap: "wrap" }}>
         <button onClick={() => setActiveTab("auto")} style={{ ...tabStyle, background: activeTab === "auto" ? "#1c69e3" : "#e5e7eb", color: activeTab === "auto" ? "#fff" : "#111827" }}>
-          📸 SMC Analysis
+          🎯 SMC Analysis
         </button>
         <button onClick={() => setActiveTab("signals")} style={{ ...tabStyle, background: activeTab === "signals" ? "#1c69e3" : "#e5e7eb", color: activeTab === "signals" ? "#fff" : "#111827" }}>
           📊 Signals ({signals.length})
@@ -362,17 +340,17 @@ export default function AdminPage() {
       {activeTab === "auto" && (
         <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: isMobile ? "16px" : "24px" }}>
           <h2 style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: "700", marginBottom: "8px" }}>
-            📸 SMC Chart Analysis
+            🎯 SMC Signal Generator
           </h2>
           <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>
-            Upload a chart screenshot. The AI reads candles, liquidity zones, order blocks, and FVGs directly from the image.
+            Select pair and timeframe. The AI fetches live candles and analyzes liquidity zones, order blocks, and FVGs.
           </p>
 
           <div style={{ marginBottom: "20px" }}>
             <TradingViewChart onPairChange={setAutoPair} onTimeframeChange={setAutoTimeframe} />
           </div>
 
-          {/* Pair + Timeframe summary */}
+          {/* Pair + Timeframe */}
           <div style={{ marginBottom: "20px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: "150px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "6px" }}>Pair</label>
@@ -400,101 +378,37 @@ export default function AdminPage() {
             </div>
           </div>
 
-          {/* Screenshot upload */}
-          <div style={{ marginBottom: "20px", padding: isMobile ? "12px" : "16px", background: "#f9fafb", borderRadius: "8px", border: "1px solid #e5e7eb" }}>
-            <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "8px" }}>
-              📸 Upload Chart Screenshot
-            </label>
-
-            <input
-              ref={screenshotInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleScreenshotSelect}
-              style={{ display: "none" }}
-            />
-
-            {screenshotPreview ? (
-              <div>
-                <img
-                  src={screenshotPreview}
-                  alt="Chart"
-                  style={{ maxHeight: isMobile ? "200px" : "300px", margin: "0 auto 12px", display: "block", borderRadius: "8px", border: "1px solid #e5e7eb" }}
-                />
-                <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
-                  <button
-                    onClick={handleSMC}
-                    disabled={autoLoading}
-                    style={{
-                      padding: "12px 24px",
-                      background: autoLoading ? "#9ca3af" : "#7c3aed",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: "8px",
-                      fontWeight: "700",
-                      cursor: autoLoading ? "wait" : "pointer",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {autoLoading ? "Analyzing..." : "🔍 Analyze SMC"}
-                  </button>
-                  <button
-                    onClick={clearScreenshot}
-                    style={{ padding: "12px 24px", background: "#e5e7eb", color: "#111827", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: "14px" }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => screenshotInputRef.current?.click()}
-                style={{
-                  width: "100%",
-                  padding: isMobile ? "24px" : "32px",
-                  border: "2px dashed #d1d5db",
-                  borderRadius: "8px",
-                  background: "#fff",
-                  cursor: "pointer",
-                  fontSize: isMobile ? "13px" : "14px",
-                  color: "#6b7280",
-                }}
-              >
-                📸 Click to upload chart screenshot
-                <br />
-                <span style={{ fontSize: "12px", color: "#9ca3af" }}>Make sure the price scale (y-axis) is visible</span>
-              </button>
-            )}
-          </div>
-
-          {/* Optional manual price */}
-          <div style={{ marginBottom: "20px" }}>
-            <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "6px" }}>
-              Current Price (optional — overrides image read)
-            </label>
-            <input
-              type="number"
-              value={autoPrice}
-              onChange={(e) => setAutoPrice(e.target.value)}
-              placeholder="Leave empty to use price from image"
-              style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "14px" }}
-            />
-          </div>
+          <button
+            onClick={handleSMC}
+            disabled={autoLoading}
+            style={{
+              width: "100%",
+              padding: "14px",
+              background: autoLoading ? "#9ca3af" : "#7c3aed",
+              color: "#fff",
+              border: "none",
+              borderRadius: "8px",
+              fontWeight: "700",
+              cursor: autoLoading ? "wait" : "pointer",
+              fontSize: "15px",
+            }}
+          >
+            {autoLoading ? "Analyzing..." : "⚡ Generate SMC Signal"}
+          </button>
 
           {autoError && (
-            <div style={{ padding: "12px", background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }}>
+            <div style={{ padding: "12px", background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", marginTop: "16px", fontSize: "14px" }}>
               {autoError}
             </div>
           )}
 
           {/* SMC Result */}
           {autoResult && (
-            <div style={{ marginTop: "16px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
+            <div style={{ marginTop: "20px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
               <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>
                 {autoResult.direction === "neutral" ? "⏸️ Neutral" : "✅ SMC Signal"} — {autoPair} ({autoTimeframe})
               </p>
 
-              {/* Direction box */}
               <div style={{
                 padding: "14px",
                 borderRadius: "8px",
@@ -516,7 +430,6 @@ export default function AdminPage() {
                 </p>
               </div>
 
-              {/* Levels */}
               {autoResult.direction !== "neutral" && (
                 <div style={{
                   display: "grid",
@@ -540,22 +453,22 @@ export default function AdminPage() {
                 </div>
               )}
 
-              {/* SMC Data — image read stats */}
+              {/* Data read stats */}
               <div style={{ marginBottom: "12px", padding: "10px", background: "#ecfeff", borderRadius: "8px", border: "1px solid #a5f3fc" }}>
                 <p style={{ fontWeight: "700", color: "#0891b2", marginBottom: "6px", fontSize: "12px" }}>
-                  📸 IMAGE READ STATS:
+                  📊 DATA READ STATS:
                 </p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "12px", color: "#6b7280" }}>
-                  <p>Candles detected: <strong>{autoResult.candleCount ?? "N/A"}</strong></p>
-                  <p>Y-axis range: <strong>{autoResult.yAxisRange?.min?.toFixed(2)} - {autoResult.yAxisRange?.max?.toFixed(2)}</strong></p>
+                  <p>Candles: <strong>{autoResult.candleCount ?? "N/A"}</strong></p>
                   <p>Liquidity zones: <strong>{autoResult.liquidityZones?.length ?? 0}</strong></p>
                   <p>Order blocks: <strong>{autoResult.orderBlocks?.length ?? 0}</strong></p>
                   <p>FVGs: <strong>{autoResult.fvgs?.length ?? 0}</strong></p>
-                  <p>Source: <strong>{autoResult.dataSource ?? "image_smc"}</strong></p>
+                  <p>Source: <strong>{autoResult.dataSource ?? "live_data"}</strong></p>
+                  <p>Timeframe: <strong>{autoResult.timeframe}</strong></p>
                 </div>
               </div>
 
-              {/* Liquidity zones list */}
+              {/* Liquidity zones */}
               {autoResult.liquidityZones && autoResult.liquidityZones.length > 0 && (
                 <div style={{ marginBottom: "12px", padding: "10px", background: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
                   <p style={{ fontWeight: "700", color: "#1c69e3", marginBottom: "6px", fontSize: "12px" }}>
