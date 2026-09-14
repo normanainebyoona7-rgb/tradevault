@@ -11,19 +11,18 @@ async function fetchCandlesFromPython(
     const response = await fetch(`${pythonUrl}/api/smc-candles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pair, timeframe, limit: 200 }),
+      body: JSON.stringify({ pair, timeframe, limit: 300 }),
       signal: AbortSignal.timeout(20000),
     });
 
     if (!response.ok) {
-      const err = await response.text();
-      console.error(`[SMC] Python candles failed: ${response.status} ${err}`);
+      console.error(`[SMC] Python failed: ${response.status}`);
       return null;
     }
 
     const data = await response.json();
-    if (!data.candles || data.candles.length < 20) {
-      console.error(`[SMC] Only ${data.candles?.length || 0} candles returned`);
+    if (!data.candles || data.candles.length < 50) {
+      console.error(`[SMC] Only ${data.candles?.length || 0} candles`);
       return null;
     }
 
@@ -33,33 +32,6 @@ async function fetchCandlesFromPython(
     console.error(`[SMC] Fetch failed: ${error?.message}`);
     return null;
   }
-}
-
-function buildAnalysisText(pair: string, signal: any, timeframe: string): string {
-  if (signal.direction === "neutral") {
-    return `📊 **TradeVault SMC — ${pair} (${timeframe})**
-
-⏸️ **NEUTRAL — No trade**
-
-${signal.confluences.map((c: string) => `• ${c}`).join("\n")}
-
-⚠️ No clean SMC setup detected.`;
-  }
-
-  const dir = signal.direction === "long" ? "BUY (LONG)" : "SELL (SHORT)";
-  const emoji = signal.direction === "long" ? "📈" : "📉";
-
-  return `📊 **TradeVault SMC — ${pair} (${timeframe})**
-
-${emoji} **Direction: ${dir}**
-
-🎯 **ENTRY: ${signal.entryPrice}**
-🛑 **STOP LOSS: ${signal.stopLossPrice}**
-✅ **TP1: ${signal.takeProfit1Price}**
-✅ **TP2: ${signal.takeProfit2Price}**
-✅ **TP3: ${signal.takeProfit3Price}**
-
-⚡ Confidence: ${signal.confidence} (${signal.signalScore}/100)`;
 }
 
 export async function POST(request: Request) {
@@ -73,7 +45,6 @@ export async function POST(request: Request) {
     const pair = body.pair || "XAU/USD";
     const timeframe = body.timeframe || "1H";
 
-    // Fetch real candles from FCS via Python
     const candles = await fetchCandlesFromPython(pair, timeframe);
 
     if (!candles) {
@@ -86,44 +57,41 @@ export async function POST(request: Request) {
       );
     }
 
-    // Build SMC signal
     const signal = buildSMCSignal(pair, candles);
 
     if (!signal) {
       return NextResponse.json(
-        {
-          error: "Not enough data",
-          message: "Not enough candles to analyze.",
-        },
+        { error: "Not enough data", message: "Need at least 50 candles." },
         { status: 400 },
       );
     }
 
-    const analysisText = buildAnalysisText(pair, {
-      direction: signal.direction,
-      confluences: signal.confluences,
-      entryPrice: signal.entry,
-      stopLossPrice: signal.stopLoss,
-      takeProfit1Price: signal.takeProfit1,
-      takeProfit2Price: signal.takeProfit2,
-      takeProfit3Price: signal.takeProfit3,
-      confidence: signal.confidence,
-      signalScore: signal.score,
-    }, timeframe);
+    const dirEmoji = signal.direction === "long" ? "📈" : "📉";
+    const dirLabel = signal.direction === "long" ? "BUY (LONG)" : "SELL (SHORT)";
 
-    console.log(`[SMC Signal] ${pair} ${timeframe}: dir=${signal.direction} score=${signal.score}`);
+    const analysisText = `📊 **TradeVault SMC — ${pair} (${timeframe})**
+
+${dirEmoji} **Direction: ${dirLabel}**
+
+🎯 **ENTRY: ${signal.entry}**
+🛑 **STOP LOSS: ${signal.stopLoss}**
+✅ **TP1: ${signal.takeProfit1}**
+✅ **TP2: ${signal.takeProfit2}**
+✅ **TP3: ${signal.takeProfit3}**
+
+⚡ Confidence: ${signal.confidence} (${signal.score}/100)`;
+
+    console.log(`[SMC Signal] ${pair} ${timeframe}: dir=${signal.direction} score=${signal.score} entry=${signal.entry.toFixed(5)} sl=${signal.stopLoss.toFixed(5)}`);
 
     return NextResponse.json({
       analysis: analysisText,
       signal: {
         direction: signal.direction,
-        orderType: signal.direction === "long" ? "MARKET_BUY" : signal.direction === "short" ? "MARKET_SELL" : "NONE",
+        orderType: signal.direction === "long" ? "MARKET_BUY" : "MARKET_SELL",
         orderTypeDescription:
           signal.direction === "long"
             ? "Market Buy — enter immediately"
-            : signal.direction === "short"
-            ? "Market Sell — enter immediately"
-            : "No trade",
+            : "Market Sell — enter immediately",
 
         currentPrice: signal.entry,
         entryPrice: signal.entry,
@@ -152,6 +120,10 @@ export async function POST(request: Request) {
         liquidityZones: signal.liquidityZones,
         orderBlocks: signal.orderBlocks,
         fvgs: signal.fvgs,
+        supplyDemandZones: signal.supplyDemandZones,
+        sma9: signal.sma9,
+        sma21: signal.sma21,
+        sma200: signal.sma200,
         candleCount: signal.candleCount,
       },
     });

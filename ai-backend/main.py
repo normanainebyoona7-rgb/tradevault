@@ -30,14 +30,8 @@ FCS_SYMBOLS = {
 }
 
 FCS_TIMEFRAME_MAP = {
-    "1m": "1m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1H": "1h",
-    "4H": "4h",
-    "1D": "1d",
-    "1W": "1w",
+    "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+    "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w",
 }
 
 
@@ -73,19 +67,13 @@ def get_fcs_price(pair: str) -> dict:
 
 
 def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
-    """Fetch full OHLC candles from FCS API using /forex/history."""
     symbol = FCS_SYMBOLS.get(pair)
     if not symbol:
         raise Exception(f"Unsupported pair: {pair}")
 
     period = FCS_TIMEFRAME_MAP.get(timeframe, "1h")
-
     endpoint = f"{FCS_BASE_URL}/forex/history"
-    params = {
-        "symbol": symbol,
-        "period": period,
-        "access_key": FCS_API_KEY,
-    }
+    params = {"symbol": symbol, "period": period, "access_key": FCS_API_KEY}
 
     response = requests.get(endpoint, params=params, timeout=20)
     response.raise_for_status()
@@ -95,12 +83,9 @@ def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
         raise Exception(f"FCS API error: {data.get('msg', 'Unknown')}")
 
     raw = data.get("response", {})
-
-    # FCS returns an object keyed by timestamp — convert to sorted array
     candles = []
 
     if isinstance(raw, dict):
-        # Sort by timestamp key ascending (oldest first)
         sorted_keys = sorted(raw.keys(), key=lambda k: int(k) if k.isdigit() else 0)
         for key in sorted_keys:
             c = raw[key]
@@ -112,17 +97,13 @@ def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
                 if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
                     continue
                 candles.append({
-                    "open": o,
-                    "high": h,
-                    "low": l,
-                    "close": cl,
+                    "open": o, "high": h, "low": l, "close": cl,
                     "is_green": cl >= o,
                 })
             except (ValueError, TypeError):
                 continue
 
     elif isinstance(raw, list):
-        # Fallback: already an array
         for c in raw:
             try:
                 o = float(c.get("o", 0))
@@ -132,16 +113,12 @@ def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
                 if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
                     continue
                 candles.append({
-                    "open": o,
-                    "high": h,
-                    "low": l,
-                    "close": cl,
+                    "open": o, "high": h, "low": l, "close": cl,
                     "is_green": cl >= o,
                 })
             except (ValueError, TypeError):
                 continue
 
-    # Take last N (most recent)
     if len(candles) > limit:
         candles = candles[-limit:]
 
@@ -179,7 +156,6 @@ async def get_price(request: PriceRequest):
 
 @app.post("/api/smc-candles")
 async def smc_candles(request: SMCRequest):
-    """Fetch OHLC candles for pair + timeframe. Frontend runs SMC analysis."""
     try:
         return get_fcs_candles(request.pair, request.timeframe, request.limit)
     except Exception as e:

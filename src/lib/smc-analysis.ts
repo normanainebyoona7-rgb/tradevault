@@ -1,7 +1,6 @@
 // src/lib/smc-analysis.ts
-// Pure SMC signal builder.
-// Input: OHLC candles from Python (FCS API).
-// Output: direction, entry, SL, TP1-3, liquidity-based.
+// Pure SMC signal builder with supply/demand + SMA 9/21/200 direction filter.
+// Always returns a signal (long/short) — never neutral unless data is missing.
 
 export interface SMCCandle {
   open: number;
@@ -32,6 +31,13 @@ export interface SMCFVG {
   index: number;
 }
 
+export interface SMCSupplyDemand {
+  type: "supply" | "demand";
+  top: number;
+  bottom: number;
+  index: number;
+}
+
 export interface SMCSignal {
   direction: "long" | "short" | "neutral";
   entry: number;
@@ -53,10 +59,14 @@ export interface SMCSignal {
   liquidityZones: SMCLiquidity[];
   orderBlocks: SMCOrderBlock[];
   fvgs: SMCFVG[];
+  supplyDemandZones: SMCSupplyDemand[];
+  sma9: number;
+  sma21: number;
+  sma200: number;
   candleCount: number;
 }
 
-// ===== PIP SIZE =====
+// ===== HELPERS =====
 
 function calcPipSize(pair: string): number {
   if (pair.includes("XAU")) return 0.10;
@@ -74,7 +84,17 @@ function avgCandleRange(candles: SMCCandle[]): number {
   return total / sample.length;
 }
 
-// ===== SWING DETECTION =====
+function sma(candles: SMCCandle[], period: number): number {
+  if (candles.length < period) {
+    const closes = candles.map(c => c.close);
+    return closes.reduce((s, v) => s + v, 0) / closes.length;
+  }
+  const slice = candles.slice(-period);
+  const sum = slice.reduce((s, c) => s + c.close, 0);
+  return sum / period;
+}
+
+// ===== SWINGS =====
 
 function detectSwings(candles: SMCCandle[], lookback: number = 3) {
   const swingHighs: { price: number; index: number }[] = [];
@@ -121,10 +141,7 @@ function detectLiquidity(candles: SMCCandle[]): SMCLiquidity[] {
     }
 
     const swept = candles.slice(h1.index + 1).some(c => c.high > highest + tolerance);
-
-    if (!swept) {
-      liquidity.push({ type: "buy_side", price: highest, touches, index: h1.index });
-    }
+    if (!swept) liquidity.push({ type: "buy_side", price: highest, touches, index: h1.index });
   }
 
   for (let i = 0; i < swings.swingLows.length; i++) {
@@ -140,10 +157,7 @@ function detectLiquidity(candles: SMCCandle[]): SMCLiquidity[] {
     }
 
     const swept = candles.slice(l1.index + 1).some(c => c.low < lowest - tolerance);
-
-    if (!swept) {
-      liquidity.push({ type: "sell_side", price: lowest, touches, index: l1.index });
-    }
+    if (!swept) liquidity.push({ type: "sell_side", price: lowest, touches, index: l1.index });
   }
 
   return liquidity;
@@ -220,19 +234,93 @@ function detectFVGs(candles: SMCCandle[]): SMCFVG[] {
   return fvgs.slice(-10);
 }
 
-// ===== DIRECTION =====
+// ===== SUPPLY / DEMAND =====
+// Demand zone: base (small candles) followed by strong bullish move
+// Supply zone: base followed by strong bearish move
+
+function detectSupplyDemand(candles: SMCCandle[]): SMCSupplyDemand[] {
+  if (candles.length < 5) return [];
+
+  const zones: SMCSupplyDemand[] = [];
+  const avgRange = avgCandleRange(candles);
+
+  for (let i = 1; i < candles.length - 2; i++) {
+    const base = candles[i];
+    const baseBody = Math.abs(base.close - base.open);
+    const next = candles[i + 1];
+    const nextBody = Math.abs(next.close - next.open);
+
+    // Base candle must be small (< 50% of avg range)
+    if (baseBody > avgRange * 0.5) continue;
+
+    // Next candle must be explosive (> 1.5x avg range)
+    if (nextBody < avgRange * 1.5) continue;
+
+    // Bullish move = demand zone
+    if (next.close > next.open && next.close > base.high) {
+      zones.push({
+        type: "demand",
+        top: base.high,
+        bottom: base.low,
+        index: i,
+      });
+    }
+
+    // Bearish move = supply zone
+    if (next.close < next.open && next.close < base.low) {
+      zones.push({
+        type: "supply",
+        top: base.high,
+        bottom: base.low,
+        index: i,
+      });
+    }
+  }
+
+  return zones.slice(-10);
+}
+
+// ===== DIRECTION — SMA 9/21/200 driven =====
+// Long if SMA9 > SMA21 AND price > SMA200
+// Short if SMA9 < SMA21 AND price < SMA200
+// Mixed = use nearest liquidity / SMC zones
 
 function determineDirection(
   candles: SMCCandle[],
   liquidity: SMCLiquidity[],
   obs: SMCOrderBlock[],
   fvgs: SMCFVG[],
+  sdZones: SMCSupplyDemand[],
   currentPrice: number,
-): { direction: "long" | "short" | "neutral"; score: number; confluences: string[] } {
+): { direction: "long" | "short"; score: number; confluences: string[] } {
   const confluences: string[] = [];
   let longScore = 0;
   let shortScore = 0;
 
+  // ===== SMAs =====
+  const sma9 = sma(candles, 9);
+  const sma21 = sma(candles, 21);
+  const sma200 = sma(candles, 200);
+
+  // SMA 9 vs 21 = short-term trend
+  if (sma9 > sma21) {
+    longScore += 25;
+    confluences.push(`✅ SMA9 (${sma9.toFixed(2)}) > SMA21 (${sma21.toFixed(2)}) — short-term bullish`);
+  } else {
+    shortScore += 25;
+    confluences.push(`✅ SMA9 (${sma9.toFixed(2)}) < SMA21 (${sma21.toFixed(2)}) — short-term bearish`);
+  }
+
+  // Price vs SMA200 = long-term trend
+  if (currentPrice > sma200) {
+    longScore += 20;
+    confluences.push(`✅ Price above SMA200 (${sma200.toFixed(2)}) — bullish bias`);
+  } else {
+    shortScore += 20;
+    confluences.push(`✅ Price below SMA200 (${sma200.toFixed(2)}) — bearish bias`);
+  }
+
+  // ===== LIQUIDITY DRAW =====
   const buyAbove = liquidity
     .filter(l => l.type === "buy_side" && l.price > currentPrice)
     .sort((a, b) => a.price - b.price);
@@ -243,88 +331,83 @@ function determineDirection(
   const nearestBuy = buyAbove[0];
   const nearestSell = sellBelow[0];
 
-  const distToBuy = nearestBuy ? Math.abs(nearestBuy.price - currentPrice) : Infinity;
-  const distToSell = nearestSell ? Math.abs(nearestSell.price - currentPrice) : Infinity;
+  const distBuy = nearestBuy ? Math.abs(nearestBuy.price - currentPrice) : Infinity;
+  const distSell = nearestSell ? Math.abs(nearestSell.price - currentPrice) : Infinity;
 
-  if (distToBuy < distToSell) {
-    longScore += 20;
-    confluences.push(`✅ Buy-side liquidity closer (${nearestBuy!.price.toFixed(5)})`);
-  } else if (distToSell < distToBuy) {
-    shortScore += 20;
-    confluences.push(`✅ Sell-side liquidity closer (${nearestSell!.price.toFixed(5)})`);
-  } else {
-    confluences.push(`⚠️ No clear liquidity draw`);
-  }
-
-  const recent = candles.slice(-5);
-  const greenCount = recent.filter(c => c.is_green).length;
-  const redCount = recent.length - greenCount;
-
-  if (greenCount >= 4) {
+  if (distBuy < distSell) {
     longScore += 15;
-    confluences.push(`✅ Recent structure bullish (${greenCount}/${recent.length})`);
-  } else if (redCount >= 4) {
+    confluences.push(`✅ Buy-side liquidity closer (${nearestBuy!.price.toFixed(5)})`);
+  } else if (distSell < distBuy) {
     shortScore += 15;
-    confluences.push(`✅ Recent structure bearish (${redCount}/${recent.length})`);
+    confluences.push(`✅ Sell-side liquidity closer (${nearestSell!.price.toFixed(5)})`);
   }
 
+  // ===== SUPPLY / DEMAND =====
+  const demandBelow = sdZones.filter(z => z.type === "demand" && z.top < currentPrice);
+  const supplyAbove = sdZones.filter(z => z.type === "supply" && z.bottom > currentPrice);
+
+  if (demandBelow.length > 0) {
+    longScore += 10;
+    confluences.push(`✅ Demand zone below (${demandBelow.length})`);
+  }
+  if (supplyAbove.length > 0) {
+    shortScore += 10;
+    confluences.push(`✅ Supply zone above (${supplyAbove.length})`);
+  }
+
+  // ===== ORDER BLOCKS =====
   const bullishOBs = obs.filter(o => o.type === "bullish" && o.top < currentPrice);
   const bearishOBs = obs.filter(o => o.type === "bearish" && o.bottom > currentPrice);
+
   if (bullishOBs.length > 0) {
-    longScore += 10;
+    longScore += 8;
     confluences.push(`✅ Bullish OB below price (${bullishOBs.length})`);
   }
   if (bearishOBs.length > 0) {
-    shortScore += 10;
+    shortScore += 8;
     confluences.push(`✅ Bearish OB above price (${bearishOBs.length})`);
   }
 
+  // ===== FVGs =====
   const bullishFVGs = fvgs.filter(f => f.type === "bullish" && f.bottom < currentPrice);
   const bearishFVGs = fvgs.filter(f => f.type === "bearish" && f.top > currentPrice);
+
   if (bullishFVGs.length > 0) {
-    longScore += 10;
+    longScore += 5;
     confluences.push(`✅ Bullish FVG below price (${bullishFVGs.length})`);
   }
   if (bearishFVGs.length > 0) {
-    shortScore += 10;
+    shortScore += 5;
     confluences.push(`✅ Bearish FVG above price (${bearishFVGs.length})`);
   }
 
-  if (nearestBuy && nearestBuy.touches >= 2) {
+  // ===== Recent structure =====
+  const recent = candles.slice(-5);
+  const greenCount = recent.filter(c => c.is_green).length;
+  if (greenCount >= 4) {
     longScore += 5;
-    confluences.push(`✅ Strong buy-side liquidity (${nearestBuy.touches} touches)`);
-  }
-  if (nearestSell && nearestSell.touches >= 2) {
+    confluences.push(`✅ Recent candles bullish (${greenCount}/${recent.length})`);
+  } else if (greenCount <= 1) {
     shortScore += 5;
-    confluences.push(`✅ Strong sell-side liquidity (${nearestSell.touches} touches)`);
+    confluences.push(`✅ Recent candles bearish (${recent.length - greenCount}/${recent.length})`);
   }
 
-  const diff = Math.abs(longScore - shortScore);
-  if (diff < 5) {
-    return {
-      direction: "neutral",
-      score: 0,
-      confluences: [...confluences, "⚠️ Long/short scores too close"],
-    };
-  }
+  // ===== FINAL DIRECTION =====
+  const direction = longScore >= shortScore ? "long" : "short";
+  const score = Math.min(Math.max(longScore, shortScore), 100);
 
-  const direction = longScore > shortScore ? "long" : "short";
-  return {
-    direction,
-    score: Math.min(Math.max(longScore, shortScore), 100),
-    confluences,
-  };
+  return { direction, score, confluences };
 }
 
-// ===== SL / TP =====
+// ===== SL / TP PLACEMENT =====
 
 function placeSLTP(
   direction: "long" | "short",
   entry: number,
   liquidity: SMCLiquidity[],
   obs: SMCOrderBlock[],
+  sdZones: SMCSupplyDemand[],
   candles: SMCCandle[],
-  pipSize: number,
 ): { stopLoss: number; tp1: number; tp2: number; tp3: number; notes: string[] } {
   const notes: string[] = [];
   const atrRange = avgCandleRange(candles);
@@ -334,9 +417,13 @@ function placeSLTP(
   let tp1: number, tp2: number, tp3: number;
 
   if (direction === "long") {
+    // SL: below nearest sell-side liquidity, or demand zone, or OB
     const sellBelow = liquidity
       .filter(l => l.type === "sell_side" && l.price < entry)
       .sort((a, b) => b.price - a.price);
+    const demandBelow = sdZones
+      .filter(z => z.type === "demand" && z.bottom < entry)
+      .sort((a, b) => b.bottom - a.bottom);
     const bullishOBs = obs
       .filter(o => o.type === "bullish" && o.bottom < entry)
       .sort((a, b) => b.bottom - a.bottom);
@@ -344,14 +431,18 @@ function placeSLTP(
     if (sellBelow.length > 0) {
       stopLoss = sellBelow[0].price - buffer;
       notes.push(`SL below sell-side liquidity at ${sellBelow[0].price.toFixed(5)}`);
+    } else if (demandBelow.length > 0) {
+      stopLoss = demandBelow[0].bottom - buffer;
+      notes.push(`SL below demand zone at ${demandBelow[0].bottom.toFixed(5)}`);
     } else if (bullishOBs.length > 0) {
       stopLoss = bullishOBs[0].bottom - buffer;
       notes.push(`SL below bullish OB at ${bullishOBs[0].bottom.toFixed(5)}`);
     } else {
       stopLoss = entry - atrRange * 2;
-      notes.push(`SL from ATR (no liquidity or OB below)`);
+      notes.push(`SL from ATR (no structural level below)`);
     }
 
+    // TPs: buy-side liquidity above
     const buyAbove = liquidity
       .filter(l => l.type === "buy_side" && l.price > entry)
       .sort((a, b) => a.price - b.price);
@@ -372,15 +463,20 @@ function placeSLTP(
       tp3 = entry + (entry - stopLoss) * 4;
       notes.push(`TP1 at liquidity, TP2/TP3 at ratio`);
     } else {
-      tp1 = entry + (entry - stopLoss) * 1.5;
-      tp2 = entry + (entry - stopLoss) * 2.5;
-      tp3 = entry + (entry - stopLoss) * 4;
-      notes.push(`TPs from ratio (no liquidity above)`);
+      const risk = entry - stopLoss;
+      tp1 = entry + risk * 1.5;
+      tp2 = entry + risk * 2.5;
+      tp3 = entry + risk * 4;
+      notes.push(`TPs from R:R ratio (no liquidity above)`);
     }
   } else {
+    // SHORT
     const buyAbove = liquidity
       .filter(l => l.type === "buy_side" && l.price > entry)
       .sort((a, b) => a.price - b.price);
+    const supplyAbove = sdZones
+      .filter(z => z.type === "supply" && z.top > entry)
+      .sort((a, b) => a.top - b.top);
     const bearishOBs = obs
       .filter(o => o.type === "bearish" && o.top > entry)
       .sort((a, b) => a.top - b.top);
@@ -388,12 +484,15 @@ function placeSLTP(
     if (buyAbove.length > 0) {
       stopLoss = buyAbove[0].price + buffer;
       notes.push(`SL above buy-side liquidity at ${buyAbove[0].price.toFixed(5)}`);
+    } else if (supplyAbove.length > 0) {
+      stopLoss = supplyAbove[0].top + buffer;
+      notes.push(`SL above supply zone at ${supplyAbove[0].top.toFixed(5)}`);
     } else if (bearishOBs.length > 0) {
       stopLoss = bearishOBs[0].top + buffer;
       notes.push(`SL above bearish OB at ${bearishOBs[0].top.toFixed(5)}`);
     } else {
       stopLoss = entry + atrRange * 2;
-      notes.push(`SL from ATR (no liquidity or OB above)`);
+      notes.push(`SL from ATR (no structural level above)`);
     }
 
     const sellBelow = liquidity
@@ -416,14 +515,15 @@ function placeSLTP(
       tp3 = entry - (stopLoss - entry) * 4;
       notes.push(`TP1 at liquidity, TP2/TP3 at ratio`);
     } else {
-      tp1 = entry - (stopLoss - entry) * 1.5;
-      tp2 = entry - (stopLoss - entry) * 2.5;
-      tp3 = entry - (stopLoss - entry) * 4;
-      notes.push(`TPs from ratio (no liquidity below)`);
+      const risk = stopLoss - entry;
+      tp1 = entry - risk * 1.5;
+      tp2 = entry - risk * 2.5;
+      tp3 = entry - risk * 4;
+      notes.push(`TPs from R:R ratio (no liquidity below)`);
     }
   }
 
-  // Sanity
+  // Sanity check
   if (direction === "long") {
     if (tp1 <= entry || tp2 <= tp1 || tp3 <= tp2) {
       const risk = entry - stopLoss;
@@ -451,7 +551,7 @@ export function buildSMCSignal(
   pair: string,
   candles: SMCCandle[],
 ): SMCSignal | null {
-  if (!candles || candles.length < 20) return null;
+  if (!candles || candles.length < 50) return null;
 
   const currentPrice = candles[candles.length - 1].close;
   const pipSize = calcPipSize(pair);
@@ -459,28 +559,15 @@ export function buildSMCSignal(
   const liquidity = detectLiquidity(candles);
   const obs = detectOrderBlocks(candles);
   const fvgs = detectFVGs(candles);
+  const sdZones = detectSupplyDemand(candles);
 
-  const decision = determineDirection(candles, liquidity, obs, fvgs, currentPrice);
+  const sma9 = sma(candles, 9);
+  const sma21 = sma(candles, 21);
+  const sma200 = sma(candles, 200);
 
-  if (decision.direction === "neutral") {
-    return {
-      direction: "neutral",
-      entry: currentPrice,
-      stopLoss: 0, takeProfit1: 0, takeProfit2: 0, takeProfit3: 0,
-      riskPips: 0, rewardPips1: 0, rewardPips2: 0, rewardPips3: 0,
-      riskReward1: "0", riskReward2: "0", riskReward3: "0",
-      confidence: "NEUTRAL",
-      score: 0,
-      confluences: decision.confluences,
-      smcSource: "live_data",
-      liquidityZones: liquidity,
-      orderBlocks: obs,
-      fvgs,
-      candleCount: candles.length,
-    };
-  }
+  const decision = determineDirection(candles, liquidity, obs, fvgs, sdZones, currentPrice);
 
-  const levels = placeSLTP(decision.direction, currentPrice, liquidity, obs, candles, pipSize);
+  const levels = placeSLTP(decision.direction, currentPrice, liquidity, obs, sdZones, candles);
 
   const riskPips = Math.round(Math.abs(currentPrice - levels.stopLoss) / pipSize);
   const rewardPips1 = Math.round(Math.abs(levels.tp1 - currentPrice) / pipSize);
@@ -491,26 +578,12 @@ export function buildSMCSignal(
   const rr2 = riskPips > 0 ? (rewardPips2 / riskPips).toFixed(1) : "0";
   const rr3 = riskPips > 0 ? (rewardPips3 / riskPips).toFixed(1) : "0";
 
-  if (parseFloat(rr1) < 1.2) {
-    return {
-      direction: "neutral",
-      entry: currentPrice,
-      stopLoss: 0, takeProfit1: 0, takeProfit2: 0, takeProfit3: 0,
-      riskPips: 0, rewardPips1: 0, rewardPips2: 0, rewardPips3: 0,
-      riskReward1: "0", riskReward2: "0", riskReward3: "0",
-      confidence: "NEUTRAL",
-      score: 0,
-      confluences: [...decision.confluences, `❌ Rejected: TP1 R:R 1:${rr1} < 1.2`],
-      smcSource: "live_data",
-      liquidityZones: liquidity,
-      orderBlocks: obs,
-      fvgs,
-      candleCount: candles.length,
-    };
-  }
-
   const confidence = decision.score >= 70 ? "HIGH" : decision.score >= 50 ? "MEDIUM" : "LOW";
-  const allConfluences = [...decision.confluences, ...levels.notes.map(n => `🎯 ${n}`)];
+  const allConfluences = [
+    ...decision.confluences,
+    `📊 SMA9: ${sma9.toFixed(5)} | SMA21: ${sma21.toFixed(5)} | SMA200: ${sma200.toFixed(5)}`,
+    ...levels.notes.map(n => `🎯 ${n}`),
+  ];
 
   return {
     direction: decision.direction,
@@ -533,6 +606,10 @@ export function buildSMCSignal(
     liquidityZones: liquidity,
     orderBlocks: obs,
     fvgs,
+    supplyDemandZones: sdZones,
+    sma9,
+    sma21,
+    sma200,
     candleCount: candles.length,
   };
 }
