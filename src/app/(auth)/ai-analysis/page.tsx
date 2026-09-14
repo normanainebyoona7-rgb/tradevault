@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { TradingViewChart } from "@/components/charts/tradingview-chart";
 
 const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
@@ -14,6 +14,9 @@ export default function AIAnalysisPage() {
   const [signal, setSignal] = useState<any>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [userTier, setUserTier] = useState("free");
+  const [screenshot, setScreenshot] = useState<File | null>(null);
+  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -32,20 +35,44 @@ export default function AIAnalysisPage() {
 
   const canSeeAllTPs = userTier === "vip" || userTier === "vvip";
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScreenshot(file);
+    const reader = new FileReader();
+    reader.onload = (event) => setScreenshotPreview(event.target?.result as string);
+    reader.readAsDataURL(file);
+    setSignal(null);
+    setError("");
+  };
+
+  const clearScreenshot = () => {
+    setScreenshot(null);
+    setScreenshotPreview(null);
+    setSignal(null);
+    setError("");
+  };
+
   const handleAnalyze = async () => {
+    if (!screenshot) {
+      setError("Please upload a chart screenshot first");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setSignal(null);
 
     try {
+      const formData = new FormData();
+      formData.append("file", screenshot);
+      formData.append("pair", currentPair);
+      formData.append("timeframe", currentTimeframe);
+      if (manualPrice) formData.append("userPrice", manualPrice);
+
       const response = await fetch("/api/analyze-chart", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pair: currentPair,
-          timeframe: currentTimeframe,
-          ...(manualPrice ? { userPrice: manualPrice } : {}),
-        }),
+        body: formData,
       });
 
       const data = await response.json();
@@ -81,12 +108,13 @@ export default function AIAnalysisPage() {
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: isMobile ? "12px" : "24px" }}>
       <h1 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "800", marginBottom: "8px" }}>
-        🤖 AI Signal Analysis
+        📸 Chart Signal Analysis
       </h1>
       <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "20px" }}>
-        Multi-confluence strategy: trend + MACD + RSI + ADX + liquidity-based SL/TP.
+        Upload a chart screenshot to get an AI-powered trading signal.
       </p>
 
+      {/* Optional TradingView for reference */}
       <div style={{ marginBottom: "20px" }}>
         <TradingViewChart
           onPairChange={setCurrentPair}
@@ -94,49 +122,129 @@ export default function AIAnalysisPage() {
         />
       </div>
 
+      {/* Pair + Timeframe selects */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
         gap: "12px",
         marginBottom: "20px",
       }}>
+        <div>
+          <label style={labelStyle}>Pair</label>
+          <select value={currentPair} onChange={(e) => setCurrentPair(e.target.value)} style={inputStyle}>
+            {["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY"].map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+        </div>
         <div>
           <label style={labelStyle}>Timeframe</label>
           <select value={currentTimeframe} onChange={(e) => setCurrentTimeframe(e.target.value)} style={inputStyle}>
             {TIMEFRAMES.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
           </select>
         </div>
-        <div>
-          <label style={labelStyle}>Current Price (optional)</label>
-          <input
-            type="number"
-            step="any"
-            value={manualPrice}
-            onChange={(e) => setManualPrice(e.target.value)}
-            placeholder="Leave empty for live price"
-            style={inputStyle}
-          />
-        </div>
       </div>
 
-      <button
-        onClick={handleAnalyze}
-        disabled={loading}
-        style={{
-          width: "100%",
-          padding: "14px",
-          background: loading ? "#9ca3af" : "#7c3aed",
-          color: "#fff",
-          border: "none",
-          borderRadius: "8px",
-          fontWeight: "700",
-          cursor: loading ? "wait" : "pointer",
-          fontSize: "15px",
-          marginBottom: "20px",
-        }}
-      >
-        {loading ? "Analyzing..." : "🔍 Analyze"}
-      </button>
+      {/* Screenshot upload */}
+      <div style={{
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: "12px",
+        padding: isMobile ? "16px" : "20px",
+        marginBottom: "20px",
+      }}>
+        <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "10px" }}>
+          📸 Chart Screenshot (Required)
+        </label>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileSelect}
+          style={{ display: "none" }}
+        />
+
+        {screenshotPreview ? (
+          <div>
+            <img
+              src={screenshotPreview}
+              alt="Chart screenshot"
+              style={{
+                maxHeight: isMobile ? "200px" : "300px",
+                margin: "0 auto 12px",
+                display: "block",
+                borderRadius: "8px",
+                border: "1px solid #e5e7eb",
+              }}
+            />
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={handleAnalyze}
+                disabled={loading}
+                style={{
+                  padding: "12px 24px",
+                  background: loading ? "#9ca3af" : "#7c3aed",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontWeight: "700",
+                  cursor: loading ? "wait" : "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                {loading ? "Analyzing..." : "🔍 Analyze Chart"}
+              </button>
+              <button
+                onClick={clearScreenshot}
+                style={{
+                  padding: "12px 24px",
+                  background: "#e5e7eb",
+                  color: "#111827",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontWeight: "600",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              width: "100%",
+              padding: isMobile ? "24px" : "32px",
+              border: "2px dashed #d1d5db",
+              borderRadius: "8px",
+              background: "#fff",
+              cursor: "pointer",
+              fontSize: isMobile ? "13px" : "14px",
+              color: "#6b7280",
+            }}
+          >
+            📸 Click to upload chart screenshot
+            <br />
+            <span style={{ fontSize: "12px", color: "#9ca3af" }}>Make sure the price scale is visible on the right</span>
+          </button>
+        )}
+      </div>
+
+      {/* Optional manual price */}
+      <div style={{ marginBottom: "20px" }}>
+        <label style={labelStyle}>Current Price (optional)</label>
+        <input
+          type="number"
+          step="any"
+          value={manualPrice}
+          onChange={(e) => setManualPrice(e.target.value)}
+          placeholder="Leave empty to read from image"
+          style={inputStyle}
+        />
+      </div>
 
       {error && (
         <div style={{
@@ -152,6 +260,7 @@ export default function AIAnalysisPage() {
         </div>
       )}
 
+      {/* Signal display */}
       {signal && (
         <div style={{
           background: "#fff",
@@ -160,13 +269,9 @@ export default function AIAnalysisPage() {
           padding: isMobile ? "16px" : "20px",
           marginBottom: "16px",
         }}>
-          <h2 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "16px" }}>
-            📊 {currentPair} ({currentTimeframe})
-          </h2>
-
           {/* Direction badge */}
           <div style={{
-            padding: "14px",
+            padding: "16px",
             borderRadius: "12px",
             marginBottom: "16px",
             textAlign: "center",
@@ -174,110 +279,119 @@ export default function AIAnalysisPage() {
             border: `2px solid ${signal.direction === "long" ? "#16a34a" : signal.direction === "short" ? "#dc2626" : "#ca8a04"}`,
           }}>
             <p style={{ fontSize: "12px", fontWeight: "600", color: "#6b7280", marginBottom: "4px" }}>
-              📋 DIRECTION
+              SIGNAL
             </p>
             <p style={{
-              fontSize: isMobile ? "22px" : "26px",
+              fontSize: isMobile ? "26px" : "32px",
               fontWeight: "800",
               color: signal.direction === "long" ? "#16a34a" : signal.direction === "short" ? "#dc2626" : "#ca8a04",
               letterSpacing: "1px",
             }}>
-              {signal.direction === "neutral" ? "⏸️ NEUTRAL" : signal.direction === "long" ? "📈 LONG" : "📉 SHORT"}
+              {signal.direction === "neutral" ? "⏸️ NO TRADE" : signal.direction === "long" ? "📈 BUY" : "📉 SELL"}
             </p>
-            {signal.direction !== "neutral" && (
-              <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
-                {signal.confidence} confidence • Score {signal.signalScore}/100
-              </p>
-            )}
+            <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "6px" }}>
+              {currentPair} • {currentTimeframe}
+            </p>
           </div>
 
-          {/* Neutral reasons */}
+          {/* Neutral message */}
           {signal.direction === "neutral" && (
             <div style={{
               padding: "14px",
               background: "#fef9c3",
               borderRadius: "10px",
               border: "1px solid #fde68a",
-              marginBottom: "16px",
+              textAlign: "center",
             }}>
-              <p style={{ fontWeight: "700", color: "#854d0e", marginBottom: "8px", fontSize: "14px" }}>
-                ⚠️ No trade — waiting for a clearer setup
+              <p style={{ fontSize: "14px", color: "#854d0e", fontWeight: "600" }}>
+                No clear setup detected on this chart.
               </p>
-              {signal.confluences && signal.confluences.length > 0 && (
-                <ul style={{ listStyle: "none", padding: 0, fontSize: "13px", color: "#854d0e" }}>
-                  {signal.confluences.slice(0, 6).map((c: string, i: number) => (
-                    <li key={i} style={{ padding: "3px 0" }}>{c}</li>
-                  ))}
-                </ul>
-              )}
+              <p style={{ fontSize: "13px", color: "#854d0e", marginTop: "6px" }}>
+                Try a different timeframe or upload a clearer chart.
+              </p>
             </div>
           )}
 
           {/* Signal levels */}
           {signal.direction !== "neutral" && (
             <>
-              {/* Entry / SL / Current price */}
+              {/* Entry + SL */}
               <div style={{
                 display: "grid",
-                gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)",
+                gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
                 gap: "10px",
                 marginBottom: "12px",
               }}>
-                <div style={{ padding: "12px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280" }}>Current</p>
-                  <p style={{ fontSize: "18px", fontWeight: "800" }}>{signal.currentPrice}</p>
+                <div style={{ padding: "14px", background: "#eff6ff", borderRadius: "10px", textAlign: "center" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>ENTRY</p>
+                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#1c69e3" }}>
+                    {signal.entryPrice}
+                  </p>
                 </div>
-                <div style={{ padding: "12px", background: "#eff6ff", borderRadius: "8px", textAlign: "center" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280" }}>Entry</p>
-                  <p style={{ fontSize: "18px", fontWeight: "800", color: "#1c69e3" }}>{signal.entryPrice}</p>
-                </div>
-                <div style={{ padding: "12px", background: "#fef2f2", borderRadius: "8px", textAlign: "center" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280" }}>Stop Loss</p>
-                  <p style={{ fontSize: "18px", fontWeight: "800", color: "#dc2626" }}>{signal.stopLossPrice}</p>
+                <div style={{ padding: "14px", background: "#fef2f2", borderRadius: "10px", textAlign: "center" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>STOP LOSS</p>
+                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#dc2626" }}>
+                    {signal.stopLossPrice}
+                  </p>
                 </div>
               </div>
 
-              {/* TP levels — TP1 always, TP2/TP3 for VIP+ */}
+              {/* TPs */}
               <div style={{
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr" : canSeeAllTPs ? "repeat(3, 1fr)" : "1fr",
                 gap: "10px",
-                marginBottom: "12px",
+                marginBottom: "14px",
               }}>
-                <div style={{ padding: "12px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280" }}>TP1</p>
-                  <p style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit1Price}</p>
-                  <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>R:R 1:{signal.riskReward1}</p>
+                <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 1</p>
+                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
+                    {signal.takeProfit1Price}
+                  </p>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
+                    Risk:Reward 1:{signal.riskReward1}
+                  </p>
                 </div>
 
                 {canSeeAllTPs && (
                   <>
-                    <div style={{ padding: "12px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                      <p style={{ fontSize: "11px", color: "#6b7280" }}>TP2</p>
-                      <p style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit2Price}</p>
-                      <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>R:R 1:{signal.riskReward2}</p>
+                    <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
+                      <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 2</p>
+                      <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
+                        {signal.takeProfit2Price}
+                      </p>
+                      <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
+                        Risk:Reward 1:{signal.riskReward2}
+                      </p>
                     </div>
-                    <div style={{ padding: "12px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                      <p style={{ fontSize: "11px", color: "#6b7280" }}>TP3</p>
-                      <p style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a" }}>{signal.takeProfit3Price}</p>
-                      <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>R:R 1:{signal.riskReward3}</p>
+                    <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
+                      <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 3</p>
+                      <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
+                        {signal.takeProfit3Price}
+                      </p>
+                      <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
+                        Risk:Reward 1:{signal.riskReward3}
+                      </p>
                     </div>
                   </>
                 )}
               </div>
 
-              {/* Upgrade prompt for free users */}
+              {/* Upgrade prompt for free tier */}
               {!canSeeAllTPs && (
                 <div style={{
-                  padding: "12px",
+                  padding: "14px",
                   background: "linear-gradient(135deg, #dbeafe, #f3e8ff)",
-                  borderRadius: "8px",
+                  borderRadius: "10px",
                   border: "1px solid #c7d2fe",
                   textAlign: "center",
                   marginBottom: "12px",
                 }}>
-                  <p style={{ fontSize: "13px", color: "#1c69e3", fontWeight: "600" }}>
-                    🔒 Unlock TP2 & TP3 with VIP membership
+                  <p style={{ fontSize: "14px", color: "#1c69e3", fontWeight: "700", marginBottom: "4px" }}>
+                    🔒 Unlock TP2 & TP3
+                  </p>
+                  <p style={{ fontSize: "12px", color: "#6b7280" }}>
+                    Upgrade to VIP or VVIP to see all take profit levels
                   </p>
                 </div>
               )}
@@ -289,30 +403,10 @@ export default function AIAnalysisPage() {
                 borderRadius: "8px",
                 fontSize: "13px",
                 color: "#6b7280",
-                marginBottom: "12px",
                 textAlign: "center",
               }}>
-                Risk: <strong>{signal.riskPips} pips</strong> • Trend: <strong>{signal.trendBias}</strong> • ADX: <strong>{signal.adx}</strong>
+                Risk: <strong>{signal.riskPips} pips</strong> • Confidence: <strong>{signal.confidence}</strong>
               </div>
-
-              {/* Confluences */}
-              {signal.confluences && signal.confluences.length > 0 && (
-                <div style={{
-                  padding: "12px",
-                  background: "#faf5ff",
-                  borderRadius: "8px",
-                  border: "1px solid #e9d5ff",
-                }}>
-                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px", fontSize: "13px" }}>
-                    🔗 Confluences
-                  </p>
-                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
-                    {signal.confluences.slice(0, 8).map((c: string, i: number) => (
-                      <li key={i} style={{ padding: "2px 0" }}>{c}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </>
           )}
         </div>
