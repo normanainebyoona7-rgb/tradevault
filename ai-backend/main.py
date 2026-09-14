@@ -30,14 +30,14 @@ FCS_SYMBOLS = {
 }
 
 FCS_TIMEFRAME_MAP = {
-    "1m": "1",
-    "5m": "5",
-    "15m": "15",
-    "30m": "30",
-    "1H": "60",
-    "4H": "240",
-    "1D": "D",
-    "1W": "W",
+    "1m": "1m",
+    "5m": "5m",
+    "15m": "15m",
+    "30m": "30m",
+    "1H": "1h",
+    "4H": "4h",
+    "1D": "1d",
+    "1W": "1w",
 }
 
 
@@ -73,18 +73,17 @@ def get_fcs_price(pair: str) -> dict:
 
 
 def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
-    """Fetch full OHLC candles from FCS API."""
+    """Fetch full OHLC candles from FCS API using /forex/history."""
     symbol = FCS_SYMBOLS.get(pair)
     if not symbol:
         raise Exception(f"Unsupported pair: {pair}")
 
-    period = FCS_TIMEFRAME_MAP.get(timeframe, "60")
+    period = FCS_TIMEFRAME_MAP.get(timeframe, "1h")
 
-    endpoint = f"{FCS_BASE_URL}/forex/candle"
+    endpoint = f"{FCS_BASE_URL}/forex/history"
     params = {
         "symbol": symbol,
         "period": period,
-        "limit": limit,
         "access_key": FCS_API_KEY,
     }
 
@@ -95,32 +94,56 @@ def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
     if not data.get("status"):
         raise Exception(f"FCS API error: {data.get('msg', 'Unknown')}")
 
-    raw = data.get("response", [])
+    raw = data.get("response", {})
 
-    # Normalize into OHLC candles
+    # FCS returns an object keyed by timestamp — convert to sorted array
     candles = []
-    for c in raw:
-        try:
-            o = float(c.get("o", 0))
-            h = float(c.get("h", 0))
-            l = float(c.get("l", 0))
-            cl = float(c.get("c", 0))
-            if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
-                continue
-            candles.append({
-                "open": o,
-                "high": h,
-                "low": l,
-                "close": cl,
-                "is_green": cl >= o,
-            })
-        except (ValueError, TypeError):
-            continue
 
-    # Sort by time — FCS returns newest first sometimes
-    # We can't be sure of order, so reverse if needed based on structure
-    # For SMC we need oldest first. FCS typically returns ascending already.
-    # Extra safety: we don't have timestamps, so trust the API order.
+    if isinstance(raw, dict):
+        # Sort by timestamp key ascending (oldest first)
+        sorted_keys = sorted(raw.keys(), key=lambda k: int(k) if k.isdigit() else 0)
+        for key in sorted_keys:
+            c = raw[key]
+            try:
+                o = float(c.get("o", 0))
+                h = float(c.get("h", 0))
+                l = float(c.get("l", 0))
+                cl = float(c.get("c", 0))
+                if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
+                    continue
+                candles.append({
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": cl,
+                    "is_green": cl >= o,
+                })
+            except (ValueError, TypeError):
+                continue
+
+    elif isinstance(raw, list):
+        # Fallback: already an array
+        for c in raw:
+            try:
+                o = float(c.get("o", 0))
+                h = float(c.get("h", 0))
+                l = float(c.get("l", 0))
+                cl = float(c.get("c", 0))
+                if o <= 0 or h <= 0 or l <= 0 or cl <= 0:
+                    continue
+                candles.append({
+                    "open": o,
+                    "high": h,
+                    "low": l,
+                    "close": cl,
+                    "is_green": cl >= o,
+                })
+            except (ValueError, TypeError):
+                continue
+
+    # Take last N (most recent)
+    if len(candles) > limit:
+        candles = candles[-limit:]
 
     if not candles:
         raise Exception(f"No candles returned for {pair} {timeframe}")
@@ -156,10 +179,7 @@ async def get_price(request: PriceRequest):
 
 @app.post("/api/smc-candles")
 async def smc_candles(request: SMCRequest):
-    """
-    Fetch OHLC candles for pair + timeframe.
-    Frontend runs SMC analysis on these candles.
-    """
+    """Fetch OHLC candles for pair + timeframe. Frontend runs SMC analysis."""
     try:
         return get_fcs_candles(request.pair, request.timeframe, request.limit)
     except Exception as e:
