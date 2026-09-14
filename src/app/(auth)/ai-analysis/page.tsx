@@ -82,7 +82,7 @@ export default function AIAnalysisPage() {
         🎯 Signal Analysis
       </h1>
       <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "20px" }}>
-        Select a pair and timeframe. Get an AI-powered SMC signal.
+        Select a pair and timeframe to get an SMC signal.
       </p>
 
       <div style={{ marginBottom: "20px" }}>
@@ -155,14 +155,13 @@ export default function AIAnalysisPage() {
           padding: isMobile ? "16px" : "20px",
           marginBottom: "16px",
         }}>
-          {/* Direction badge */}
           <div style={{
             padding: "16px",
             borderRadius: "12px",
             marginBottom: "16px",
             textAlign: "center",
-            background: signal.direction === "long" ? "#f0fdf4" : signal.direction === "short" ? "#fef2f2" : "#fef9c3",
-            border: `2px solid ${signal.direction === "long" ? "#16a34a" : signal.direction === "short" ? "#dc2626" : "#ca8a04"}`,
+            background: signal.direction === "long" ? "#f0fdf4" : "#fef2f2",
+            border: `2px solid ${signal.direction === "long" ? "#16a34a" : "#dc2626"}`,
           }}>
             <p style={{ fontSize: "12px", fontWeight: "600", color: "#6b7280", marginBottom: "4px" }}>
               SIGNAL
@@ -170,127 +169,104 @@ export default function AIAnalysisPage() {
             <p style={{
               fontSize: isMobile ? "26px" : "32px",
               fontWeight: "800",
-              color: signal.direction === "long" ? "#16a34a" : signal.direction === "short" ? "#dc2626" : "#ca8a04",
+              color: signal.direction === "long" ? "#16a34a" : "#dc2626",
               letterSpacing: "1px",
             }}>
-              {signal.direction === "neutral" ? "⏸️ NO TRADE" : signal.direction === "long" ? "📈 BUY" : "📉 SELL"}
+              {signal.direction === "long" ? "📈 BUY" : "📉 SELL"}
             </p>
             <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "6px" }}>
               {currentPair} • {currentTimeframe}
             </p>
           </div>
 
-          {/* Neutral message */}
-          {signal.direction === "neutral" && (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
+            gap: "10px",
+            marginBottom: "12px",
+          }}>
+            <div style={{ padding: "14px", background: "#eff6ff", borderRadius: "10px", textAlign: "center" }}>
+              <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>ENTRY</p>
+              <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#1c69e3" }}>
+                {signal.entryPrice}
+              </p>
+            </div>
+            <div style={{ padding: "14px", background: "#fef2f2", borderRadius: "10px", textAlign: "center" }}>
+              <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>STOP LOSS</p>
+              <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#dc2626" }}>
+                {signal.stopLossPrice}
+              </p>
+            </div>
+          </div>
+
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : canSeeAllTPs ? "repeat(3, 1fr)" : "1fr",
+            gap: "10px",
+            marginBottom: "14px",
+          }}>
+            <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
+              <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 1</p>
+              <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
+                {signal.takeProfit1Price}
+              </p>
+              <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
+                Risk:Reward 1:{signal.riskReward1}
+              </p>
+            </div>
+
+            {canSeeAllTPs && (
+              <>
+                <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 2</p>
+                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
+                    {signal.takeProfit2Price}
+                  </p>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
+                    Risk:Reward 1:{signal.riskReward2}
+                  </p>
+                </div>
+                <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 3</p>
+                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
+                    {signal.takeProfit3Price}
+                  </p>
+                  <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
+                    Risk:Reward 1:{signal.riskReward3}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {!canSeeAllTPs && (
             <div style={{
               padding: "14px",
-              background: "#fef9c3",
+              background: "linear-gradient(135deg, #dbeafe, #f3e8ff)",
               borderRadius: "10px",
-              border: "1px solid #fde68a",
+              border: "1px solid #c7d2fe",
               textAlign: "center",
+              marginBottom: "12px",
             }}>
-              <p style={{ fontSize: "14px", color: "#854d0e", fontWeight: "600" }}>
-                No clear setup detected right now.
+              <p style={{ fontSize: "14px", color: "#1c69e3", fontWeight: "700", marginBottom: "4px" }}>
+                🔒 Unlock TP2 & TP3
               </p>
-              <p style={{ fontSize: "13px", color: "#854d0e", marginTop: "6px" }}>
-                Try a different timeframe or pair.
+              <p style={{ fontSize: "12px", color: "#6b7280" }}>
+                Upgrade to VIP or VVIP to see all take profit levels
               </p>
             </div>
           )}
 
-          {/* Signal levels */}
-          {signal.direction !== "neutral" && (
-            <>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
-                gap: "10px",
-                marginBottom: "12px",
-              }}>
-                <div style={{ padding: "14px", background: "#eff6ff", borderRadius: "10px", textAlign: "center" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>ENTRY</p>
-                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#1c69e3" }}>
-                    {signal.entryPrice}
-                  </p>
-                </div>
-                <div style={{ padding: "14px", background: "#fef2f2", borderRadius: "10px", textAlign: "center" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>STOP LOSS</p>
-                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#dc2626" }}>
-                    {signal.stopLossPrice}
-                  </p>
-                </div>
-              </div>
-
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : canSeeAllTPs ? "repeat(3, 1fr)" : "1fr",
-                gap: "10px",
-                marginBottom: "14px",
-              }}>
-                <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
-                  <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 1</p>
-                  <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
-                    {signal.takeProfit1Price}
-                  </p>
-                  <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
-                    Risk:Reward 1:{signal.riskReward1}
-                  </p>
-                </div>
-
-                {canSeeAllTPs && (
-                  <>
-                    <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
-                      <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 2</p>
-                      <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
-                        {signal.takeProfit2Price}
-                      </p>
-                      <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
-                        Risk:Reward 1:{signal.riskReward2}
-                      </p>
-                    </div>
-                    <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "10px", textAlign: "center", border: "1px solid #bbf7d0" }}>
-                      <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "4px" }}>TAKE PROFIT 3</p>
-                      <p style={{ fontSize: isMobile ? "20px" : "24px", fontWeight: "800", color: "#16a34a" }}>
-                        {signal.takeProfit3Price}
-                      </p>
-                      <p style={{ fontSize: "11px", color: "#6b7280", marginTop: "4px" }}>
-                        Risk:Reward 1:{signal.riskReward3}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {!canSeeAllTPs && (
-                <div style={{
-                  padding: "14px",
-                  background: "linear-gradient(135deg, #dbeafe, #f3e8ff)",
-                  borderRadius: "10px",
-                  border: "1px solid #c7d2fe",
-                  textAlign: "center",
-                  marginBottom: "12px",
-                }}>
-                  <p style={{ fontSize: "14px", color: "#1c69e3", fontWeight: "700", marginBottom: "4px" }}>
-                    🔒 Unlock TP2 & TP3
-                  </p>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>
-                    Upgrade to VIP or VVIP to see all take profit levels
-                  </p>
-                </div>
-              )}
-
-              <div style={{
-                padding: "10px",
-                background: "#f9fafb",
-                borderRadius: "8px",
-                fontSize: "13px",
-                color: "#6b7280",
-                textAlign: "center",
-              }}>
-                Risk: <strong>{signal.riskPips} pips</strong> • Confidence: <strong>{signal.confidence}</strong>
-              </div>
-            </>
-          )}
+          <div style={{
+            padding: "10px",
+            background: "#f9fafb",
+            borderRadius: "8px",
+            fontSize: "13px",
+            color: "#6b7280",
+            textAlign: "center",
+          }}>
+            Risk: <strong>{signal.riskPips} pips</strong> • Confidence: <strong>{signal.confidence}</strong>
+          </div>
         </div>
       )}
     </div>

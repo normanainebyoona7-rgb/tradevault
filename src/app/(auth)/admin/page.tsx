@@ -122,7 +122,6 @@ export default function AdminPage() {
     }
   };
 
-  // ===== Generate SMC signal from live data =====
   const handleSMC = async () => {
     setAutoLoading(true);
     setAutoResult(null);
@@ -147,7 +146,6 @@ export default function AdminPage() {
 
       setAutoResult(data.signal);
 
-      // Save non-neutral signals
       if (data.signal.direction !== "neutral") {
         const signalToSave = {
           pair: autoPair,
@@ -178,11 +176,6 @@ export default function AdminPage() {
     } finally {
       setAutoLoading(false);
     }
-  };
-
-  const clearResult = () => {
-    setAutoResult(null);
-    setAutoError("");
   };
 
   const handleAddSignal = async () => {
@@ -343,14 +336,13 @@ export default function AdminPage() {
             🎯 SMC Signal Generator
           </h2>
           <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>
-            Select pair and timeframe. The AI fetches live candles and analyzes liquidity zones, order blocks, and FVGs.
+            Live candles from FCS. SMA 9/21/200 direction filter. M5/M15 liquidity + reversal check.
           </p>
 
           <div style={{ marginBottom: "20px" }}>
             <TradingViewChart onPairChange={setAutoPair} onTimeframeChange={setAutoTimeframe} />
           </div>
 
-          {/* Pair + Timeframe */}
           <div style={{ marginBottom: "20px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: "150px" }}>
               <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "6px" }}>Pair</label>
@@ -402,11 +394,10 @@ export default function AdminPage() {
             </div>
           )}
 
-          {/* SMC Result */}
           {autoResult && (
             <div style={{ marginTop: "20px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
               <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>
-                {autoResult.direction === "neutral" ? "⏸️ Neutral" : "✅ SMC Signal"} — {autoPair} ({autoTimeframe})
+                ✅ SMC Signal — {autoPair} ({autoTimeframe})
               </p>
 
               <div style={{
@@ -414,42 +405,102 @@ export default function AdminPage() {
                 borderRadius: "8px",
                 marginBottom: "12px",
                 textAlign: "center",
-                background: autoResult.direction === "long" ? "#dcfce7" : autoResult.direction === "short" ? "#fee2e2" : "#fef9c3",
-                border: `2px solid ${autoResult.direction === "long" ? "#16a34a" : autoResult.direction === "short" ? "#dc2626" : "#ca8a04"}`,
+                background: autoResult.direction === "long" ? "#dcfce7" : "#fee2e2",
+                border: `2px solid ${autoResult.direction === "long" ? "#16a34a" : "#dc2626"}`,
               }}>
                 <p style={{ fontSize: "11px", fontWeight: "600", color: "#6b7280" }}>DIRECTION</p>
                 <p style={{
                   fontSize: "22px",
                   fontWeight: "800",
-                  color: autoResult.direction === "long" ? "#16a34a" : autoResult.direction === "short" ? "#dc2626" : "#ca8a04",
+                  color: autoResult.direction === "long" ? "#16a34a" : "#dc2626",
                 }}>
-                  {autoResult.direction === "neutral" ? "⏸️ NEUTRAL" : autoResult.direction?.toUpperCase()}
+                  {autoResult.direction?.toUpperCase()}
                 </p>
                 <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
                   {autoResult.confidence} • Score {autoResult.signalScore}/100
                 </p>
               </div>
 
-              {autoResult.direction !== "neutral" && (
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr",
-                  gap: "8px",
-                  marginBottom: "12px",
-                  padding: "12px",
-                  background: "#ffffff",
-                  borderRadius: "8px",
-                  border: "1px solid #d8b4fe",
-                }}>
-                  <p>Entry: <strong style={{ color: "#1c69e3" }}>{autoResult.entryPrice}</strong></p>
-                  <p>SL: <strong style={{ color: "#dc2626" }}>{autoResult.stopLossPrice}</strong></p>
-                  <p>Risk: <strong>{autoResult.riskPips} pips</strong></p>
-                  <p>TP1: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit1Price}</strong></p>
-                  <p>R:R1: <strong>1:{autoResult.riskReward1}</strong></p>
-                  <p>TP2: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit2Price}</strong></p>
-                  <p>R:R2: <strong>1:{autoResult.riskReward2}</strong></p>
-                  <p>TP3: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit3Price}</strong></p>
-                  <p>R:R3: <strong>1:{autoResult.riskReward3}</strong></p>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr",
+                gap: "8px",
+                marginBottom: "12px",
+                padding: "12px",
+                background: "#ffffff",
+                borderRadius: "8px",
+                border: "1px solid #d8b4fe",
+              }}>
+                <p>Entry: <strong style={{ color: "#1c69e3" }}>{autoResult.entryPrice}</strong></p>
+                <p>SL: <strong style={{ color: "#dc2626" }}>{autoResult.stopLossPrice}</strong></p>
+                <p>Risk: <strong>{autoResult.riskPips} pips</strong></p>
+                <p>TP1: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit1Price}</strong></p>
+                <p>R:R1: <strong>1:{autoResult.riskReward1}</strong></p>
+                <p>TP2: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit2Price}</strong></p>
+                <p>R:R2: <strong>1:{autoResult.riskReward2}</strong></p>
+                <p>TP3: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit3Price}</strong></p>
+                <p>R:R3: <strong>1:{autoResult.riskReward3}</strong></p>
+              </div>
+
+              {/* SMA Values */}
+              <div style={{ marginBottom: "12px", padding: "10px", background: "#fef3c7", borderRadius: "8px", border: "1px solid #fde68a" }}>
+                <p style={{ fontWeight: "700", color: "#d97706", marginBottom: "6px", fontSize: "12px" }}>
+                  📈 SMA DIRECTION FILTER:
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px", fontSize: "12px", color: "#6b7280" }}>
+                  <p>SMA 9: <strong>{autoResult.sma9?.toFixed(5)}</strong></p>
+                  <p>SMA 21: <strong>{autoResult.sma21?.toFixed(5)}</strong></p>
+                  <p>SMA 200: <strong>{autoResult.sma200?.toFixed(5)}</strong></p>
+                </div>
+              </div>
+
+              {/* MTF Section */}
+              {(autoResult.mtf5 || autoResult.mtf15) && (
+                <div style={{ marginBottom: "12px", padding: "10px", background: "#f0fdfa", borderRadius: "8px", border: "1px solid #99f6e4" }}>
+                  <p style={{ fontWeight: "700", color: "#0d9488", marginBottom: "8px", fontSize: "12px" }}>
+                    ⏱️ MTF LIQUIDITY & REVERSAL CHECK (Last 3+ candles)
+                  </p>
+
+                  {autoResult.mtf5 && (
+                    <div style={{ marginBottom: "6px", fontSize: "12px", color: "#6b7280" }}>
+                      <strong>M5:</strong>{" "}
+                      Sweep: <strong style={{ color: autoResult.mtf5.liquiditySweep === "bullish" ? "#16a34a" : autoResult.mtf5.liquiditySweep === "bearish" ? "#dc2626" : "#6b7280" }}>
+                        {autoResult.mtf5.liquiditySweep}
+                      </strong>{" | "}
+                      Reversal: <strong style={{ color: autoResult.mtf5.reversal === "bullish" ? "#16a34a" : autoResult.mtf5.reversal === "bearish" ? "#dc2626" : "#6b7280" }}>
+                        {autoResult.mtf5.reversal}
+                      </strong>{" | "}
+                      Score: <strong>{autoResult.mtf5.score}</strong>
+                    </div>
+                  )}
+
+                  {autoResult.mtf15 && (
+                    <div style={{ marginBottom: "6px", fontSize: "12px", color: "#6b7280" }}>
+                      <strong>M15:</strong>{" "}
+                      Sweep: <strong style={{ color: autoResult.mtf15.liquiditySweep === "bullish" ? "#16a34a" : autoResult.mtf15.liquiditySweep === "bearish" ? "#dc2626" : "#6b7280" }}>
+                        {autoResult.mtf15.liquiditySweep}
+                      </strong>{" | "}
+                      Reversal: <strong style={{ color: autoResult.mtf15.reversal === "bullish" ? "#16a34a" : autoResult.mtf15.reversal === "bearish" ? "#dc2626" : "#6b7280" }}>
+                        {autoResult.mtf15.reversal}
+                      </strong>{" | "}
+                      Score: <strong>{autoResult.mtf15.score}</strong>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: "6px", fontSize: "12px" }}>
+                    <strong>Alignment:</strong>{" "}
+                    <span style={{
+                      padding: "3px 8px",
+                      borderRadius: "4px",
+                      fontWeight: "700",
+                      background: autoResult.mtfAlignment === "strong_confirmation" ? "#dcfce7" :
+                                  autoResult.mtfAlignment === "conflict" ? "#fee2e2" : "#fef9c3",
+                      color: autoResult.mtfAlignment === "strong_confirmation" ? "#16a34a" :
+                             autoResult.mtfAlignment === "conflict" ? "#dc2626" : "#ca8a04",
+                    }}>
+                      {autoResult.mtfAlignment}
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -463,8 +514,8 @@ export default function AdminPage() {
                   <p>Liquidity zones: <strong>{autoResult.liquidityZones?.length ?? 0}</strong></p>
                   <p>Order blocks: <strong>{autoResult.orderBlocks?.length ?? 0}</strong></p>
                   <p>FVGs: <strong>{autoResult.fvgs?.length ?? 0}</strong></p>
+                  <p>Supply/Demand: <strong>{autoResult.supplyDemandZones?.length ?? 0}</strong></p>
                   <p>Source: <strong>{autoResult.dataSource ?? "live_data"}</strong></p>
-                  <p>Timeframe: <strong>{autoResult.timeframe}</strong></p>
                 </div>
               </div>
 
@@ -479,6 +530,22 @@ export default function AdminPage() {
                       <li key={i} style={{ padding: "2px 0" }}>
                         • {z.type === "buy_side" ? "🔼 Buy-side" : "🔽 Sell-side"} at {z.price?.toFixed(5)}
                         {z.touches > 1 && ` (${z.touches} touches)`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Supply/Demand zones */}
+              {autoResult.supplyDemandZones && autoResult.supplyDemandZones.length > 0 && (
+                <div style={{ marginBottom: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                  <p style={{ fontWeight: "700", color: "#16a34a", marginBottom: "6px", fontSize: "12px" }}>
+                    📦 SUPPLY/DEMAND ZONES ({autoResult.supplyDemandZones.length}):
+                  </p>
+                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                    {autoResult.supplyDemandZones.slice(0, 5).map((z: any, i: number) => (
+                      <li key={i} style={{ padding: "2px 0" }}>
+                        • {z.type === "demand" ? "🟢 Demand" : "🔴 Supply"} {z.bottom?.toFixed(5)} - {z.top?.toFixed(5)}
                       </li>
                     ))}
                   </ul>
@@ -526,14 +593,6 @@ export default function AdminPage() {
                       <li key={i} style={{ padding: "3px 0" }}>{c}</li>
                     ))}
                   </ul>
-                </div>
-              )}
-
-              {autoResult.direction === "neutral" && (
-                <div style={{ marginTop: "12px", padding: "10px", background: "#fef9c3", borderRadius: "8px", border: "1px solid #fde68a" }}>
-                  <p style={{ fontSize: "12px", color: "#854d0e" }}>
-                    ⏸️ Neutral — <strong>not saved</strong> to DB, <strong>not sent</strong> to Telegram.
-                  </p>
                 </div>
               )}
             </div>

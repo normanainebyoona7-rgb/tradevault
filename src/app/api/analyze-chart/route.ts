@@ -5,31 +5,64 @@ import { buildSMCSignal, SMCCandle } from "@/lib/smc-analysis";
 async function fetchCandlesFromPython(
   pair: string,
   timeframe: string,
+  limit: number = 300,
 ): Promise<SMCCandle[] | null> {
   try {
     const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
     const response = await fetch(`${pythonUrl}/api/smc-candles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pair, timeframe, limit: 300 }),
+      body: JSON.stringify({ pair, timeframe, limit }),
       signal: AbortSignal.timeout(20000),
     });
 
     if (!response.ok) {
-      console.error(`[SMC] Python failed: ${response.status}`);
+      console.error(`[SMC] Python failed: ${response.status} for ${pair} ${timeframe}`);
       return null;
     }
 
     const data = await response.json();
     if (!data.candles || data.candles.length < 50) {
-      console.error(`[SMC] Only ${data.candles?.length || 0} candles`);
+      console.error(`[SMC] Only ${data.candles?.length || 0} candles for ${pair} ${timeframe}`);
       return null;
     }
 
     console.log(`[SMC] Got ${data.candles.length} candles for ${pair} ${timeframe}`);
     return data.candles as SMCCandle[];
   } catch (error: any) {
-    console.error(`[SMC] Fetch failed: ${error?.message}`);
+    console.error(`[SMC] Fetch failed for ${pair} ${timeframe}: ${error?.message}`);
+    return null;
+  }
+}
+
+async function fetchMTFCandles(
+  pair: string,
+  timeframe: string,
+): Promise<SMCCandle[] | null> {
+  try {
+    const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
+    const response = await fetch(`${pythonUrl}/api/smc-candles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pair, timeframe, limit: 100 }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      console.error(`[MTF ${timeframe}] Python failed: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    if (!data.candles || data.candles.length < 10) {
+      console.error(`[MTF ${timeframe}] Only ${data.candles?.length || 0} candles`);
+      return null;
+    }
+
+    console.log(`[MTF ${timeframe}] Got ${data.candles.length} candles`);
+    return data.candles as SMCCandle[];
+  } catch (error: any) {
+    console.error(`[MTF ${timeframe}] Failed: ${error?.message}`);
     return null;
   }
 }
@@ -45,7 +78,12 @@ export async function POST(request: Request) {
     const pair = body.pair || "XAU/USD";
     const timeframe = body.timeframe || "1H";
 
-    const candles = await fetchCandlesFromPython(pair, timeframe);
+    // Fetch main candles + MTF (M5, M15) in parallel
+    const [candles, mtf5, mtf15] = await Promise.all([
+      fetchCandlesFromPython(pair, timeframe, 300),
+      fetchMTFCandles(pair, "5m"),
+      fetchMTFCandles(pair, "15m"),
+    ]);
 
     if (!candles) {
       return NextResponse.json(
@@ -57,7 +95,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const signal = buildSMCSignal(pair, candles);
+    const signal = buildSMCSignal(pair, candles, mtf5, mtf15);
 
     if (!signal) {
       return NextResponse.json(
@@ -79,9 +117,10 @@ ${dirEmoji} **Direction: ${dirLabel}**
 ✅ **TP2: ${signal.takeProfit2}**
 ✅ **TP3: ${signal.takeProfit3}**
 
-⚡ Confidence: ${signal.confidence} (${signal.score}/100)`;
+⚡ Confidence: ${signal.confidence} (${signal.score}/100)
+⏱️ MTF: ${signal.mtfAlignment}`;
 
-    console.log(`[SMC Signal] ${pair} ${timeframe}: dir=${signal.direction} score=${signal.score} entry=${signal.entry.toFixed(5)} sl=${signal.stopLoss.toFixed(5)}`);
+    console.log(`[SMC Signal] ${pair} ${timeframe}: dir=${signal.direction} score=${signal.score} mtf=${signal.mtfAlignment}`);
 
     return NextResponse.json({
       analysis: analysisText,
@@ -125,6 +164,9 @@ ${dirEmoji} **Direction: ${dirLabel}**
         sma21: signal.sma21,
         sma200: signal.sma200,
         candleCount: signal.candleCount,
+        mtf5: signal.mtf5,
+        mtf15: signal.mtf15,
+        mtfAlignment: signal.mtfAlignment,
       },
     });
   } catch (error: any) {

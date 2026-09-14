@@ -1,6 +1,5 @@
 // src/lib/smc-analysis.ts
-// Pure SMC signal builder with supply/demand + SMA 9/21/200 direction filter.
-// Always returns a signal (long/short) — never neutral unless data is missing.
+// Pure SMC signal builder with SMA 9/21/200 direction filter + MTF (M5/M15) confluence.
 
 export interface SMCCandle {
   open: number;
@@ -38,6 +37,14 @@ export interface SMCSupplyDemand {
   index: number;
 }
 
+export interface MTFCheck {
+  timeframe: string;
+  liquiditySweep: "bullish" | "bearish" | "none";
+  reversal: "bullish" | "bearish" | "none";
+  score: number;
+  notes: string[];
+}
+
 export interface SMCSignal {
   direction: "long" | "short" | "neutral";
   entry: number;
@@ -64,6 +71,9 @@ export interface SMCSignal {
   sma21: number;
   sma200: number;
   candleCount: number;
+  mtf5: MTFCheck | null;
+  mtf15: MTFCheck | null;
+  mtfAlignment: string;
 }
 
 // ===== HELPERS =====
@@ -235,8 +245,6 @@ function detectFVGs(candles: SMCCandle[]): SMCFVG[] {
 }
 
 // ===== SUPPLY / DEMAND =====
-// Demand zone: base (small candles) followed by strong bullish move
-// Supply zone: base followed by strong bearish move
 
 function detectSupplyDemand(candles: SMCCandle[]): SMCSupplyDemand[] {
   if (candles.length < 5) return [];
@@ -250,40 +258,119 @@ function detectSupplyDemand(candles: SMCCandle[]): SMCSupplyDemand[] {
     const next = candles[i + 1];
     const nextBody = Math.abs(next.close - next.open);
 
-    // Base candle must be small (< 50% of avg range)
     if (baseBody > avgRange * 0.5) continue;
-
-    // Next candle must be explosive (> 1.5x avg range)
     if (nextBody < avgRange * 1.5) continue;
 
-    // Bullish move = demand zone
     if (next.close > next.open && next.close > base.high) {
-      zones.push({
-        type: "demand",
-        top: base.high,
-        bottom: base.low,
-        index: i,
-      });
+      zones.push({ type: "demand", top: base.high, bottom: base.low, index: i });
     }
 
-    // Bearish move = supply zone
     if (next.close < next.open && next.close < base.low) {
-      zones.push({
-        type: "supply",
-        top: base.high,
-        bottom: base.low,
-        index: i,
-      });
+      zones.push({ type: "supply", top: base.high, bottom: base.low, index: i });
     }
   }
 
   return zones.slice(-10);
 }
 
-// ===== DIRECTION — SMA 9/21/200 driven =====
-// Long if SMA9 > SMA21 AND price > SMA200
-// Short if SMA9 < SMA21 AND price < SMA200
-// Mixed = use nearest liquidity / SMC zones
+// ===== MTF LIQUIDITY + REVERSAL DETECTION =====
+
+export function analyzeMTF(
+  candles: SMCCandle[],
+  label: string,
+  lookback: number = 3,
+): MTFCheck {
+  const notes: string[] = [];
+  let score = 0;
+  let liquiditySweep: "bullish" | "bearish" | "none" = "none";
+  let reversal: "bullish" | "bearish" | "none" = "none";
+
+  if (!candles || candles.length < lookback + 5) {
+    return { timeframe: label, liquiditySweep: "none", reversal: "none", score: 0, notes };
+  }
+
+  const recent = candles.slice(-lookback);
+  const beforeRecent = candles.slice(-(lookback * 2), -lookback);
+
+  if (beforeRecent.length === 0) {
+    return { timeframe: label, liquiditySweep: "none", reversal: "none", score: 0, notes };
+  }
+
+  // ===== LIQUIDITY SWEEP =====
+  const priorLow = Math.min(...beforeRecent.map(c => c.low));
+  const priorHigh = Math.max(...beforeRecent.map(c => c.high));
+
+  for (const c of recent) {
+    if (c.low < priorLow && c.close > priorLow) {
+      liquiditySweep = "bullish";
+      score += 15;
+      notes.push(`✅ ${label}: Bullish liquidity sweep (wick below ${priorLow.toFixed(5)}, closed above)`);
+      break;
+    }
+
+    if (c.high > priorHigh && c.close < priorHigh) {
+      liquiditySweep = "bearish";
+      score += 15;
+      notes.push(`✅ ${label}: Bearish liquidity sweep (wick above ${priorHigh.toFixed(5)}, closed below)`);
+      break;
+    }
+  }
+
+  // ===== REVERSAL =====
+  const lastCandle = recent[recent.length - 1];
+  const prevCandle = beforeRecent[beforeRecent.length - 1];
+  const bodySize = Math.abs(lastCandle.close - lastCandle.open);
+  const avgBodySize = recent.reduce((s, c) => s + Math.abs(c.close - c.open), 0) / recent.length;
+
+  if (lastCandle.is_green && !prevCandle.is_green && lastCandle.close > prevCandle.high) {
+    reversal = "bullish";
+    score += 12;
+    notes.push(`✅ ${label}: Bullish reversal (green closed above prior high)`);
+  } else if (!lastCandle.is_green && prevCandle.is_green && lastCandle.close < prevCandle.low) {
+    reversal = "bearish";
+    score += 12;
+    notes.push(`✅ ${label}: Bearish reversal (red closed below prior low)`);
+  } else if (lastCandle.is_green && bodySize > avgBodySize * 1.8) {
+    reversal = "bullish";
+    score += 8;
+    notes.push(`✅ ${label}: Strong bullish candle (${(bodySize / avgBodySize).toFixed(1)}x avg body)`);
+  } else if (!lastCandle.is_green && bodySize > avgBodySize * 1.8) {
+    reversal = "bearish";
+    score += 8;
+    notes.push(`✅ ${label}: Strong bearish candle (${(bodySize / avgBodySize).toFixed(1)}x avg body)`);
+  }
+
+  // ===== ENGULFING =====
+  if (
+    lastCandle.is_green &&
+    !prevCandle.is_green &&
+    lastCandle.close > prevCandle.open &&
+    lastCandle.open < prevCandle.close
+  ) {
+    reversal = "bullish";
+    score += 10;
+    notes.push(`✅ ${label}: Bullish engulfing`);
+  } else if (
+    !lastCandle.is_green &&
+    prevCandle.is_green &&
+    lastCandle.close < prevCandle.open &&
+    lastCandle.open > prevCandle.close
+  ) {
+    reversal = "bearish";
+    score += 10;
+    notes.push(`✅ ${label}: Bearish engulfing`);
+  }
+
+  return {
+    timeframe: label,
+    liquiditySweep,
+    reversal,
+    score: Math.min(score, 30),
+    notes,
+  };
+}
+
+// ===== DIRECTION =====
 
 function determineDirection(
   candles: SMCCandle[],
@@ -297,12 +384,10 @@ function determineDirection(
   let longScore = 0;
   let shortScore = 0;
 
-  // ===== SMAs =====
   const sma9 = sma(candles, 9);
   const sma21 = sma(candles, 21);
   const sma200 = sma(candles, 200);
 
-  // SMA 9 vs 21 = short-term trend
   if (sma9 > sma21) {
     longScore += 25;
     confluences.push(`✅ SMA9 (${sma9.toFixed(2)}) > SMA21 (${sma21.toFixed(2)}) — short-term bullish`);
@@ -311,7 +396,6 @@ function determineDirection(
     confluences.push(`✅ SMA9 (${sma9.toFixed(2)}) < SMA21 (${sma21.toFixed(2)}) — short-term bearish`);
   }
 
-  // Price vs SMA200 = long-term trend
   if (currentPrice > sma200) {
     longScore += 20;
     confluences.push(`✅ Price above SMA200 (${sma200.toFixed(2)}) — bullish bias`);
@@ -320,7 +404,6 @@ function determineDirection(
     confluences.push(`✅ Price below SMA200 (${sma200.toFixed(2)}) — bearish bias`);
   }
 
-  // ===== LIQUIDITY DRAW =====
   const buyAbove = liquidity
     .filter(l => l.type === "buy_side" && l.price > currentPrice)
     .sort((a, b) => a.price - b.price);
@@ -342,7 +425,6 @@ function determineDirection(
     confluences.push(`✅ Sell-side liquidity closer (${nearestSell!.price.toFixed(5)})`);
   }
 
-  // ===== SUPPLY / DEMAND =====
   const demandBelow = sdZones.filter(z => z.type === "demand" && z.top < currentPrice);
   const supplyAbove = sdZones.filter(z => z.type === "supply" && z.bottom > currentPrice);
 
@@ -355,7 +437,6 @@ function determineDirection(
     confluences.push(`✅ Supply zone above (${supplyAbove.length})`);
   }
 
-  // ===== ORDER BLOCKS =====
   const bullishOBs = obs.filter(o => o.type === "bullish" && o.top < currentPrice);
   const bearishOBs = obs.filter(o => o.type === "bearish" && o.bottom > currentPrice);
 
@@ -368,7 +449,6 @@ function determineDirection(
     confluences.push(`✅ Bearish OB above price (${bearishOBs.length})`);
   }
 
-  // ===== FVGs =====
   const bullishFVGs = fvgs.filter(f => f.type === "bullish" && f.bottom < currentPrice);
   const bearishFVGs = fvgs.filter(f => f.type === "bearish" && f.top > currentPrice);
 
@@ -381,7 +461,6 @@ function determineDirection(
     confluences.push(`✅ Bearish FVG above price (${bearishFVGs.length})`);
   }
 
-  // ===== Recent structure =====
   const recent = candles.slice(-5);
   const greenCount = recent.filter(c => c.is_green).length;
   if (greenCount >= 4) {
@@ -392,14 +471,13 @@ function determineDirection(
     confluences.push(`✅ Recent candles bearish (${recent.length - greenCount}/${recent.length})`);
   }
 
-  // ===== FINAL DIRECTION =====
   const direction = longScore >= shortScore ? "long" : "short";
   const score = Math.min(Math.max(longScore, shortScore), 100);
 
   return { direction, score, confluences };
 }
 
-// ===== SL / TP PLACEMENT =====
+// ===== SL / TP =====
 
 function placeSLTP(
   direction: "long" | "short",
@@ -417,7 +495,6 @@ function placeSLTP(
   let tp1: number, tp2: number, tp3: number;
 
   if (direction === "long") {
-    // SL: below nearest sell-side liquidity, or demand zone, or OB
     const sellBelow = liquidity
       .filter(l => l.type === "sell_side" && l.price < entry)
       .sort((a, b) => b.price - a.price);
@@ -442,7 +519,6 @@ function placeSLTP(
       notes.push(`SL from ATR (no structural level below)`);
     }
 
-    // TPs: buy-side liquidity above
     const buyAbove = liquidity
       .filter(l => l.type === "buy_side" && l.price > entry)
       .sort((a, b) => a.price - b.price);
@@ -470,7 +546,6 @@ function placeSLTP(
       notes.push(`TPs from R:R ratio (no liquidity above)`);
     }
   } else {
-    // SHORT
     const buyAbove = liquidity
       .filter(l => l.type === "buy_side" && l.price > entry)
       .sort((a, b) => a.price - b.price);
@@ -523,7 +598,6 @@ function placeSLTP(
     }
   }
 
-  // Sanity check
   if (direction === "long") {
     if (tp1 <= entry || tp2 <= tp1 || tp3 <= tp2) {
       const risk = entry - stopLoss;
@@ -550,6 +624,8 @@ function placeSLTP(
 export function buildSMCSignal(
   pair: string,
   candles: SMCCandle[],
+  mtf5Candles: SMCCandle[] | null = null,
+  mtf15Candles: SMCCandle[] | null = null,
 ): SMCSignal | null {
   if (!candles || candles.length < 50) return null;
 
@@ -578,12 +654,64 @@ export function buildSMCSignal(
   const rr2 = riskPips > 0 ? (rewardPips2 / riskPips).toFixed(1) : "0";
   const rr3 = riskPips > 0 ? (rewardPips3 / riskPips).toFixed(1) : "0";
 
-  const confidence = decision.score >= 70 ? "HIGH" : decision.score >= 50 ? "MEDIUM" : "LOW";
+  // ===== MTF ANALYSIS =====
+  const mtf5 = mtf5Candles ? analyzeMTF(mtf5Candles, "M5", 3) : null;
+  const mtf15 = mtf15Candles ? analyzeMTF(mtf15Candles, "M15", 3) : null;
+
+  let mtfScoreAdjustment = 0;
+  let mtfAlignment = "none";
+
+  if (mtf5 && mtf15) {
+    const mtf5Bullish = mtf5.liquiditySweep === "bullish" || mtf5.reversal === "bullish";
+    const mtf5Bearish = mtf5.liquiditySweep === "bearish" || mtf5.reversal === "bearish";
+    const mtf15Bullish = mtf15.liquiditySweep === "bullish" || mtf15.reversal === "bullish";
+    const mtf15Bearish = mtf15.liquiditySweep === "bearish" || mtf15.reversal === "bearish";
+
+    const signalDirection = decision.direction;
+
+    if (signalDirection === "long") {
+      if (mtf5Bullish && mtf15Bullish) {
+        mtfScoreAdjustment = +15;
+        mtfAlignment = "strong_confirmation";
+      } else if (mtf5Bullish || mtf15Bullish) {
+        mtfScoreAdjustment = +8;
+        mtfAlignment = "partial_confirmation";
+      } else if (mtf5Bearish && mtf15Bearish) {
+        mtfScoreAdjustment = -20;
+        mtfAlignment = "conflict";
+      } else if (mtf5Bearish || mtf15Bearish) {
+        mtfScoreAdjustment = -10;
+        mtfAlignment = "weak_conflict";
+      }
+    } else {
+      if (mtf5Bearish && mtf15Bearish) {
+        mtfScoreAdjustment = +15;
+        mtfAlignment = "strong_confirmation";
+      } else if (mtf5Bearish || mtf15Bearish) {
+        mtfScoreAdjustment = +8;
+        mtfAlignment = "partial_confirmation";
+      } else if (mtf5Bullish && mtf15Bullish) {
+        mtfScoreAdjustment = -20;
+        mtfAlignment = "conflict";
+      } else if (mtf5Bullish || mtf15Bullish) {
+        mtfScoreAdjustment = -10;
+        mtfAlignment = "weak_conflict";
+      }
+    }
+  }
+
+  const finalScore = Math.min(Math.max(decision.score + mtfScoreAdjustment, 0), 100);
+
   const allConfluences = [
     ...decision.confluences,
     `📊 SMA9: ${sma9.toFixed(5)} | SMA21: ${sma21.toFixed(5)} | SMA200: ${sma200.toFixed(5)}`,
+    ...(mtf5 ? mtf5.notes : []),
+    ...(mtf15 ? mtf15.notes : []),
+    `MTF alignment: ${mtfAlignment}`,
     ...levels.notes.map(n => `🎯 ${n}`),
   ];
+
+  const confidence = finalScore >= 70 ? "HIGH" : finalScore >= 50 ? "MEDIUM" : "LOW";
 
   return {
     direction: decision.direction,
@@ -600,7 +728,7 @@ export function buildSMCSignal(
     riskReward2: rr2,
     riskReward3: rr3,
     confidence,
-    score: decision.score,
+    score: finalScore,
     confluences: allConfluences,
     smcSource: "live_data",
     liquidityZones: liquidity,
@@ -611,5 +739,8 @@ export function buildSMCSignal(
     sma21,
     sma200,
     candleCount: candles.length,
+    mtf5,
+    mtf15,
+    mtfAlignment,
   };
 }
