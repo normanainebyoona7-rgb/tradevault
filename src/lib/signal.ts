@@ -6,17 +6,19 @@
 // Order types:
 //   - BUY / SELL              → price at zone + confirmation (market)
 //   - BUY LIMIT / SELL LIMIT  → price approaching zone (limit)
-//   - BUY STOP / SELL STOP    → price bounced off zone AND is currently outside
-//   - NEUTRAL                 → no setup, price between zones, or zone failed
+//   - BUY STOP / SELL STOP    → price bounced off zone AND stop level is valid
+//   - NEUTRAL                 → no setup, price between zones, zone failed,
+//                                or stop level is on the wrong side of price
 //
-// Critical bounce rule:
-//   BUY STOP only fires if price is CURRENTLY above the demand zone.
-//   SELL STOP only fires if price is CURRENTLY below the supply zone.
-//   If price re-entered the zone after bouncing, the bounce is invalidated.
+// STOP ORDER VALIDATION (Option A):
+//   A SELL STOP entry must be BELOW current price.
+//   A BUY STOP entry must be ABOVE current price.
+//   If price has already run past the stop level, the setup is missed.
+//   Do NOT fire the stop — return NEUTRAL instead.
 //
 // SL placement rules (per cheat sheet Part 5):
-//   - Long:  SL = zone.bottom - buffer  (below zone)
-//   - Short: SL = zone.top    + buffer  (above zone)
+//   - Long:  SL = zone.bottom - buffer
+//   - Short: SL = zone.top    + buffer
 //   - buffer = max(0.1×avgRange, minimum pips for pair)
 //   - SL is guaranteed on the correct side of entry
 
@@ -415,39 +417,38 @@ export function buildSignal(
     };
   }
 
-  // Sort zones by distance to current price (closest first)
   const sortedZones = [...zones].sort(
     (a, b) => a.distanceToPrice - b.distanceToPrice
   );
 
-  // Buffer for entry/SL
   const avgRange =
     candles.slice(-20).reduce((s, c) => s + (c.high - c.low), 0) / 20;
   const minBufferPrice = minBufferPips(pair) * pipSize;
   const buffer = Math.max(avgRange * 0.1, minBufferPrice);
 
   // ===== SCAN ZONES FOR BOUNCE SETUPS =====
-  // RULE: BUY STOP fires only if price is CURRENTLY above the demand zone.
-  //       SELL STOP fires only if price is CURRENTLY below the supply zone.
-  //       If price re-entered the zone, the bounce is invalidated — skip.
+  // STOP orders must have a valid entry level relative to current price:
+  //   SELL STOP: entryLevel < currentPrice
+  //   BUY STOP:  entryLevel > currentPrice
+  // If the level is on the wrong side, the setup has been missed — skip.
 
   for (const zone of sortedZones) {
     if (zone.type === "demand") {
       const bounce = detectDemandBounce(candles, zone);
 
       if (bounce.bounced) {
-        // Price must CURRENTLY be above the zone top
         const distanceAbove = currentPrice - zone.top;
         const pctAbove = (distanceAbove / zone.top) * 100;
 
-        // stillAbove: price is outside the zone (above)
-        // notTooFar: price is within 0.5% of the zone edge
         const stillAbove = currentPrice > zone.top;
         const notTooFar = pctAbove <= 0.5;
 
-        if (stillAbove && notTooFar) {
-          // BUY STOP
-          const entry = zone.top + buffer;
+        // BUY STOP entry must be above current price
+        const entryLevel = zone.top + buffer;
+        const canPlaceStop = entryLevel > currentPrice;
+
+        if (stillAbove && notTooFar && canPlaceStop) {
+          const entry = entryLevel;
           const stopLoss = zone.bottom - buffer;
           const risk = Math.abs(entry - stopLoss);
 
@@ -544,16 +545,18 @@ export function buildSignal(
       const bounce = detectSupplyBounce(candles, zone);
 
       if (bounce.bounced) {
-        // Price must CURRENTLY be below the zone bottom
         const distanceBelow = zone.bottom - currentPrice;
         const pctBelow = (distanceBelow / zone.bottom) * 100;
 
         const stillBelow = currentPrice < zone.bottom;
         const notTooFar = pctBelow <= 0.5;
 
-        if (stillBelow && notTooFar) {
-          // SELL STOP
-          const entry = zone.bottom - buffer;
+        // SELL STOP entry must be below current price
+        const entryLevel = zone.bottom - buffer;
+        const canPlaceStop = entryLevel < currentPrice;
+
+        if (stillBelow && notTooFar && canPlaceStop) {
+          const entry = entryLevel;
           const stopLoss = zone.top + buffer;
           const risk = Math.abs(entry - stopLoss);
 
@@ -648,7 +651,7 @@ export function buildSignal(
     }
   }
 
-  // ===== NO BOUNCE — fall through to LIMIT / MARKET logic =====
+  // ===== NO VALID BOUNCE — fall through to LIMIT / MARKET / NEUTRAL =====
 
   const activeZone = sortedZones.find((z) => {
     if (z.type === "demand" && currentPrice < z.bottom) return false;
