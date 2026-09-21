@@ -1,11 +1,15 @@
 // src/lib/signal.ts
-// Signal orchestrator with cross-source price verification.
+// Signal orchestrator with:
+//   - Cross-source price verification
+//   - Timeframe-scaled SL
+//   - Fibonacci extension TPs (1.272 / 1.618 / 2.0)
 //
-// Before firing any signal, this engine compares the chart price
-// (Dukascopy) against Yahoo Finance. If they disagree by more than 0.1%,
-// no signal fires — returns NEUTRAL with the mismatch reason.
-//
-// This prevents trading on stale or wrong data.
+// TPs are calculated from the zone's swing range:
+//   TP1 = swing end ± 1.272 × swing range
+//   TP2 = swing end ± 1.618 × swing range
+//   TP3 = swing end ± 2.0   × swing range
+// If a TP lands on the wrong side of entry (rare edge case), it falls back
+// to R:R multiples so the order stays valid.
 
 import type { Candle } from "@/lib/data/candles";
 import type { Overlays } from "@/lib/overlays";
@@ -92,13 +96,69 @@ function calcPipSize(pair: string): number {
   return 0.0001;
 }
 
-function minBufferPips(pair: string): number {
-  if (pair.includes("XAU")) return 30;
-  if (pair.includes("XAG")) return 3;
-  if (pair.includes("BTC")) return 100;
-  if (pair.includes("ETH")) return 10;
-  if (pair.includes("JPY")) return 5;
-  return 5;
+function minBufferPips(pair: string, timeframe: string): number {
+  const isGold = pair.includes("XAU");
+  const isSilver = pair.includes("XAG");
+  const isBTC = pair.includes("BTC");
+  const isETH = pair.includes("ETH");
+  const isJPY = pair.includes("JPY");
+
+  if (isGold) {
+    switch (timeframe) {
+      case "1m": return 20;
+      case "5m": return 30;
+      case "15m": return 40;
+      case "30m": return 50;
+      case "1H": return 80;
+      case "4H": return 150;
+      case "1D": return 300;
+      case "1W": return 500;
+      default: return 50;
+    }
+  }
+  if (isSilver) {
+    switch (timeframe) {
+      case "1m": return 5;
+      case "15m": return 10;
+      case "1H": return 20;
+      case "4H": return 40;
+      default: return 15;
+    }
+  }
+  if (isBTC) {
+    switch (timeframe) {
+      case "1m": return 100;
+      case "15m": return 300;
+      case "1H": return 500;
+      case "4H": return 1000;
+      default: return 300;
+    }
+  }
+  if (isETH) {
+    switch (timeframe) {
+      case "1H": return 50;
+      default: return 20;
+    }
+  }
+  if (isJPY) {
+    switch (timeframe) {
+      case "1m": return 5;
+      case "15m": return 8;
+      case "1H": return 15;
+      case "4H": return 30;
+      default: return 10;
+    }
+  }
+  switch (timeframe) {
+    case "1m": return 5;
+    case "5m": return 8;
+    case "15m": return 12;
+    case "30m": return 15;
+    case "1H": return 20;
+    case "4H": return 40;
+    case "1D": return 80;
+    default: return 15;
+  }
 }
 
 function getSession(): { name: string; favorable: boolean } {
@@ -232,7 +292,6 @@ function validateOrderAgainstPrice(
   currentPrice: number
 ): { orderType: OrderType; signalLabel: SignalLabel } {
   if (orderType === "market" || orderType === "none") return { orderType, signalLabel };
-
   if (direction === "long") {
     if (orderType === "limit" && entryLevel >= currentPrice) return { orderType: "stop", signalLabel: "BUY STOP" };
     if (orderType === "stop" && entryLevel <= currentPrice) return { orderType: "limit", signalLabel: "BUY LIMIT" };
@@ -241,6 +300,44 @@ function validateOrderAgainstPrice(
     if (orderType === "stop" && entryLevel >= currentPrice) return { orderType: "limit", signalLabel: "SELL LIMIT" };
   }
   return { orderType, signalLabel };
+}
+
+// ===== FIBONACCI TPs =====
+// Compute TPs from the zone's swing range.
+// For a long: swingStart = zone.bottom, swingEnd = zone.top
+// For a short: swingStart = zone.top, swingEnd = zone.bottom
+// TPs = swingEnd + direction × swingRange × extension
+function computeFibonacciTPs(
+  direction: "long" | "short",
+  entry: number,
+  stopLoss: number,
+  zone: SupplyDemandZone,
+  pipSize: number
+): { tp1: number; tp2: number; tp3: number } {
+  const swingStart = direction === "long" ? zone.bottom : zone.top;
+  const swingEnd = direction === "long" ? zone.top : zone.bottom;
+  const swingRange = Math.abs(swingEnd - swingStart);
+  const dirSign = direction === "long" ? 1 : -1;
+
+  // Fibonacci extension levels
+  let tp1 = swingEnd + dirSign * swingRange * 0.272; // 1.272 extension
+  let tp2 = swingEnd + dirSign * swingRange * 0.618; // 1.618 extension
+  let tp3 = swingEnd + dirSign * swingRange * 1.0;   // 2.0 extension
+
+  // Ensure TPs are on the correct side of entry — fall back to R:R if not
+  const risk = Math.abs(entry - stopLoss);
+
+  if (direction === "long") {
+    if (tp1 <= entry) tp1 = entry + risk * 2.0;
+    if (tp2 <= tp1) tp2 = entry + risk * 3.5;
+    if (tp3 <= tp2) tp3 = entry + risk * 6.0;
+  } else {
+    if (tp1 >= entry) tp1 = entry - risk * 2.0;
+    if (tp2 >= tp1) tp2 = entry - risk * 3.5;
+    if (tp3 >= tp2) tp3 = entry - risk * 6.0;
+  }
+
+  return { tp1, tp2, tp3 };
 }
 
 export function buildSignal(
@@ -271,18 +368,11 @@ export function buildSignal(
 
   const baseConfluences: SignalConfluences = {
     roundNumber: roundNumberNear,
-    supertrendAligned: false,
-    rsiAligned: false,
-    smaAligned: false,
-    vwapAligned: false,
-    orderBlockNear: false,
-    fvgNear: false,
-    session: sessionInfo.name,
-    sessionFavorable: sessionInfo.favorable,
+    supertrendAligned: false, rsiAligned: false, smaAligned: false,
+    vwapAligned: false, orderBlockNear: false, fvgNear: false,
+    session: sessionInfo.name, sessionFavorable: sessionInfo.favorable,
   };
 
-  // ===== PRICE VERIFICATION GATE =====
-  // If the caller supplied a verifiedPrice and it failed, refuse to signal.
   if (verifiedPrice && !verifiedPrice.ok) {
     return {
       pair, timeframe, timestamp,
@@ -292,8 +382,7 @@ export function buildSignal(
       zone: null, entryCandle: null,
       confluences: baseConfluences, confidence: "NEUTRAL", score: 0,
       neutralReason: verifiedPrice.reason || "Price feed not verified",
-      notes,
-      priceVerification,
+      notes, priceVerification,
     };
   }
 
@@ -317,10 +406,8 @@ export function buildSignal(
   }
 
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
-
-  const avgRange = candles.slice(-20).reduce((s, c) => s + (c.high - c.low), 0) / 20;
-  const minBufferPrice = minBufferPips(pair) * pipSize;
-  const buffer = Math.max(avgRange * 0.1, minBufferPrice);
+  const minPips = minBufferPips(pair, timeframe);
+  const buffer = minPips * pipSize;
 
   const activeZone = sortedZones.find((z) => {
     if (currentPrice >= z.bottom && currentPrice <= z.top) return true;
@@ -357,21 +444,16 @@ export function buildSignal(
   const signalLabel = validated.signalLabel;
   const entryLevel = initial.entryLevel;
 
+  // SL — timeframe-scaled
   const rawSL = direction === "long" ? entryLevel - buffer : entryLevel + buffer;
-  const rawRisk = Math.abs(entryLevel - rawSL);
 
-  let rawTP1: number, rawTP2: number, rawTP3: number;
-  if (direction === "long") {
-    rawTP1 = entryLevel + rawRisk * 2.0;
-    rawTP2 = entryLevel + rawRisk * 3.5;
-    rawTP3 = entryLevel + rawRisk * 6.0;
-  } else {
-    rawTP1 = entryLevel - rawRisk * 2.0;
-    rawTP2 = entryLevel - rawRisk * 3.5;
-    rawTP3 = entryLevel - rawRisk * 6.0;
-  }
+  // TPs — Fibonacci
+  const fib = computeFibonacciTPs(direction, entryLevel, rawSL, activeZone, pipSize);
+  const rawTP1 = fib.tp1;
+  const rawTP2 = fib.tp2;
+  const rawTP3 = fib.tp3;
 
-  const riskPips = Math.round(rawRisk / pipSize);
+  const riskPips = Math.round(Math.abs(entryLevel - rawSL) / pipSize);
   const rewardPips: [number, number, number] = [
     Math.round(Math.abs(rawTP1 - entryLevel) / pipSize),
     Math.round(Math.abs(rawTP2 - entryLevel) / pipSize),
@@ -410,11 +492,10 @@ export function buildSignal(
 
   notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
   notes.push(`Current price: ${currentPrice.toFixed(5)}`);
-  if (verifiedPrice) {
-    notes.push(`Chart price: ${verifiedPrice.chartPrice.toFixed(5)}, Yahoo: ${verifiedPrice.yahooPrice?.toFixed(5) ?? "n/a"}, diff: ${verifiedPrice.diffPct.toFixed(3)}%`);
-  }
   notes.push(`Entry (${signalLabel}): ${entryLevel.toFixed(5)}`);
-  notes.push(`SL: ${rawSL.toFixed(5)} (risk ${riskPips} pips)`);
+  notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips (${timeframe} scaled)`);
+  notes.push(`TPs: Fibonacci extensions 1.272 / 1.618 / 2.0`);
+  notes.push(`R:R = 1:${riskReward[0]} / 1:${riskReward[1]} / 1:${riskReward[2]}`);
   notes.push(`Session: ${sessionInfo.name}`);
 
   return {
