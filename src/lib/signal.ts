@@ -1,16 +1,16 @@
 // src/lib/signal.ts
-// Signal orchestrator. Every directional setup produces a tradeable signal.
-// No null entries — if a zone is found, you get BUY / SELL / BUY LIMIT /
-// SELL LIMIT / BUY STOP / SELL STOP, never NEUTRAL.
+// Signal orchestrator.
+// Order type depends on price position relative to the zone, and a final
+// safety check converts any impossible order into a valid one:
 //
-// Rules:
-//   - Price INSIDE zone + confirmation candle → BUY / SELL (market)
-//   - Price INSIDE zone, no confirmation      → BUY LIMIT / SELL LIMIT
-//   - Price APPROACHING zone (within 0.5%)    → BUY LIMIT / SELL LIMIT
-//   - Price BOUNCED off zone, valid stop      → BUY STOP / SELL STOP
-//   - Nothing valid                           → NEUTRAL
+//   BUY LIMIT  — must be BELOW current price (price above demand zone)
+//   SELL LIMIT — must be ABOVE current price (price below supply zone)
+//   BUY STOP   — must be ABOVE current price (price broke out above demand)
+//   SELL STOP  — must be BELOW current price (price broke out below supply)
+//   BUY / SELL — market, at current price
 //
-// Side enforcement: long → SL < entry < TPs. short → TPs < entry < SL.
+// Direction/entry/SL/TP come from zone-strategy.ts (pure S/D).
+// Confluence scoring reads overlays (Supertrend, RSI, SMA, VWAP, OB, FVG).
 
 import type { Candle } from "@/lib/data/candles";
 import type { Overlays } from "@/lib/overlays";
@@ -21,11 +21,18 @@ import {
   type SupplyDemandZone,
 } from "@/lib/zone-strategy";
 
+// ===== TYPES =====
+
 export type SignalDirection = "long" | "short" | "neutral";
 export type OrderType = "market" | "limit" | "stop" | "none";
 export type SignalLabel =
-  | "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT"
-  | "BUY STOP" | "SELL STOP" | "NEUTRAL";
+  | "BUY"
+  | "SELL"
+  | "BUY LIMIT"
+  | "SELL LIMIT"
+  | "BUY STOP"
+  | "SELL STOP"
+  | "NEUTRAL";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "NEUTRAL";
 
 export interface SignalZone {
@@ -79,6 +86,8 @@ export interface TradingSignal {
   notes: string[];
 }
 
+// ===== HELPERS =====
+
 function calcPipSize(pair: string): number {
   if (pair.includes("XAU")) return 0.10;
   if (pair.includes("XAG")) return 0.01;
@@ -124,51 +133,7 @@ function nearestRoundNumber(
   return { level: nearest, distancePct: (distance / price) * 100 };
 }
 
-function detectDemandBounce(
-  candles: Candle[],
-  zone: SupplyDemandZone,
-  lookback: number = 20
-): boolean {
-  const recent = candles.slice(-lookback);
-  const offset = candles.length - recent.length;
-  let touchIndex = -1;
-  for (let i = recent.length - 1; i >= 0; i--) {
-    const c = recent[i];
-    if (c.low <= zone.top && c.high >= zone.bottom) {
-      touchIndex = i + offset;
-      break;
-    }
-  }
-  if (touchIndex === -1) return false;
-  for (let i = touchIndex + 1; i < candles.length; i++) {
-    const c = candles[i];
-    if (c.is_green && c.close > zone.top) return true;
-  }
-  return false;
-}
-
-function detectSupplyBounce(
-  candles: Candle[],
-  zone: SupplyDemandZone,
-  lookback: number = 20
-): boolean {
-  const recent = candles.slice(-lookback);
-  const offset = candles.length - recent.length;
-  let touchIndex = -1;
-  for (let i = recent.length - 1; i >= 0; i--) {
-    const c = recent[i];
-    if (c.high >= zone.bottom && c.low <= zone.top) {
-      touchIndex = i + offset;
-      break;
-    }
-  }
-  if (touchIndex === -1) return false;
-  for (let i = touchIndex + 1; i < candles.length; i++) {
-    const c = candles[i];
-    if (!c.is_green && c.close < zone.bottom) return true;
-  }
-  return false;
-}
+// ===== CONFLUENCE CHECKS =====
 
 function checkSupertrendAligned(overlays: Overlays, direction: "long" | "short"): boolean {
   const st = overlays.supertrend;
@@ -259,6 +224,121 @@ function enforceCorrectSides(
   }
 }
 
+// ===== ORDER TYPE SELECTION =====
+// Determines the correct order type based on where current price is
+// relative to the zone. Then applies a hard safety check to convert any
+// impossible order into a valid one.
+function selectOrderType(
+  direction: "long" | "short",
+  currentPrice: number,
+  zone: SupplyDemandZone,
+  entryCandleType: string
+): { orderType: OrderType; signalLabel: SignalLabel; entryLevel: number } {
+  const priceInsideZone = currentPrice >= zone.bottom && currentPrice <= zone.top;
+  const priceAboveZone = currentPrice > zone.top;
+  const priceBelowZone = currentPrice < zone.bottom;
+
+  let orderType: OrderType;
+  let signalLabel: SignalLabel;
+  let entryLevel: number;
+
+  if (direction === "long") {
+    if (priceInsideZone) {
+      if (entryCandleType !== "none") {
+        // Inside demand zone + confirmation → market BUY
+        orderType = "market";
+        signalLabel = "BUY";
+        entryLevel = currentPrice;
+      } else {
+        // Inside zone, no confirmation → BUY LIMIT at zone top
+        orderType = "limit";
+        signalLabel = "BUY LIMIT";
+        entryLevel = zone.top;
+      }
+    } else if (priceAboveZone) {
+      // Price above demand zone → waiting for pullback to zone
+      // BUY LIMIT below current price
+      orderType = "limit";
+      signalLabel = "BUY LIMIT";
+      entryLevel = zone.top;
+    } else {
+      // priceBelowZone — price broke below demand, waiting for reclaim
+      // BUY STOP above current price
+      orderType = "stop";
+      signalLabel = "BUY STOP";
+      entryLevel = zone.top;
+    }
+  } else {
+    if (priceInsideZone) {
+      if (entryCandleType !== "none") {
+        // Inside supply zone + confirmation → market SELL
+        orderType = "market";
+        signalLabel = "SELL";
+        entryLevel = currentPrice;
+      } else {
+        // Inside zone, no confirmation → SELL LIMIT at zone bottom
+        orderType = "limit";
+        signalLabel = "SELL LIMIT";
+        entryLevel = zone.bottom;
+      }
+    } else if (priceBelowZone) {
+      // Price below supply zone → waiting for rally to zone
+      // SELL LIMIT above current price
+      orderType = "limit";
+      signalLabel = "SELL LIMIT";
+      entryLevel = zone.bottom;
+    } else {
+      // priceAboveZone — price broke above supply, waiting for rejection
+      // SELL STOP below current price
+      orderType = "stop";
+      signalLabel = "SELL STOP";
+      entryLevel = zone.bottom;
+    }
+  }
+
+  return { orderType, signalLabel, entryLevel };
+}
+
+// ===== SAFETY CHECK =====
+// Converts any impossible order into the valid counterpart.
+//   BUY LIMIT above price     → BUY STOP above price
+//   SELL LIMIT below price    → SELL STOP below price
+//   BUY STOP below price      → BUY LIMIT below price
+//   SELL STOP above price     → SELL LIMIT above price
+function validateOrderAgainstPrice(
+  orderType: OrderType,
+  signalLabel: SignalLabel,
+  direction: "long" | "short",
+  entryLevel: number,
+  currentPrice: number
+): { orderType: OrderType; signalLabel: SignalLabel } {
+  if (orderType === "market" || orderType === "none") {
+    return { orderType, signalLabel };
+  }
+
+  if (direction === "long") {
+    if (orderType === "limit" && entryLevel >= currentPrice) {
+      // BUY LIMIT must be below price → convert to BUY STOP
+      return { orderType: "stop", signalLabel: "BUY STOP" };
+    }
+    if (orderType === "stop" && entryLevel <= currentPrice) {
+      // BUY STOP must be above price → convert to BUY LIMIT
+      return { orderType: "limit", signalLabel: "BUY LIMIT" };
+    }
+  } else {
+    if (orderType === "limit" && entryLevel <= currentPrice) {
+      // SELL LIMIT must be above price → convert to SELL STOP
+      return { orderType: "stop", signalLabel: "SELL STOP" };
+    }
+    if (orderType === "stop" && entryLevel >= currentPrice) {
+      // SELL STOP must be below price → convert to SELL LIMIT
+      return { orderType: "limit", signalLabel: "SELL LIMIT" };
+    }
+  }
+
+  return { orderType, signalLabel };
+}
+
 // ===== MAIN =====
 export function buildSignal(
   pair: string,
@@ -316,146 +396,32 @@ export function buildSignal(
   const minBufferPrice = minBufferPips(pair) * pipSize;
   const buffer = Math.max(avgRange * 0.1, minBufferPrice);
 
-  // ===== SCAN FOR BOUNCE SETUPS =====
-  for (const zone of sortedZones) {
-    if (zone.type === "demand") {
-      if (!detectDemandBounce(candles, zone)) continue;
-
-      const pctAbove = ((currentPrice - zone.top) / zone.top) * 100;
-      const entryLevel = zone.top + buffer;
-      const canPlaceStop = entryLevel > currentPrice && currentPrice > zone.top && pctAbove <= 0.5;
-      if (!canPlaceStop) continue;
-
-      const rawSL = zone.bottom - buffer;
-      const rawRisk = Math.abs(entryLevel - rawSL);
-      const fixed = enforceCorrectSides(
-        "long", entryLevel, rawSL,
-        entryLevel + rawRisk * 2.0,
-        entryLevel + rawRisk * 3.5,
-        entryLevel + rawRisk * 6.0,
-        pipSize
-      );
-
-      const riskPips = Math.round(Math.abs(fixed.entry - fixed.stopLoss) / pipSize);
-      const rewardPips: [number, number, number] = [
-        Math.round(Math.abs(fixed.tp1 - fixed.entry) / pipSize),
-        Math.round(Math.abs(fixed.tp2 - fixed.entry) / pipSize),
-        Math.round(Math.abs(fixed.tp3 - fixed.entry) / pipSize),
-      ];
-      const riskReward: [string, string, string] = [
-        riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
-        riskPips > 0 ? (rewardPips[1] / riskPips).toFixed(1) : "0",
-        riskPips > 0 ? (rewardPips[2] / riskPips).toFixed(1) : "0",
-      ];
-
-      const confluences: SignalConfluences = {
-        roundNumber: roundNumberNear,
-        supertrendAligned: checkSupertrendAligned(overlays, "long"),
-        rsiAligned: checkRSIAligned(overlays, "long"),
-        smaAligned: checkSMAAligned(overlays, "long"),
-        vwapAligned: checkVWAPAligned(overlays, currentPrice, "long"),
-        orderBlockNear: checkOrderBlockNear(overlays, currentPrice, "long"),
-        fvgNear: checkFVGNear(overlays, currentPrice, "long"),
-        session: sessionInfo.name,
-        sessionFavorable: sessionInfo.favorable,
-      };
-      let score = 70;
-      if (confluences.supertrendAligned) score += 5;
-      if (confluences.rsiAligned) score += 5;
-      if (confluences.smaAligned) score += 5;
-      if (confluences.vwapAligned) score += 5;
-      if (confluences.orderBlockNear) score += 5;
-      if (confluences.fvgNear) score += 5;
-      if (confluences.roundNumber) score += 5;
-      if (confluences.sessionFavorable) score += 10;
-      score = Math.min(score, 100);
-      const confidence: Confidence = score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : score >= 35 ? "LOW" : "NEUTRAL";
-
-      notes.push(`Demand bounce — BUY STOP at ${fixed.entry.toFixed(5)}`);
-
-      return {
-        pair, timeframe, timestamp,
-        direction: "long", orderType: "stop", signalLabel: "BUY STOP",
-        entry: fixed.entry, stopLoss: fixed.stopLoss,
-        takeProfit1: fixed.tp1, takeProfit2: fixed.tp2, takeProfit3: fixed.tp3,
-        riskPips, rewardPips, riskReward,
-        zone: { type: zone.type, top: zone.top, bottom: zone.bottom, strength: 0, distanceToPrice: zone.distanceToPrice },
-        entryCandle: { type: "large_range", direction: "bullish", probability: 70, reason: "Demand bounce confirmed" },
-        confluences, confidence, score, notes,
-      };
-    } else {
-      if (!detectSupplyBounce(candles, zone)) continue;
-
-      const pctBelow = ((zone.bottom - currentPrice) / zone.bottom) * 100;
-      const entryLevel = zone.bottom - buffer;
-      const canPlaceStop = entryLevel < currentPrice && currentPrice < zone.bottom && pctBelow <= 0.5;
-      if (!canPlaceStop) continue;
-
-      const rawSL = zone.top + buffer;
-      const rawRisk = Math.abs(entryLevel - rawSL);
-      const fixed = enforceCorrectSides(
-        "short", entryLevel, rawSL,
-        entryLevel - rawRisk * 2.0,
-        entryLevel - rawRisk * 3.5,
-        entryLevel - rawRisk * 6.0,
-        pipSize
-      );
-
-      const riskPips = Math.round(Math.abs(fixed.stopLoss - fixed.entry) / pipSize);
-      const rewardPips: [number, number, number] = [
-        Math.round(Math.abs(fixed.entry - fixed.tp1) / pipSize),
-        Math.round(Math.abs(fixed.entry - fixed.tp2) / pipSize),
-        Math.round(Math.abs(fixed.entry - fixed.tp3) / pipSize),
-      ];
-      const riskReward: [string, string, string] = [
-        riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
-        riskPips > 0 ? (rewardPips[1] / riskPips).toFixed(1) : "0",
-        riskPips > 0 ? (rewardPips[2] / riskPips).toFixed(1) : "0",
-      ];
-
-      const confluences: SignalConfluences = {
-        roundNumber: roundNumberNear,
-        supertrendAligned: checkSupertrendAligned(overlays, "short"),
-        rsiAligned: checkRSIAligned(overlays, "short"),
-        smaAligned: checkSMAAligned(overlays, "short"),
-        vwapAligned: checkVWAPAligned(overlays, currentPrice, "short"),
-        orderBlockNear: checkOrderBlockNear(overlays, currentPrice, "short"),
-        fvgNear: checkFVGNear(overlays, currentPrice, "short"),
-        session: sessionInfo.name,
-        sessionFavorable: sessionInfo.favorable,
-      };
-      let score = 70;
-      if (confluences.supertrendAligned) score += 5;
-      if (confluences.rsiAligned) score += 5;
-      if (confluences.smaAligned) score += 5;
-      if (confluences.vwapAligned) score += 5;
-      if (confluences.orderBlockNear) score += 5;
-      if (confluences.fvgNear) score += 5;
-      if (confluences.roundNumber) score += 5;
-      if (confluences.sessionFavorable) score += 10;
-      score = Math.min(score, 100);
-      const confidence: Confidence = score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : score >= 35 ? "LOW" : "NEUTRAL";
-
-      notes.push(`Supply bounce — SELL STOP at ${fixed.entry.toFixed(5)}`);
-
-      return {
-        pair, timeframe, timestamp,
-        direction: "short", orderType: "stop", signalLabel: "SELL STOP",
-        entry: fixed.entry, stopLoss: fixed.stopLoss,
-        takeProfit1: fixed.tp1, takeProfit2: fixed.tp2, takeProfit3: fixed.tp3,
-        riskPips, rewardPips, riskReward,
-        zone: { type: zone.type, top: zone.top, bottom: zone.bottom, strength: 0, distanceToPrice: zone.distanceToPrice },
-        entryCandle: { type: "large_range", direction: "bearish", probability: 70, reason: "Supply bounce confirmed" },
-        confluences, confidence, score, notes,
-      };
-    }
-  }
-
-  // ===== LIMIT / MARKET / NEUTRAL FALLBACK =====
+  // ===== FIND ACTIVE ZONE =====
+  // A zone is "active" if price is inside it OR approaching it within 0.5%.
+  // A failed zone (price already broke through in the wrong direction)
+  // is skipped, EXCEPT for the stop-order case which is handled below.
   const activeZone = sortedZones.find((z) => {
-    if (z.type === "demand" && currentPrice < z.bottom) return false;
-    if (z.type === "supply" && currentPrice > z.top) return false;
-    return (z.distanceToPrice / currentPrice) * 100 <= 0.5;
+    // Price inside
+    if (currentPrice >= z.bottom && currentPrice <= z.top) return true;
+    // Price approaching from correct side
+    if (z.type === "demand" && currentPrice > z.top) {
+      const pct = ((currentPrice - z.top) / z.top) * 100;
+      return pct <= 0.5;
+    }
+    if (z.type === "supply" && currentPrice < z.bottom) {
+      const pct = ((z.bottom - currentPrice) / z.bottom) * 100;
+      return pct <= 0.5;
+    }
+    // Price broke through — still allow for STOP order scenario
+    if (z.type === "demand" && currentPrice < z.bottom) {
+      const pct = ((z.bottom - currentPrice) / z.bottom) * 100;
+      return pct <= 0.5; // near the broken zone
+    }
+    if (z.type === "supply" && currentPrice > z.top) {
+      const pct = ((currentPrice - z.top) / z.top) * 100;
+      return pct <= 0.5; // near the broken zone
+    }
+    return false;
   });
 
   if (!activeZone) {
@@ -465,7 +431,10 @@ export function buildSignal(
       direction: "neutral", orderType: "none", signalLabel: "NEUTRAL",
       entry: null, stopLoss: null, takeProfit1: null, takeProfit2: null, takeProfit3: null,
       riskPips: 0, rewardPips: [0, 0, 0], riskReward: ["0", "0", "0"],
-      zone: { type: nearest.type, top: nearest.top, bottom: nearest.bottom, strength: 0, distanceToPrice: nearest.distanceToPrice },
+      zone: {
+        type: nearest.type, top: nearest.top, bottom: nearest.bottom,
+        strength: 0, distanceToPrice: nearest.distanceToPrice,
+      },
       entryCandle: null,
       confluences: baseConfluences, confidence: "NEUTRAL", score: 0,
       neutralReason: `Price not at zone. Nearest ${nearest.type} at ${nearest.bottom.toFixed(5)} - ${nearest.top.toFixed(5)}`,
@@ -474,53 +443,56 @@ export function buildSignal(
   }
 
   const direction: "long" | "short" = activeZone.type === "demand" ? "long" : "short";
-  const priceInsideZone = currentPrice >= activeZone.bottom && currentPrice <= activeZone.top;
   const signalDirection = direction === "long" ? "bullish" : "bearish";
   const entryCandle = detectEntrySignal(zoneCandles, signalDirection);
 
-  let orderType: OrderType;
-  let signalLabel: SignalLabel;
+  // ===== SELECT ORDER TYPE =====
+  const initial = selectOrderType(direction, currentPrice, activeZone, entryCandle.type);
 
-  if (priceInsideZone && entryCandle.type !== "none") {
-    orderType = "market";
-    signalLabel = direction === "long" ? "BUY" : "SELL";
-  } else {
-    // Either inside zone without confirmation, or approaching zone — both give LIMIT
-    orderType = "limit";
-    signalLabel = direction === "long" ? "BUY LIMIT" : "SELL LIMIT";
-  }
+  // ===== VALIDATE AGAINST CURRENT PRICE =====
+  const validated = validateOrderAgainstPrice(
+    initial.orderType,
+    initial.signalLabel,
+    direction,
+    initial.entryLevel,
+    currentPrice
+  );
 
-  // ===== ENTRY =====
-  let rawEntry: number;
-  if (orderType === "limit") {
-    // Limit entry = the zone edge price approaches from
-    rawEntry = direction === "long" ? activeZone.top : activeZone.bottom;
-  } else {
-    rawEntry = currentPrice;
-  }
+  const orderType = validated.orderType;
+  const signalLabel = validated.signalLabel;
+  const entryLevel = initial.entryLevel;
 
   // ===== SL =====
   let rawSL: number;
   if (direction === "long") {
-    rawSL = Math.min(activeZone.bottom - buffer, rawEntry - buffer);
+    rawSL = activeZone.bottom - buffer;
   } else {
-    rawSL = Math.max(activeZone.top + buffer, rawEntry + buffer);
+    rawSL = activeZone.top + buffer;
   }
 
   // ===== TPs =====
-  const rawRisk = Math.abs(rawEntry - rawSL);
+  const rawRisk = Math.abs(entryLevel - rawSL);
   let rawTP1: number, rawTP2: number, rawTP3: number;
   if (direction === "long") {
-    rawTP1 = rawEntry + rawRisk * 2.0;
-    rawTP2 = rawEntry + rawRisk * 3.5;
-    rawTP3 = rawEntry + rawRisk * 6.0;
+    rawTP1 = entryLevel + rawRisk * 2.0;
+    rawTP2 = entryLevel + rawRisk * 3.5;
+    rawTP3 = entryLevel + rawRisk * 6.0;
   } else {
-    rawTP1 = rawEntry - rawRisk * 2.0;
-    rawTP2 = rawEntry - rawRisk * 3.5;
-    rawTP3 = rawEntry - rawRisk * 6.0;
+    rawTP1 = entryLevel - rawRisk * 2.0;
+    rawTP2 = entryLevel - rawRisk * 3.5;
+    rawTP3 = entryLevel - rawRisk * 6.0;
   }
 
-  const fixed = enforceCorrectSides(direction, rawEntry, rawSL, rawTP1, rawTP2, rawTP3, pipSize);
+  // ===== FINAL SIDE ENFORCEMENT =====
+  const fixed = enforceCorrectSides(
+    direction,
+    entryLevel,
+    rawSL,
+    rawTP1,
+    rawTP2,
+    rawTP3,
+    pipSize
+  );
 
   const riskPips = Math.round(Math.abs(fixed.entry - fixed.stopLoss) / pipSize);
   const rewardPips: [number, number, number] = [
@@ -534,6 +506,7 @@ export function buildSignal(
     riskPips > 0 ? (rewardPips[2] / riskPips).toFixed(1) : "0",
   ];
 
+  // ===== CONFLUENCE SCORING =====
   const confluences: SignalConfluences = {
     roundNumber: roundNumberNear,
     supertrendAligned: checkSupertrendAligned(overlays, direction),
@@ -560,16 +533,36 @@ export function buildSignal(
   const confidence: Confidence = score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : score >= 35 ? "LOW" : "NEUTRAL";
 
   notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
+  notes.push(`Current price: ${currentPrice.toFixed(5)}`);
   notes.push(`Entry (${signalLabel}): ${fixed.entry.toFixed(5)}`);
   notes.push(`SL: ${fixed.stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
+  if (entryCandle.type !== "none") {
+    notes.push(`Entry signal: ${entryCandle.reason} (${entryCandle.probability}%)`);
+  }
+  if (confluences.supertrendAligned) notes.push("Supertrend aligned ✅");
+  if (confluences.rsiAligned) notes.push("RSI aligned ✅");
+  if (confluences.smaAligned) notes.push("SMA aligned ✅");
+  if (confluences.vwapAligned) notes.push("VWAP aligned ✅");
+  if (confluences.orderBlockNear) notes.push("Order block nearby ✅");
+  if (confluences.fvgNear) notes.push("FVG nearby ✅");
+  if (confluences.roundNumber && round) {
+    notes.push(`Near round number ${round.level} (${round.distancePct.toFixed(2)}%)`);
+  }
+  notes.push(`Session: ${sessionInfo.name}`);
 
   return {
     pair, timeframe, timestamp,
     direction, orderType, signalLabel,
-    entry: fixed.entry, stopLoss: fixed.stopLoss,
-    takeProfit1: fixed.tp1, takeProfit2: fixed.tp2, takeProfit3: fixed.tp3,
+    entry: fixed.entry,
+    stopLoss: fixed.stopLoss,
+    takeProfit1: fixed.tp1,
+    takeProfit2: fixed.tp2,
+    takeProfit3: fixed.tp3,
     riskPips, rewardPips, riskReward,
-    zone: { type: activeZone.type, top: activeZone.top, bottom: activeZone.bottom, strength: 0, distanceToPrice: activeZone.distanceToPrice },
+    zone: {
+      type: activeZone.type, top: activeZone.top, bottom: activeZone.bottom,
+      strength: 0, distanceToPrice: activeZone.distanceToPrice,
+    },
     entryCandle: {
       type: entryCandle.type === "large_range_candle" ? "large_range" : entryCandle.type,
       direction: entryCandle.direction,
