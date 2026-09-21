@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { buildSMCSignal, SMCCandle } from "@/lib/smc-analysis";
+import { runZoneStrategy, ZoneCandle } from "@/lib/zone-strategy";
 
 async function fetchCandlesFromPython(
   pair: string,
   timeframe: string,
   limit: number = 300,
-): Promise<SMCCandle[] | null> {
+): Promise<ZoneCandle[] | null> {
   try {
     const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
     const response = await fetch(`${pythonUrl}/api/smc-candles`, {
@@ -17,20 +17,20 @@ async function fetchCandlesFromPython(
     });
 
     if (!response.ok) {
-      console.error(`[SMC] Python failed: ${response.status} for ${pair} ${timeframe}`);
+      console.error(`[Zone] Python failed: ${response.status} for ${pair} ${timeframe}`);
       return null;
     }
 
     const data = await response.json();
     if (!data.candles || data.candles.length < 50) {
-      console.error(`[SMC] Only ${data.candles?.length || 0} candles for ${pair} ${timeframe}`);
+      console.error(`[Zone] Only ${data.candles?.length || 0} candles for ${pair} ${timeframe}`);
       return null;
     }
 
-    console.log(`[SMC] Got ${data.candles.length} candles for ${pair} ${timeframe}`);
-    return data.candles as SMCCandle[];
+    console.log(`[Zone] Got ${data.candles.length} candles for ${pair} ${timeframe}`);
+    return data.candles as ZoneCandle[];
   } catch (error: any) {
-    console.error(`[SMC] Fetch failed for ${pair} ${timeframe}: ${error?.message}`);
+    console.error(`[Zone] Fetch failed for ${pair} ${timeframe}: ${error?.message}`);
     return null;
   }
 }
@@ -38,7 +38,7 @@ async function fetchCandlesFromPython(
 async function fetchMTFCandles(
   pair: string,
   timeframe: string,
-): Promise<SMCCandle[] | null> {
+): Promise<ZoneCandle[] | null> {
   try {
     const pythonUrl = process.env.PYTHON_AI_URL || "https://tradevault-ai.onrender.com";
     const response = await fetch(`${pythonUrl}/api/smc-candles`, {
@@ -48,19 +48,10 @@ async function fetchMTFCandles(
       signal: AbortSignal.timeout(15000),
     });
 
-    if (!response.ok) {
-      console.error(`[MTF ${timeframe}] Python failed: ${response.status}`);
-      return null;
-    }
-
+    if (!response.ok) return null;
     const data = await response.json();
-    if (!data.candles || data.candles.length < 10) {
-      console.error(`[MTF ${timeframe}] Only ${data.candles?.length || 0} candles`);
-      return null;
-    }
-
-    console.log(`[MTF ${timeframe}] Got ${data.candles.length} candles`);
-    return data.candles as SMCCandle[];
+    if (!data.candles || data.candles.length < 10) return null;
+    return data.candles as ZoneCandle[];
   } catch (error: any) {
     console.error(`[MTF ${timeframe}] Failed: ${error?.message}`);
     return null;
@@ -95,78 +86,122 @@ export async function POST(request: Request) {
       );
     }
 
-    const signal = buildSMCSignal(pair, candles, mtf5, mtf15);
+    const result = runZoneStrategy(pair, candles, mtf5, mtf15);
 
-    if (!signal) {
-      return NextResponse.json(
-        { error: "Not enough data", message: "Need at least 50 candles." },
-        { status: 400 },
-      );
+    console.log(`[Zone Signal] ${pair} ${timeframe}: status=${result.status}${result.direction ? " dir=" + result.direction : ""}`);
+
+    // If no signal yet — return watching or no_setup
+    if (result.status !== "signal") {
+      return NextResponse.json({
+        status: result.status,
+        message: result.message,
+        analysis: result.message,
+        signal: {
+          direction: "neutral",
+          orderType: "NONE",
+          orderTypeDescription: result.status === "watching" ? "Waiting for zone" : "No setup",
+
+          currentPrice: candles[candles.length - 1].close,
+          entryPrice: 0,
+          stopLossPrice: 0,
+          takeProfit1Price: 0,
+          takeProfit2Price: 0,
+          takeProfit3Price: 0,
+
+          riskPips: 0,
+          rewardPips1: 0,
+          rewardPips2: 0,
+          rewardPips3: 0,
+          riskReward1: "0",
+          riskReward2: "0",
+          riskReward3: "0",
+
+          confidence: "NEUTRAL",
+          confidenceScore: 0,
+          signalScore: 0,
+
+          timeframe,
+          dataSource: "live_data",
+          status: result.status,
+
+          zone: result.zone || null,
+          entrySignal: result.entrySignal || null,
+          confluences: result.confluences || [],
+          candleCount: result.candleCount,
+        },
+      });
     }
 
-    const dirEmoji = signal.direction === "long" ? "📈" : "📉";
-    const dirLabel = signal.direction === "long" ? "BUY (LONG)" : "SELL (SHORT)";
+    // ===== Valid signal =====
+    const dirEmoji = result.direction === "long" ? "📈" : "📉";
+    const dirLabel = result.direction === "long" ? "BUY (LONG)" : "SELL (SHORT)";
 
-    const analysisText = `📊 **TradeVault SMC — ${pair} (${timeframe})**
+    const analysisText = `🎯 **Zone Strategy — ${pair} (${timeframe})**
 
 ${dirEmoji} **Direction: ${dirLabel}**
 
-🎯 **ENTRY: ${signal.entry}**
-🛑 **STOP LOSS: ${signal.stopLoss}**
-✅ **TP1: ${signal.takeProfit1}**
-✅ **TP2: ${signal.takeProfit2}**
-✅ **TP3: ${signal.takeProfit3}**
+📍 **ZONE:** ${result.zone?.type.toUpperCase()} ${result.zone?.bottom.toFixed(5)} - ${result.zone?.top.toFixed(5)}
 
-⚡ Confidence: ${signal.confidence} (${signal.score}/100)
-⏱️ MTF: ${signal.mtfAlignment}`;
+🎯 **ENTRY:** ${result.entry?.toFixed(5)}
+🛑 **STOP LOSS:** ${result.stopLoss?.toFixed(5)}
+✅ **TP1 (1.272 Fib):** ${result.takeProfit1?.toFixed(5)}
+✅ **TP2 (1.618 Fib):** ${result.takeProfit2?.toFixed(5)}
+✅ **TP3 (2.0 Fib):** ${result.takeProfit3?.toFixed(5)}
 
-    console.log(`[SMC Signal] ${pair} ${timeframe}: dir=${signal.direction} score=${signal.score} mtf=${signal.mtfAlignment}`);
+⚡ Confidence: ${result.confidence} (${result.entrySignal?.probability}% base)
+🕐 Session: ${result.session}
+📊 R:R = 1:${result.riskReward1} / 1:${result.riskReward2} / 1:${result.riskReward3}`;
 
     return NextResponse.json({
+      status: "signal",
       analysis: analysisText,
       signal: {
-        direction: signal.direction,
-        orderType: signal.direction === "long" ? "MARKET_BUY" : "MARKET_SELL",
+        direction: result.direction,
+        orderType: result.direction === "long" ? "MARKET_BUY" : "MARKET_SELL",
         orderTypeDescription:
-          signal.direction === "long"
-            ? "Market Buy — enter immediately"
-            : "Market Sell — enter immediately",
+          result.direction === "long"
+            ? "Market Buy — enter at zone"
+            : "Market Sell — enter at zone",
 
-        currentPrice: signal.entry,
-        entryPrice: signal.entry,
-        stopLossPrice: signal.stopLoss,
-        takeProfit1Price: signal.takeProfit1,
-        takeProfit2Price: signal.takeProfit2,
-        takeProfit3Price: signal.takeProfit3,
+        currentPrice: result.entry,
+        entryPrice: result.entry,
+        stopLossPrice: result.stopLoss,
+        takeProfit1Price: result.takeProfit1,
+        takeProfit2Price: result.takeProfit2,
+        takeProfit3Price: result.takeProfit3,
 
-        riskPips: signal.riskPips,
-        rewardPips1: signal.rewardPips1,
-        rewardPips2: signal.rewardPips2,
-        rewardPips3: signal.rewardPips3,
+        riskPips: result.riskPips,
+        rewardPips1: result.rewardPips1,
+        rewardPips2: result.rewardPips2,
+        rewardPips3: result.rewardPips3,
 
-        riskReward1: signal.riskReward1,
-        riskReward2: signal.riskReward2,
-        riskReward3: signal.riskReward3,
+        riskReward1: result.riskReward1,
+        riskReward2: result.riskReward2,
+        riskReward3: result.riskReward3,
 
-        confidence: signal.confidence,
-        confidenceScore: signal.score,
-        signalScore: signal.score,
+        confidence: result.confidence,
+        confidenceScore: result.entrySignal?.probability || 0,
+        signalScore: result.entrySignal?.probability || 0,
 
         timeframe,
-        dataSource: signal.smcSource,
+        dataSource: "live_data",
+        status: "signal",
 
-        confluences: signal.confluences,
-        liquidityZones: signal.liquidityZones,
-        orderBlocks: signal.orderBlocks,
-        fvgs: signal.fvgs,
-        supplyDemandZones: signal.supplyDemandZones,
-        sma9: signal.sma9,
-        sma21: signal.sma21,
-        sma200: signal.sma200,
-        candleCount: signal.candleCount,
-        mtf5: signal.mtf5,
-        mtf15: signal.mtf15,
-        mtfAlignment: signal.mtfAlignment,
+        // Zone data
+        zone: result.zone,
+        entrySignal: result.entrySignal,
+        fibonacci: result.fibonacci,
+        tradeManagement: result.tradeManagement,
+        positionSizing: result.positionSizing,
+        mtfConfirmed: result.mtfConfirmed,
+        mtfNote: result.mtfNote,
+        session: result.session,
+        sessionWeight: result.sessionWeight,
+        nearRoundNumber: result.nearRoundNumber,
+        roundNumberNote: result.roundNumberNote,
+
+        confluences: result.confluences,
+        candleCount: result.candleCount,
       },
     });
   } catch (error: any) {

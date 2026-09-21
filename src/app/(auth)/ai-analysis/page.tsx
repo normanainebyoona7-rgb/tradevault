@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { TradingViewChart } from "@/components/charts/tradingview-chart";
 
-const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
+const TIMEFRAMES = ["5m", "15m", "30m", "1H", "4H", "1D"];
 
 export default function AIAnalysisPage() {
   const [currentPair, setCurrentPair] = useState("XAU/USD");
@@ -11,6 +11,7 @@ export default function AIAnalysisPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [signal, setSignal] = useState<any>(null);
+  const [status, setStatus] = useState<"signal" | "watching" | "no_setup" | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [userTier, setUserTier] = useState("free");
 
@@ -35,6 +36,7 @@ export default function AIAnalysisPage() {
     setLoading(true);
     setError("");
     setSignal(null);
+    setStatus(null);
 
     try {
       const response = await fetch("/api/analyze-chart", {
@@ -53,6 +55,7 @@ export default function AIAnalysisPage() {
         return;
       }
 
+      setStatus(data.status);
       setSignal(data.signal);
     } catch (err) {
       setError("Something went wrong. Please try again.");
@@ -79,10 +82,10 @@ export default function AIAnalysisPage() {
   return (
     <div style={{ maxWidth: "900px", margin: "0 auto", padding: isMobile ? "12px" : "24px" }}>
       <h1 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "800", marginBottom: "8px" }}>
-        🎯 Signal Analysis
+        🎯 Zone Signal Analysis
       </h1>
       <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "20px" }}>
-        Select a pair and timeframe to get an SMC signal.
+        Wait for price to reach a supply/demand zone. Get a signal when the setup is confirmed.
       </p>
 
       <div style={{ marginBottom: "20px" }}>
@@ -147,7 +150,78 @@ export default function AIAnalysisPage() {
         </div>
       )}
 
-      {signal && (
+      {/* WATCHING STATE */}
+      {status === "watching" && signal && (
+        <div style={{
+          background: "#fef9c3",
+          border: "1px solid #fde68a",
+          borderRadius: "12px",
+          padding: "20px",
+          marginBottom: "16px",
+        }}>
+          <p style={{ fontSize: "18px", fontWeight: "800", color: "#854d0e", marginBottom: "12px" }}>
+            👀 Watching for setup
+          </p>
+          <p style={{ fontSize: "14px", color: "#854d0e", marginBottom: "12px" }}>
+            Price is not at a zone yet. The AI is watching the nearest level.
+          </p>
+
+          {signal.zone && (
+            <div style={{
+              padding: "14px",
+              background: "#ffffff",
+              borderRadius: "10px",
+              border: "1px solid #fde68a",
+            }}>
+              <p style={{ fontSize: "12px", fontWeight: "700", color: "#854d0e", marginBottom: "6px" }}>
+                📍 NEAREST ZONE:
+              </p>
+              <p style={{ fontSize: "14px", color: "#374151", fontWeight: "600" }}>
+                {signal.zone.type === "demand" ? "🟢 Demand Zone" : "🔴 Supply Zone"}
+              </p>
+              <p style={{ fontSize: "13px", color: "#6b7280", marginTop: "4px" }}>
+                {signal.zone.bottom?.toFixed(5)} — {signal.zone.top?.toFixed(5)}
+              </p>
+            </div>
+          )}
+
+          {signal.entrySignal && signal.entrySignal.type === "none" && (
+            <div style={{
+              marginTop: "12px",
+              padding: "12px",
+              background: "#ffffff",
+              borderRadius: "10px",
+              border: "1px solid #fde68a",
+            }}>
+              <p style={{ fontSize: "13px", color: "#854d0e" }}>
+                ⏸️ Price is at the zone but waiting for a Large Range Candle, Engulfing, or Pin Bar to confirm entry.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* NO SETUP STATE */}
+      {status === "no_setup" && (
+        <div style={{
+          background: "#f3f4f6",
+          border: "1px solid #d1d5db",
+          borderRadius: "12px",
+          padding: "20px",
+          marginBottom: "16px",
+          textAlign: "center",
+        }}>
+          <p style={{ fontSize: "18px", fontWeight: "800", color: "#6b7280", marginBottom: "8px" }}>
+            No zones detected
+          </p>
+          <p style={{ fontSize: "14px", color: "#6b7280" }}>
+            Try another pair or timeframe.
+          </p>
+        </div>
+      )}
+
+      {/* SIGNAL STATE */}
+      {status === "signal" && signal && signal.direction !== "neutral" && (
         <div style={{
           background: "#fff",
           border: "1px solid #e5e7eb",
@@ -155,6 +229,7 @@ export default function AIAnalysisPage() {
           padding: isMobile ? "16px" : "20px",
           marginBottom: "16px",
         }}>
+          {/* Direction */}
           <div style={{
             padding: "16px",
             borderRadius: "12px",
@@ -179,6 +254,7 @@ export default function AIAnalysisPage() {
             </p>
           </div>
 
+          {/* Entry + SL */}
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
@@ -199,6 +275,7 @@ export default function AIAnalysisPage() {
             </div>
           </div>
 
+          {/* TPs */}
           <div style={{
             display: "grid",
             gridTemplateColumns: isMobile ? "1fr" : canSeeAllTPs ? "repeat(3, 1fr)" : "1fr",
@@ -239,6 +316,7 @@ export default function AIAnalysisPage() {
             )}
           </div>
 
+          {/* Upgrade prompt for free tier */}
           {!canSeeAllTPs && (
             <div style={{
               padding: "14px",
@@ -257,6 +335,7 @@ export default function AIAnalysisPage() {
             </div>
           )}
 
+          {/* Risk + confidence */}
           <div style={{
             padding: "10px",
             background: "#f9fafb",
