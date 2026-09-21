@@ -1,16 +1,21 @@
 // src/lib/signal.ts
-// Signal orchestrator.
-// Order type depends on price position relative to the zone, and a final
-// safety check converts any impossible order into a valid one:
+// Signal orchestrator with TIGHT SL (Option A).
 //
-//   BUY LIMIT  — must be BELOW current price (price above demand zone)
-//   SELL LIMIT — must be ABOVE current price (price below supply zone)
-//   BUY STOP   — must be ABOVE current price (price broke out above demand)
-//   SELL STOP  — must be BELOW current price (price broke out below supply)
+// SL RULES:
+//   long:  SL = entry - buffer  (always below entry, tight)
+//   short: SL = entry + buffer  (always above entry, tight)
+//   buffer = max(0.1 × avg candle range, minimum pips for pair)
+//
+// This means: SL is a fixed small distance from entry, NOT at the zone
+// bottom/top. Risk stays small (30-50 pips on gold, 15-30 on forex).
+//
+// Order type is chosen based on where price sits relative to the zone:
+//   BUY LIMIT  — must be BELOW current price
+//   SELL LIMIT — must be ABOVE current price
+//   BUY STOP   — must be ABOVE current price
+//   SELL STOP  — must be BELOW current price
 //   BUY / SELL — market, at current price
-//
-// Direction/entry/SL/TP come from zone-strategy.ts (pure S/D).
-// Confluence scoring reads overlays (Supertrend, RSI, SMA, VWAP, OB, FVG).
+// Impossible orders are auto-converted to the valid counterpart.
 
 import type { Candle } from "@/lib/data/candles";
 import type { Overlays } from "@/lib/overlays";
@@ -26,13 +31,8 @@ import {
 export type SignalDirection = "long" | "short" | "neutral";
 export type OrderType = "market" | "limit" | "stop" | "none";
 export type SignalLabel =
-  | "BUY"
-  | "SELL"
-  | "BUY LIMIT"
-  | "SELL LIMIT"
-  | "BUY STOP"
-  | "SELL STOP"
-  | "NEUTRAL";
+  | "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT"
+  | "BUY STOP" | "SELL STOP" | "NEUTRAL";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "NEUTRAL";
 
 export interface SignalZone {
@@ -189,45 +189,7 @@ function checkFVGNear(overlays: Overlays, currentPrice: number, direction: "long
   return false;
 }
 
-// ===== SIDE ENFORCEMENT =====
-function enforceCorrectSides(
-  direction: "long" | "short",
-  entry: number,
-  stopLoss: number,
-  tp1: number,
-  tp2: number,
-  tp3: number,
-  pipSize: number
-): { entry: number; stopLoss: number; tp1: number; tp2: number; tp3: number } {
-  const minRisk = 5 * pipSize;
-
-  if (direction === "long") {
-    if (stopLoss >= entry) {
-      stopLoss = entry - Math.max(Math.abs(entry - stopLoss), minRisk);
-    }
-    const risk = entry - stopLoss;
-    let e1 = tp1, e2 = tp2, e3 = tp3;
-    if (e1 <= entry) e1 = entry + risk * 2.0;
-    if (e2 <= e1) e2 = entry + risk * 3.5;
-    if (e3 <= e2) e3 = entry + risk * 6.0;
-    return { entry, stopLoss, tp1: e1, tp2: e2, tp3: e3 };
-  } else {
-    if (stopLoss <= entry) {
-      stopLoss = entry + Math.max(Math.abs(stopLoss - entry), minRisk);
-    }
-    const risk = stopLoss - entry;
-    let e1 = tp1, e2 = tp2, e3 = tp3;
-    if (e1 >= entry) e1 = entry - risk * 2.0;
-    if (e2 >= e1) e2 = entry - risk * 3.5;
-    if (e3 >= e2) e3 = entry - risk * 6.0;
-    return { entry, stopLoss, tp1: e1, tp2: e2, tp3: e3 };
-  }
-}
-
 // ===== ORDER TYPE SELECTION =====
-// Determines the correct order type based on where current price is
-// relative to the zone. Then applies a hard safety check to convert any
-// impossible order into a valid one.
 function selectOrderType(
   direction: "long" | "short",
   currentPrice: number,
@@ -245,25 +207,19 @@ function selectOrderType(
   if (direction === "long") {
     if (priceInsideZone) {
       if (entryCandleType !== "none") {
-        // Inside demand zone + confirmation → market BUY
         orderType = "market";
         signalLabel = "BUY";
         entryLevel = currentPrice;
       } else {
-        // Inside zone, no confirmation → BUY LIMIT at zone top
         orderType = "limit";
         signalLabel = "BUY LIMIT";
         entryLevel = zone.top;
       }
     } else if (priceAboveZone) {
-      // Price above demand zone → waiting for pullback to zone
-      // BUY LIMIT below current price
       orderType = "limit";
       signalLabel = "BUY LIMIT";
       entryLevel = zone.top;
     } else {
-      // priceBelowZone — price broke below demand, waiting for reclaim
-      // BUY STOP above current price
       orderType = "stop";
       signalLabel = "BUY STOP";
       entryLevel = zone.top;
@@ -271,25 +227,19 @@ function selectOrderType(
   } else {
     if (priceInsideZone) {
       if (entryCandleType !== "none") {
-        // Inside supply zone + confirmation → market SELL
         orderType = "market";
         signalLabel = "SELL";
         entryLevel = currentPrice;
       } else {
-        // Inside zone, no confirmation → SELL LIMIT at zone bottom
         orderType = "limit";
         signalLabel = "SELL LIMIT";
         entryLevel = zone.bottom;
       }
     } else if (priceBelowZone) {
-      // Price below supply zone → waiting for rally to zone
-      // SELL LIMIT above current price
       orderType = "limit";
       signalLabel = "SELL LIMIT";
       entryLevel = zone.bottom;
     } else {
-      // priceAboveZone — price broke above supply, waiting for rejection
-      // SELL STOP below current price
       orderType = "stop";
       signalLabel = "SELL STOP";
       entryLevel = zone.bottom;
@@ -299,12 +249,7 @@ function selectOrderType(
   return { orderType, signalLabel, entryLevel };
 }
 
-// ===== SAFETY CHECK =====
-// Converts any impossible order into the valid counterpart.
-//   BUY LIMIT above price     → BUY STOP above price
-//   SELL LIMIT below price    → SELL STOP below price
-//   BUY STOP below price      → BUY LIMIT below price
-//   SELL STOP above price     → SELL LIMIT above price
+// ===== ORDER VALIDATION =====
 function validateOrderAgainstPrice(
   orderType: OrderType,
   signalLabel: SignalLabel,
@@ -318,20 +263,16 @@ function validateOrderAgainstPrice(
 
   if (direction === "long") {
     if (orderType === "limit" && entryLevel >= currentPrice) {
-      // BUY LIMIT must be below price → convert to BUY STOP
       return { orderType: "stop", signalLabel: "BUY STOP" };
     }
     if (orderType === "stop" && entryLevel <= currentPrice) {
-      // BUY STOP must be above price → convert to BUY LIMIT
       return { orderType: "limit", signalLabel: "BUY LIMIT" };
     }
   } else {
     if (orderType === "limit" && entryLevel <= currentPrice) {
-      // SELL LIMIT must be above price → convert to SELL STOP
       return { orderType: "stop", signalLabel: "SELL STOP" };
     }
     if (orderType === "stop" && entryLevel >= currentPrice) {
-      // SELL STOP must be below price → convert to SELL LIMIT
       return { orderType: "limit", signalLabel: "SELL LIMIT" };
     }
   }
@@ -392,18 +333,13 @@ export function buildSignal(
 
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
 
+  // Buffer = TIGHT — this is the SL distance from entry
   const avgRange = candles.slice(-20).reduce((s, c) => s + (c.high - c.low), 0) / 20;
   const minBufferPrice = minBufferPips(pair) * pipSize;
   const buffer = Math.max(avgRange * 0.1, minBufferPrice);
 
-  // ===== FIND ACTIVE ZONE =====
-  // A zone is "active" if price is inside it OR approaching it within 0.5%.
-  // A failed zone (price already broke through in the wrong direction)
-  // is skipped, EXCEPT for the stop-order case which is handled below.
   const activeZone = sortedZones.find((z) => {
-    // Price inside
     if (currentPrice >= z.bottom && currentPrice <= z.top) return true;
-    // Price approaching from correct side
     if (z.type === "demand" && currentPrice > z.top) {
       const pct = ((currentPrice - z.top) / z.top) * 100;
       return pct <= 0.5;
@@ -412,14 +348,13 @@ export function buildSignal(
       const pct = ((z.bottom - currentPrice) / z.bottom) * 100;
       return pct <= 0.5;
     }
-    // Price broke through — still allow for STOP order scenario
     if (z.type === "demand" && currentPrice < z.bottom) {
       const pct = ((z.bottom - currentPrice) / z.bottom) * 100;
-      return pct <= 0.5; // near the broken zone
+      return pct <= 0.5;
     }
     if (z.type === "supply" && currentPrice > z.top) {
       const pct = ((currentPrice - z.top) / z.top) * 100;
-      return pct <= 0.5; // near the broken zone
+      return pct <= 0.5;
     }
     return false;
   });
@@ -448,8 +383,6 @@ export function buildSignal(
 
   // ===== SELECT ORDER TYPE =====
   const initial = selectOrderType(direction, currentPrice, activeZone, entryCandle.type);
-
-  // ===== VALIDATE AGAINST CURRENT PRICE =====
   const validated = validateOrderAgainstPrice(
     initial.orderType,
     initial.signalLabel,
@@ -462,12 +395,13 @@ export function buildSignal(
   const signalLabel = validated.signalLabel;
   const entryLevel = initial.entryLevel;
 
-  // ===== SL =====
+  // ===== SL — TIGHT (Option A) =====
+  // SL is a fixed small distance from entry, NOT at the zone bottom/top.
   let rawSL: number;
   if (direction === "long") {
-    rawSL = activeZone.bottom - buffer;
+    rawSL = entryLevel - buffer;  // below entry
   } else {
-    rawSL = activeZone.top + buffer;
+    rawSL = entryLevel + buffer;  // above entry
   }
 
   // ===== TPs =====
@@ -483,22 +417,11 @@ export function buildSignal(
     rawTP3 = entryLevel - rawRisk * 6.0;
   }
 
-  // ===== FINAL SIDE ENFORCEMENT =====
-  const fixed = enforceCorrectSides(
-    direction,
-    entryLevel,
-    rawSL,
-    rawTP1,
-    rawTP2,
-    rawTP3,
-    pipSize
-  );
-
-  const riskPips = Math.round(Math.abs(fixed.entry - fixed.stopLoss) / pipSize);
+  const riskPips = Math.round(rawRisk / pipSize);
   const rewardPips: [number, number, number] = [
-    Math.round(Math.abs(fixed.tp1 - fixed.entry) / pipSize),
-    Math.round(Math.abs(fixed.tp2 - fixed.entry) / pipSize),
-    Math.round(Math.abs(fixed.tp3 - fixed.entry) / pipSize),
+    Math.round(Math.abs(rawTP1 - entryLevel) / pipSize),
+    Math.round(Math.abs(rawTP2 - entryLevel) / pipSize),
+    Math.round(Math.abs(rawTP3 - entryLevel) / pipSize),
   ];
   const riskReward: [string, string, string] = [
     riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
@@ -534,8 +457,8 @@ export function buildSignal(
 
   notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
   notes.push(`Current price: ${currentPrice.toFixed(5)}`);
-  notes.push(`Entry (${signalLabel}): ${fixed.entry.toFixed(5)}`);
-  notes.push(`SL: ${fixed.stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
+  notes.push(`Entry (${signalLabel}): ${entryLevel.toFixed(5)}`);
+  notes.push(`SL: ${rawSL.toFixed(5)} (risk ${riskPips} pips — tight)`);
   if (entryCandle.type !== "none") {
     notes.push(`Entry signal: ${entryCandle.reason} (${entryCandle.probability}%)`);
   }
@@ -553,11 +476,11 @@ export function buildSignal(
   return {
     pair, timeframe, timestamp,
     direction, orderType, signalLabel,
-    entry: fixed.entry,
-    stopLoss: fixed.stopLoss,
-    takeProfit1: fixed.tp1,
-    takeProfit2: fixed.tp2,
-    takeProfit3: fixed.tp3,
+    entry: entryLevel,
+    stopLoss: rawSL,
+    takeProfit1: rawTP1,
+    takeProfit2: rawTP2,
+    takeProfit3: rawTP3,
     riskPips, rewardPips, riskReward,
     zone: {
       type: activeZone.type, top: activeZone.top, bottom: activeZone.bottom,
