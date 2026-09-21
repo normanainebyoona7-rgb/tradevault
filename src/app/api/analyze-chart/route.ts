@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     const pair = body.pair || "EUR/USD";
     const timeframe = body.timeframe || "1H";
 
-    // Fetch candles from Dukascopy
+    // Fetch candles from Dukascopy (or Yahoo fallback for metals)
     const candles = await getCandles(pair, timeframe, 300);
 
     if (candles.length === 0) {
@@ -223,13 +223,23 @@ ${dirEmoji} **${dirLabel}**
         signal.direction === "long"
           ? "Market Buy — enter at zone"
           : "Market Sell — enter at zone";
-    } else {
+    } else if (signal.orderType === "limit") {
       uiOrderType =
         signal.direction === "long" ? "BUY_LIMIT" : "SELL_LIMIT";
       uiOrderDesc =
         signal.direction === "long"
           ? "Buy Limit — place order at zone"
           : "Sell Limit — place order at zone";
+    } else if (signal.orderType === "stop") {
+      uiOrderType =
+        signal.direction === "long" ? "BUY_STOP" : "SELL_STOP";
+      uiOrderDesc =
+        signal.direction === "long"
+          ? "Buy Stop — demand zone bounced, enter on continuation"
+          : "Sell Stop — supply zone bounced, enter on continuation";
+    } else {
+      uiOrderType = "NONE";
+      uiOrderDesc = "No order";
     }
 
     return NextResponse.json({
