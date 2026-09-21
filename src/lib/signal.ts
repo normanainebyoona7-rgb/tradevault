@@ -2,7 +2,6 @@
 // Signal orchestrator.
 // Direction/entry/SL/TP come from zone-strategy.ts (pure S/D).
 // Confluence scoring reads overlays (Supertrend, RSI, SMA, VWAP, OB, FVG).
-// The engine decides direction. Indicators only add or remove confidence.
 //
 // Order types:
 //   - BUY / SELL              → price at zone + confirmation (market)
@@ -10,13 +9,11 @@
 //   - BUY STOP / SELL STOP    → price bounced off zone and left it (stop)
 //   - NEUTRAL                 → no setup, price between zones, or zone failed
 //
-// BUY STOP / SELL STOP logic:
-//   - Demand zone bounced: price closed above zone top with bullish candle
-//     → BUY STOP at zone top + buffer, SL below zone, TPs at R:R from entry
-//   - Supply zone bounced: price closed below zone bottom with bearish candle
-//     → SELL STOP at zone bottom - buffer, SL above zone, TPs at R:R from entry
-//   - Only fires if price is within 0.5% of the zone edge (not extended)
-//   - Requires the zone to have been touched within the last 20 candles
+// SL placement rules (per cheat sheet Part 5):
+//   - Long:  SL = zone.bottom - buffer  (below zone)
+//   - Short: SL = zone.top    + buffer  (above zone)
+//   - buffer = max(0.1×avgRange, 5 pips) so SL is never too tight
+//   - SL is guaranteed on the correct side of entry
 
 import type { Candle } from "@/lib/data/candles";
 import type { Overlays } from "@/lib/overlays";
@@ -110,6 +107,16 @@ function calcPipSize(pair: string): number {
   return 0.0001;
 }
 
+// Minimum buffer in pips — SL is never closer than this to the zone edge
+function minBufferPips(pair: string): number {
+  if (pair.includes("XAU")) return 30;   // gold moves a lot
+  if (pair.includes("XAG")) return 3;
+  if (pair.includes("BTC")) return 100;
+  if (pair.includes("ETH")) return 10;
+  if (pair.includes("JPY")) return 5;
+  return 5; // standard forex
+}
+
 function getSession(): { name: string; favorable: boolean } {
   const hour = new Date().getUTCHours();
 
@@ -148,8 +155,6 @@ function nearestRoundNumber(
 
 // ===== BOUNCE DETECTION =====
 
-// Check if a demand zone has been touched (within last N candles) and price
-// has since closed above the zone top with a bullish candle.
 function detectDemandBounce(
   candles: Candle[],
   zone: SupplyDemandZone,
@@ -160,10 +165,8 @@ function detectDemandBounce(
 
   let touchIndex = -1;
 
-  // Find the most recent candle that touched the zone
   for (let i = recent.length - 1; i >= 0; i--) {
     const c = recent[i];
-    // Touched = low enters zone OR body enters zone
     if (c.low <= zone.top && c.high >= zone.bottom) {
       touchIndex = i + offset;
       break;
@@ -174,12 +177,10 @@ function detectDemandBounce(
     return { bounced: false, touchIndex: -1, breakIndex: -1 };
   }
 
-  // After the touch, check if a bullish candle closed above zone.top
   let breakIndex = -1;
 
   for (let i = touchIndex + 1; i < candles.length; i++) {
     const c = candles[i];
-    // Bullish candle closing above zone top
     if (c.is_green && c.close > zone.top) {
       breakIndex = i;
       break;
@@ -193,7 +194,6 @@ function detectDemandBounce(
   };
 }
 
-// Same for supply zones (mirror)
 function detectSupplyBounce(
   candles: Candle[],
   zone: SupplyDemandZone,
@@ -220,7 +220,6 @@ function detectSupplyBounce(
 
   for (let i = touchIndex + 1; i < candles.length; i++) {
     const c = candles[i];
-    // Bearish candle closing below zone bottom
     if (!c.is_green && c.close < zone.bottom) {
       breakIndex = i;
       break;
@@ -420,10 +419,11 @@ export function buildSignal(
     (a, b) => a.distanceToPrice - b.distanceToPrice
   );
 
-  // Buffer for entry/SL (0.1× avg range)
+  // Buffer for entry/SL: max of (0.1× avg range, minimum pips for this pair)
   const avgRange =
     candles.slice(-20).reduce((s, c) => s + (c.high - c.low), 0) / 20;
-  const buffer = avgRange * 0.1;
+  const minBufferPrice = minBufferPips(pair) * pipSize;
+  const buffer = Math.max(avgRange * 0.1, minBufferPrice);
 
   // ===== SCAN ZONES FOR BOUNCE SETUPS (BUY STOP / SELL STOP) =====
   for (const zone of sortedZones) {
@@ -431,12 +431,11 @@ export function buildSignal(
       const bounce = detectDemandBounce(candles, zone);
 
       if (bounce.bounced) {
-        // Price must be above zone.top (already left) but within 0.5%
         const distanceAbove = currentPrice - zone.top;
         const pctAbove = (distanceAbove / zone.top) * 100;
 
         if (distanceAbove > 0 && pctAbove <= 0.5) {
-          // BUY STOP signal
+          // BUY STOP
           const entry = zone.top + buffer;
           const stopLoss = zone.bottom - buffer;
           const risk = Math.abs(entry - stopLoss);
@@ -469,7 +468,7 @@ export function buildSignal(
             sessionFavorable: sessionInfo.favorable,
           };
 
-          let score = 70; // base: zone touched + bounce confirmed
+          let score = 70;
           if (confluences.supertrendAligned) score += 5;
           if (confluences.rsiAligned) score += 5;
           if (confluences.smaAligned) score += 5;
@@ -486,6 +485,7 @@ export function buildSignal(
           notes.push(`Zone: demand ${zone.bottom.toFixed(5)} - ${zone.top.toFixed(5)}`);
           notes.push(`Demand bounce confirmed — price closed above zone top`);
           notes.push(`Entry (BUY STOP): ${entry.toFixed(5)}`);
+          notes.push(`SL: ${stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
           notes.push(`Price currently ${pctAbove.toFixed(2)}% above zone top`);
           if (confluences.supertrendAligned) notes.push("Supertrend aligned ✅");
           if (confluences.rsiAligned) notes.push("RSI aligned ✅");
@@ -537,7 +537,7 @@ export function buildSignal(
         const pctBelow = (distanceBelow / zone.bottom) * 100;
 
         if (distanceBelow > 0 && pctBelow <= 0.5) {
-          // SELL STOP signal
+          // SELL STOP
           const entry = zone.bottom - buffer;
           const stopLoss = zone.top + buffer;
           const risk = Math.abs(entry - stopLoss);
@@ -587,6 +587,7 @@ export function buildSignal(
           notes.push(`Zone: supply ${zone.bottom.toFixed(5)} - ${zone.top.toFixed(5)}`);
           notes.push(`Supply bounce confirmed — price closed below zone bottom`);
           notes.push(`Entry (SELL STOP): ${entry.toFixed(5)}`);
+          notes.push(`SL: ${stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
           notes.push(`Price currently ${pctBelow.toFixed(2)}% below zone bottom`);
           if (confluences.supertrendAligned) notes.push("Supertrend aligned ✅");
           if (confluences.rsiAligned) notes.push("RSI aligned ✅");
@@ -632,14 +633,11 @@ export function buildSignal(
     }
   }
 
-  // ===== NO BOUNCE SETUP — fall through to regular LIMIT / MARKET logic =====
+  // ===== NO BOUNCE — fall through to LIMIT / MARKET logic =====
 
-  // Find active zone (closest zone where price can still interact)
   const activeZone = sortedZones.find((z) => {
-    // Skip failed zones
     if (z.type === "demand" && currentPrice < z.bottom) return false;
     if (z.type === "supply" && currentPrice > z.top) return false;
-    // Must be within threshold
     const distPct = (z.distanceToPrice / currentPrice) * 100;
     return distPct <= 0.5;
   });
@@ -744,12 +742,18 @@ export function buildSignal(
     entry = currentPrice;
   }
 
-  // ===== SL =====
+  // ===== SL (guaranteed on the correct side of entry) =====
   let stopLoss: number;
   if (direction === "long") {
-    stopLoss = activeZone.bottom - buffer;
+    // For a long, SL must be BELOW entry.
+    // Use zone.bottom - buffer, but if entry is inside the zone we need
+    // to push SL below the ENTRY, not just below the zone.
+    const slFromZone = activeZone.bottom - buffer;
+    stopLoss = Math.min(slFromZone, entry - buffer);
   } else {
-    stopLoss = activeZone.top + buffer;
+    // For a short, SL must be ABOVE entry.
+    const slFromZone = activeZone.top + buffer;
+    stopLoss = Math.max(slFromZone, entry + buffer);
   }
 
   // ===== TPs =====
@@ -807,6 +811,7 @@ export function buildSignal(
 
   notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
   notes.push(`Entry (${orderType}): ${entry.toFixed(5)}`);
+  notes.push(`SL: ${stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
   if (entryCandle.type !== "none") {
     notes.push(`Entry signal: ${entryCandle.reason} (${entryCandle.probability}%)`);
   }
