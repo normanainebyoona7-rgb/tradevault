@@ -17,7 +17,7 @@ export default function PublicLayout({
       color: theme === "dark" ? "#f1f5f9" : "#111827",
       transition: "all 0.3s ease",
     }}>
-      <Header />
+      <Header onMenuClick={() => {}} />
       <main
         style={{
           paddingTop: "80px",

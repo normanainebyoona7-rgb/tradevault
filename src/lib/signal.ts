@@ -395,15 +395,15 @@ export function buildSignal(
   let signalLabel: SignalLabel;
 
   if (priceInsideZone && entryCandle.type !== "none") {
-    // At zone + confirmed → market order
+    // At zone + confirmed -> market order
     orderType = "market";
     signalLabel = direction === "long" ? "BUY" : "SELL";
   } else if (!priceInsideZone && entryCandle.type === "none") {
-    // Approaching zone, waiting for confirmation → limit order
+    // Approaching zone, waiting for confirmation -> limit order
     orderType = "limit";
     signalLabel = direction === "long" ? "BUY LIMIT" : "SELL LIMIT";
   } else if (priceInsideZone && entryCandle.type === "none") {
-    // At zone but no confirmation candle → neutral, wait
+    // At zone but no confirmation candle -> neutral, wait
     return {
       pair,
       timeframe,
@@ -435,11 +435,12 @@ export function buildSignal(
       confluences: baseConfluences,
       confidence: "NEUTRAL",
       score: 0,
-      neutralReason: "Price at zone but no entry signal — waiting for large range candle, engulfing, or pin bar",
+      neutralReason:
+        "Price at zone but no entry signal — waiting for large range candle, engulfing, or pin bar",
       notes,
     };
   } else {
-    // Approaching zone WITH confirmation (unlikely but possible) → market
+    // Approaching zone WITH confirmation (unlikely but possible) -> market
     orderType = "market";
     signalLabel = direction === "long" ? "BUY" : "SELL";
   }
@@ -513,12 +514,22 @@ export function buildSignal(
   score = Math.min(score, 100);
 
   const confidence: Confidence =
-    score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : score >= 35 ? "LOW" : "NEUTRAL";
+    score >= 75
+      ? "HIGH"
+      : score >= 55
+        ? "MEDIUM"
+        : score >= 35
+          ? "LOW"
+          : "NEUTRAL";
 
   // ===== BUILD NOTES =====
-  notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
+  notes.push(
+    `Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`
+  );
   if (entryCandle.type !== "none") {
-    notes.push(`Entry signal: ${entryCandle.reason} (${entryCandle.probability}%)`);
+    notes.push(
+      `Entry signal: ${entryCandle.reason} (${entryCandle.probability}%)`
+    );
   }
   if (confluences.supertrendAligned) notes.push("Supertrend aligned ✅");
   if (confluences.rsiAligned) notes.push("RSI aligned ✅");
@@ -527,7 +538,9 @@ export function buildSignal(
   if (confluences.orderBlockNear) notes.push("Order block nearby ✅");
   if (confluences.fvgNear) notes.push("FVG nearby ✅");
   if (confluences.roundNumber && round) {
-    notes.push(`Near round number ${round.level} (${round.distancePct.toFixed(2)}%)`);
+    notes.push(
+      `Near round number ${round.level} (${round.distancePct.toFixed(2)}%)`
+    );
   }
   notes.push(`Session: ${sessionInfo.name}`);
 
@@ -554,7 +567,10 @@ export function buildSignal(
       distanceToPrice: activeZone.distanceToPrice,
     },
     entryCandle: {
-      type: entryCandle.type,
+      type:
+        entryCandle.type === "large_range_candle"
+          ? "large_range"
+          : entryCandle.type,
       direction: entryCandle.direction,
       probability: entryCandle.probability,
       reason: entryCandle.reason,

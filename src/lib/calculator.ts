@@ -37,7 +37,8 @@ export function calculatePositionSize(
   const riskAmount = accountBalance * (riskPercent / 100);
 
   // Get pip value for this pair
-  const pipValue = getPipValue(pair, accountCurrency, contractSize);
+  // NOTE: getPipValue() takes (pair, contractSize) — accountCurrency is unused
+  const pipValue = getPipValue(pair, contractSize);
 
   // Calculate position size in lots
   // Position Size = Risk Amount / (Stop Loss in Pips × Pip Value)

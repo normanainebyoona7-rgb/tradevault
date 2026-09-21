@@ -20,8 +20,10 @@ export const dynamic = "force-dynamic";
 export default async function TradeDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
+
   const session = await getSession();
 
   if (!session) {
@@ -31,10 +33,10 @@ export default async function TradeDetailPage({
   await dbConnect();
   const userId = new mongoose.Types.ObjectId(session.id);
 
-  let trade;
+  let trade: any = null;
   try {
     trade = await Trade.findOne({
-      _id: new mongoose.Types.ObjectId(params.id),
+      _id: new mongoose.Types.ObjectId(id),
       userId,
     }).lean();
   } catch (error) {

@@ -1,4 +1,5 @@
-// src/app/api/trades/[id]/route.ts
+// src/app/api/trades/route.ts
+// Handles: GET (list all trades for user), POST (create new trade)
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
@@ -6,10 +7,7 @@ import { dbConnect } from "@/lib/db/mongodb";
 import Trade from "@/lib/models/trade";
 import mongoose from "mongoose";
 
-export async function GET(
-  request: Request,
-  { params }: { params: { id: string } },
-) {
+export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
@@ -19,18 +17,13 @@ export async function GET(
     await dbConnect();
     const userId = new mongoose.Types.ObjectId(session.id);
 
-    const trade = await Trade.findOne({
-      _id: new mongoose.Types.ObjectId(params.id),
-      userId,
-    }).lean();
+    const trades = await Trade.find({ userId })
+      .sort({ entryDate: -1 })
+      .lean();
 
-    if (!trade) {
-      return NextResponse.json({ error: "Trade not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ trade });
+    return NextResponse.json({ trades });
   } catch (error) {
-    console.error("GET trade error:", error);
+    console.error("GET trades error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
@@ -38,10 +31,7 @@ export async function GET(
   }
 }
 
-export async function PUT(
-  request: Request,
-  { params }: { params: { id: string } },
-) {
+export async function POST(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
@@ -52,51 +42,11 @@ export async function PUT(
     await dbConnect();
     const userId = new mongoose.Types.ObjectId(session.id);
 
-    const trade = await Trade.findOneAndUpdate(
-      { _id: new mongoose.Types.ObjectId(params.id), userId },
-      body,
-      { new: true },
-    );
+    const trade = await Trade.create({ ...body, userId });
 
-    if (!trade) {
-      return NextResponse.json({ error: "Trade not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ trade });
+    return NextResponse.json({ trade }, { status: 201 });
   } catch (error) {
-    console.error("PUT trade error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
-}
-
-export async function DELETE(
-  request: Request,
-  { params }: { params: { id: string } },
-) {
-  try {
-    const session = await getSession();
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    await dbConnect();
-    const userId = new mongoose.Types.ObjectId(session.id);
-
-    const trade = await Trade.findOneAndDelete({
-      _id: new mongoose.Types.ObjectId(params.id),
-      userId,
-    });
-
-    if (!trade) {
-      return NextResponse.json({ error: "Trade not found" }, { status: 404 });
-    }
-
-    return NextResponse.json({ message: "Trade deleted successfully" });
-  } catch (error) {
-    console.error("DELETE trade error:", error);
+    console.error("POST trade error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
