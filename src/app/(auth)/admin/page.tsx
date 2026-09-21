@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { TradingViewChart } from "@/components/charts/tradingview-chart";
+import { LiveChart } from "@/components/charts/LiveChart";
 
 const ADMIN_EMAIL = "normanainebyoona7@gmail.com";
 const ADMIN_PASSWORD = "norman2026";
@@ -21,7 +21,7 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<"users" | "signals" | "auto" | "analytics">("auto");
   const [showAddSignal, setShowAddSignal] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
-  const [autoPair, setAutoPair] = useState("XAU/USD");
+  const [autoPair, setAutoPair] = useState("EUR/USD");
   const [autoTimeframe, setAutoTimeframe] = useState("1H");
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoResult, setAutoResult] = useState<any>(null);
@@ -340,11 +340,16 @@ export default function AdminPage() {
             🎯 Supply/Demand Zone Strategy
           </h2>
           <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>
-            Waits for price to reach a zone. Confirms with Large Range Candle (70%), Engulfing (55%), or Pin Bar (45%). TPs at Fibonacci extensions.
+            Waits for price to reach a zone. Confirms with Large Range Candle (70%), Engulfing (55%), or Pin Bar (45%). SL beyond zone edge. TPs at 2.0 / 3.5 / 6.0 R:R.
           </p>
 
           <div style={{ marginBottom: "20px" }}>
-            <TradingViewChart onPairChange={setAutoPair} onTimeframeChange={setAutoTimeframe} />
+            <LiveChart
+              onPairChange={setAutoPair}
+              onTimeframeChange={setAutoTimeframe}
+              initialPair={autoPair}
+              initialTimeframe={autoTimeframe}
+            />
           </div>
 
           <div style={{ marginBottom: "20px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
@@ -355,7 +360,7 @@ export default function AdminPage() {
                 onChange={(e) => setAutoPair(e.target.value)}
                 style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "14px" }}
               >
-                {["XAU/USD", "EUR/USD", "GBP/USD", "USD/JPY", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY"].map((p) => (
+                {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY"].map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
@@ -464,11 +469,16 @@ export default function AdminPage() {
                   {autoResult.direction === "long" ? "📈 BUY (LONG)" : "📉 SELL (SHORT)"}
                 </p>
                 <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
-                  {autoResult.confidence} confidence
+                  {autoResult.confidence} confidence — score {autoResult.confidenceScore}/100
                 </p>
+                {autoResult.orderTypeDescription && (
+                  <p style={{ fontSize: "12px", color: "#7c3aed", marginTop: "4px", fontWeight: "600" }}>
+                    {autoResult.orderTypeDescription}
+                  </p>
+                )}
               </div>
 
-              {/* Zone info */}
+              {/* Zone */}
               {autoResult.zone && (
                 <div style={{ marginBottom: "12px", padding: "10px", background: "#ffffff", borderRadius: "8px", border: "1px solid #d8b4fe" }}>
                   <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "6px", fontSize: "12px" }}>
@@ -487,7 +497,7 @@ export default function AdminPage() {
                     🎯 ENTRY SIGNAL
                   </p>
                   <p style={{ fontSize: "13px", color: "#374151" }}>
-                    <strong>{autoResult.entrySignal.type.replace(/_/g, " ").toUpperCase()}</strong> — {autoResult.entrySignal.probability}% probability
+                    <strong>{autoResult.entrySignal.type?.replace(/_/g, " ").toUpperCase()}</strong> — {autoResult.entrySignal.probability}% probability
                   </p>
                   <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
                     {autoResult.entrySignal.reason}
@@ -499,17 +509,36 @@ export default function AdminPage() {
               <div style={{ marginBottom: "12px", padding: "12px", background: "#ffffff", borderRadius: "8px", border: "1px solid #d8b4fe" }}>
                 <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px", fontSize: "12px" }}>💰 LEVELS</p>
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                  <p>Entry: <strong style={{ color: "#1c69e3" }}>{autoResult.entryPrice}</strong></p>
-                  <p>SL: <strong style={{ color: "#dc2626" }}>{autoResult.stopLossPrice}</strong></p>
+                  <p>Entry: <strong style={{ color: "#1c69e3" }}>{autoResult.entryPrice?.toFixed(5)}</strong></p>
+                  <p>SL: <strong style={{ color: "#dc2626" }}>{autoResult.stopLossPrice?.toFixed(5)}</strong></p>
                   <p>Risk: <strong>{autoResult.riskPips} pips</strong></p>
-                  <p>TP1: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit1Price}</strong></p>
+                  <p>TP1: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit1Price?.toFixed(5)}</strong></p>
                   <p>R:R1: <strong>1:{autoResult.riskReward1}</strong></p>
-                  <p>TP2: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit2Price}</strong></p>
+                  <p>TP2: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit2Price?.toFixed(5)}</strong></p>
                   <p>R:R2: <strong>1:{autoResult.riskReward2}</strong></p>
-                  <p>TP3: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit3Price}</strong></p>
+                  <p>TP3: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit3Price?.toFixed(5)}</strong></p>
                   <p>R:R3: <strong>1:{autoResult.riskReward3}</strong></p>
                 </div>
               </div>
+
+              {/* Confluence breakdown */}
+              {autoResult.confluenceBreakdown && (
+                <div style={{ marginBottom: "12px", padding: "10px", background: "#f0f9ff", borderRadius: "8px", border: "1px solid #bae6fd" }}>
+                  <p style={{ fontWeight: "700", color: "#0369a1", marginBottom: "6px", fontSize: "12px" }}>
+                    🔍 CONFLUENCE BREAKDOWN
+                  </p>
+                  <div style={{ fontSize: "12px", color: "#374151", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+                    <p>{autoResult.confluenceBreakdown.supertrendAligned ? "✅" : "❌"} Supertrend</p>
+                    <p>{autoResult.confluenceBreakdown.rsiAligned ? "✅" : "❌"} RSI</p>
+                    <p>{autoResult.confluenceBreakdown.smaAligned ? "✅" : "❌"} SMA 9/21</p>
+                    <p>{autoResult.confluenceBreakdown.vwapAligned ? "✅" : "❌"} VWAP</p>
+                    <p>{autoResult.confluenceBreakdown.orderBlockNear ? "✅" : "❌"} Order Block</p>
+                    <p>{autoResult.confluenceBreakdown.fvgNear ? "✅" : "❌"} FVG</p>
+                    <p>{autoResult.confluenceBreakdown.roundNumber ? "✅" : "❌"} Round Number</p>
+                    <p>{autoResult.confluenceBreakdown.sessionFavorable ? "✅" : "❌"} Session ({autoResult.confluenceBreakdown.session})</p>
+                  </div>
+                </div>
+              )}
 
               {/* Fibonacci */}
               {autoResult.fibonacci && (
@@ -520,10 +549,10 @@ export default function AdminPage() {
                   <div style={{ fontSize: "12px", color: "#6b7280" }}>
                     <p>Swing: {autoResult.fibonacci.swingStart?.toFixed(5)} → {autoResult.fibonacci.swingEnd?.toFixed(5)} ({autoResult.fibonacci.swingRange?.toFixed(5)} range)</p>
                     <div style={{ marginTop: "6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
-                      <p>TP1 (1.272): <strong>{autoResult.fibonacci.ext_1_272?.toFixed(5)}</strong></p>
-                      <p>TP2 (1.618): <strong>{autoResult.fibonacci.ext_1_618?.toFixed(5)}</strong></p>
-                      <p>TP3 (2.0): <strong>{autoResult.fibonacci.ext_2_0?.toFixed(5)}</strong></p>
-                      <p>SL buffer (0.236): <strong>{autoResult.fibonacci.ret_0_236?.toFixed(5)}</strong></p>
+                      <p>Ext 1.272: <strong>{autoResult.fibonacci.ext_1_272?.toFixed(5)}</strong></p>
+                      <p>Ext 1.618: <strong>{autoResult.fibonacci.ext_1_618?.toFixed(5)}</strong></p>
+                      <p>Ext 2.0: <strong>{autoResult.fibonacci.ext_2_0?.toFixed(5)}</strong></p>
+                      <p>Ret 0.236: <strong>{autoResult.fibonacci.ret_0_236?.toFixed(5)}</strong></p>
                     </div>
                   </div>
                 </div>
@@ -593,7 +622,7 @@ export default function AdminPage() {
               {/* Confluences */}
               {autoResult.confluences && autoResult.confluences.length > 0 && (
                 <div style={{ padding: "12px", background: "#f5f3ff", borderRadius: "8px", border: "1px solid #ddd6fe" }}>
-                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>🔗 CONFLUENCES:</p>
+                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>🔗 NOTES:</p>
                   <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
                     {autoResult.confluences.map((c: string, i: number) => (
                       <li key={i} style={{ padding: "3px 0" }}>{c}</li>
@@ -604,7 +633,7 @@ export default function AdminPage() {
 
               <div style={{ marginTop: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
                 <p style={{ fontSize: "12px", color: "#16a34a" }}>
-                  ✅ Signal saved + sent to Telegram.
+                  ✅ Signal saved. Telegram posting handled by /api/signals.
                 </p>
               </div>
             </div>
@@ -726,20 +755,20 @@ export default function AdminPage() {
               <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "20px" }}>
                 <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
                   <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Users</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats.totalUsers}</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats?.totalUsers ?? 0}</p>
                 </div>
                 <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
                   <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Trades</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats.totalTrades}</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats?.totalTrades ?? 0}</p>
                 </div>
                 <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
                   <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Signals</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats.totalSignals}</p>
+                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats?.totalSignals ?? 0}</p>
                 </div>
                 <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
                   <p style={{ fontSize: "12px", color: "#6b7280" }}>Platform P&L</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800", color: analyticsData.platformStats.totalPnL >= 0 ? "#16a34a" : "#dc2626" }}>
-                    {analyticsData.platformStats.totalPnL >= 0 ? "+" : ""}${analyticsData.platformStats.totalPnL}
+                  <p style={{ fontSize: "24px", fontWeight: "800", color: (analyticsData.platformStats?.totalPnL ?? 0) >= 0 ? "#16a34a" : "#dc2626" }}>
+                    {(analyticsData.platformStats?.totalPnL ?? 0) >= 0 ? "+" : ""}${analyticsData.platformStats?.totalPnL ?? 0}
                   </p>
                 </div>
               </div>
@@ -761,7 +790,7 @@ export default function AdminPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {analyticsData.userPerformance.map((user: any) => (
+                      {(analyticsData.userPerformance ?? []).map((user: any) => (
                         <tr key={user.userId} style={{ borderBottom: "1px solid #e5e7eb" }}>
                           <td style={{ padding: "10px", fontSize: "13px" }}>
                             <p style={{ fontWeight: "600" }}>{user.name}</p>
@@ -769,7 +798,7 @@ export default function AdminPage() {
                           </td>
                           <td style={{ padding: "10px" }}>
                             <span style={{ padding: "4px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", background: user.tier === "vvip" ? "#f3e8ff" : user.tier === "vip" ? "#dbeafe" : "#e5e7eb", color: user.tier === "vvip" ? "#7c3aed" : user.tier === "vip" ? "#1c69e3" : "#111827" }}>
-                              {user.tier.toUpperCase()}
+                              {user.tier?.toUpperCase() ?? "FREE"}
                             </span>
                           </td>
                           <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>{user.totalTrades}</td>
@@ -777,7 +806,7 @@ export default function AdminPage() {
                           <td style={{ padding: "10px", fontSize: "13px", fontWeight: "700", color: user.totalPnL >= 0 ? "#16a34a" : "#dc2626" }}>
                             {user.totalPnL >= 0 ? "+" : ""}${user.totalPnL}
                           </td>
-                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>{user.profitFactor.toFixed(2)}</td>
+                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>{user.profitFactor?.toFixed(2) ?? "0.00"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -790,19 +819,19 @@ export default function AdminPage() {
                 <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "12px" }}>
                   <div style={{ padding: "12px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
                     <p style={{ fontSize: "12px", color: "#6b7280" }}>Total</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800" }}>{analyticsData.signalMetrics.totalSignals}</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800" }}>{analyticsData.signalMetrics?.totalSignals ?? 0}</p>
                   </div>
                   <div style={{ padding: "12px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
                     <p style={{ fontSize: "12px", color: "#6b7280" }}>Active</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#16a34a" }}>{analyticsData.signalMetrics.activeSignals}</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#16a34a" }}>{analyticsData.signalMetrics?.activeSignals ?? 0}</p>
                   </div>
                   <div style={{ padding: "12px", background: "#f3e8ff", borderRadius: "8px", textAlign: "center" }}>
                     <p style={{ fontSize: "12px", color: "#6b7280" }}>Auto</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#7c3aed" }}>{analyticsData.signalMetrics.autoGenerated}</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#7c3aed" }}>{analyticsData.signalMetrics?.autoGenerated ?? 0}</p>
                   </div>
                   <div style={{ padding: "12px", background: "#dbeafe", borderRadius: "8px", textAlign: "center" }}>
                     <p style={{ fontSize: "12px", color: "#6b7280" }}>Manual</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#1c69e3" }}>{analyticsData.signalMetrics.manualSignals}</p>
+                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#1c69e3" }}>{analyticsData.signalMetrics?.manualSignals ?? 0}</p>
                   </div>
                 </div>
               </div>

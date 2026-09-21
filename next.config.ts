@@ -1,11 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["192.168.1.4", "192.168.100.203", "192.168.1.7"],
-  reactStrictMode: false,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  serverExternalPackages: ["dukascopy-node"],
+  // ... your other existing config options stay here
 };
 
 export default nextConfig;

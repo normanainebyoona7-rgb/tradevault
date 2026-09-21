@@ -94,7 +94,7 @@ function avgCandleRange(candles: SMCCandle[]): number {
   return total / sample.length;
 }
 
-function sma(candles: SMCCandle[], period: number): number {
+export function sma(candles: SMCCandle[], period: number): number {
   if (candles.length < period) {
     const closes = candles.map(c => c.close);
     return closes.reduce((s, v) => s + v, 0) / closes.length;
@@ -129,7 +129,7 @@ function detectSwings(candles: SMCCandle[], lookback: number = 3) {
 
 // ===== LIQUIDITY =====
 
-function detectLiquidity(candles: SMCCandle[]): SMCLiquidity[] {
+export function detectLiquidity(candles: SMCCandle[]): SMCLiquidity[] {
   if (candles.length < 10) return [];
 
   const swings = detectSwings(candles, 3);
@@ -175,7 +175,7 @@ function detectLiquidity(candles: SMCCandle[]): SMCLiquidity[] {
 
 // ===== ORDER BLOCKS =====
 
-function detectOrderBlocks(candles: SMCCandle[]): SMCOrderBlock[] {
+export function detectOrderBlocks(candles: SMCCandle[]): SMCOrderBlock[] {
   if (candles.length < 5) return [];
 
   const obs: SMCOrderBlock[] = [];
@@ -216,7 +216,7 @@ function detectOrderBlocks(candles: SMCCandle[]): SMCOrderBlock[] {
 
 // ===== FVG =====
 
-function detectFVGs(candles: SMCCandle[]): SMCFVG[] {
+export function detectFVGs(candles: SMCCandle[]): SMCFVG[] {
   if (candles.length < 3) return [];
 
   const fvgs: SMCFVG[] = [];
@@ -246,7 +246,7 @@ function detectFVGs(candles: SMCCandle[]): SMCFVG[] {
 
 // ===== SUPPLY / DEMAND =====
 
-function detectSupplyDemand(candles: SMCCandle[]): SMCSupplyDemand[] {
+export function detectSupplyDemand(candles: SMCCandle[]): SMCSupplyDemand[] {
   if (candles.length < 5) return [];
 
   const zones: SMCSupplyDemand[] = [];
