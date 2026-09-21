@@ -67,13 +67,24 @@ def get_fcs_price(pair: str) -> dict:
 
 
 def get_fcs_candles(pair: str, timeframe: str, limit: int = 200) -> dict:
+    """Fetch OHLC candles. Routes crypto → /crypto/history, forex → /forex/history."""
     symbol = FCS_SYMBOLS.get(pair)
     if not symbol:
         raise Exception(f"Unsupported pair: {pair}")
 
     period = FCS_TIMEFRAME_MAP.get(timeframe, "1h")
-    endpoint = f"{FCS_BASE_URL}/forex/history"
-    params = {"symbol": symbol, "period": period, "access_key": FCS_API_KEY}
+
+    is_crypto = pair.startswith(("BTC", "ETH"))
+    endpoint = f"{FCS_BASE_URL}/crypto/history" if is_crypto else f"{FCS_BASE_URL}/forex/history"
+
+    # For crypto, strip BINANCE: prefix
+    history_symbol = symbol.replace("BINANCE:", "") if is_crypto else symbol
+
+    params = {
+        "symbol": history_symbol,
+        "period": period,
+        "access_key": FCS_API_KEY,
+    }
 
     response = requests.get(endpoint, params=params, timeout=20)
     response.raise_for_status()
