@@ -6,13 +6,18 @@
 // Order types:
 //   - BUY / SELL              → price at zone + confirmation (market)
 //   - BUY LIMIT / SELL LIMIT  → price approaching zone (limit)
-//   - BUY STOP / SELL STOP    → price bounced off zone and left it (stop)
+//   - BUY STOP / SELL STOP    → price bounced off zone AND is currently outside
 //   - NEUTRAL                 → no setup, price between zones, or zone failed
+//
+// Critical bounce rule:
+//   BUY STOP only fires if price is CURRENTLY above the demand zone.
+//   SELL STOP only fires if price is CURRENTLY below the supply zone.
+//   If price re-entered the zone after bouncing, the bounce is invalidated.
 //
 // SL placement rules (per cheat sheet Part 5):
 //   - Long:  SL = zone.bottom - buffer  (below zone)
 //   - Short: SL = zone.top    + buffer  (above zone)
-//   - buffer = max(0.1×avgRange, 5 pips) so SL is never too tight
+//   - buffer = max(0.1×avgRange, minimum pips for pair)
 //   - SL is guaranteed on the correct side of entry
 
 import type { Candle } from "@/lib/data/candles";
@@ -107,14 +112,13 @@ function calcPipSize(pair: string): number {
   return 0.0001;
 }
 
-// Minimum buffer in pips — SL is never closer than this to the zone edge
 function minBufferPips(pair: string): number {
-  if (pair.includes("XAU")) return 30;   // gold moves a lot
+  if (pair.includes("XAU")) return 30;
   if (pair.includes("XAG")) return 3;
   if (pair.includes("BTC")) return 100;
   if (pair.includes("ETH")) return 10;
   if (pair.includes("JPY")) return 5;
-  return 5; // standard forex
+  return 5;
 }
 
 function getSession(): { name: string; favorable: boolean } {
@@ -257,11 +261,8 @@ function checkRSIAligned(
 
   const latest = rsi[rsi.length - 1].value;
 
-  if (direction === "long") {
-    return latest < 55;
-  } else {
-    return latest > 45;
-  }
+  if (direction === "long") return latest < 55;
+  else return latest > 45;
 }
 
 function checkSMAAligned(
@@ -419,22 +420,32 @@ export function buildSignal(
     (a, b) => a.distanceToPrice - b.distanceToPrice
   );
 
-  // Buffer for entry/SL: max of (0.1× avg range, minimum pips for this pair)
+  // Buffer for entry/SL
   const avgRange =
     candles.slice(-20).reduce((s, c) => s + (c.high - c.low), 0) / 20;
   const minBufferPrice = minBufferPips(pair) * pipSize;
   const buffer = Math.max(avgRange * 0.1, minBufferPrice);
 
-  // ===== SCAN ZONES FOR BOUNCE SETUPS (BUY STOP / SELL STOP) =====
+  // ===== SCAN ZONES FOR BOUNCE SETUPS =====
+  // RULE: BUY STOP fires only if price is CURRENTLY above the demand zone.
+  //       SELL STOP fires only if price is CURRENTLY below the supply zone.
+  //       If price re-entered the zone, the bounce is invalidated — skip.
+
   for (const zone of sortedZones) {
     if (zone.type === "demand") {
       const bounce = detectDemandBounce(candles, zone);
 
       if (bounce.bounced) {
+        // Price must CURRENTLY be above the zone top
         const distanceAbove = currentPrice - zone.top;
         const pctAbove = (distanceAbove / zone.top) * 100;
 
-        if (distanceAbove > 0 && pctAbove <= 0.5) {
+        // stillAbove: price is outside the zone (above)
+        // notTooFar: price is within 0.5% of the zone edge
+        const stillAbove = currentPrice > zone.top;
+        const notTooFar = pctAbove <= 0.5;
+
+        if (stillAbove && notTooFar) {
           // BUY STOP
           const entry = zone.top + buffer;
           const stopLoss = zone.bottom - buffer;
@@ -483,7 +494,7 @@ export function buildSignal(
             score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : score >= 35 ? "LOW" : "NEUTRAL";
 
           notes.push(`Zone: demand ${zone.bottom.toFixed(5)} - ${zone.top.toFixed(5)}`);
-          notes.push(`Demand bounce confirmed — price closed above zone top`);
+          notes.push(`Demand bounce confirmed — price currently above zone top`);
           notes.push(`Entry (BUY STOP): ${entry.toFixed(5)}`);
           notes.push(`SL: ${stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
           notes.push(`Price currently ${pctAbove.toFixed(2)}% above zone top`);
@@ -533,10 +544,14 @@ export function buildSignal(
       const bounce = detectSupplyBounce(candles, zone);
 
       if (bounce.bounced) {
+        // Price must CURRENTLY be below the zone bottom
         const distanceBelow = zone.bottom - currentPrice;
         const pctBelow = (distanceBelow / zone.bottom) * 100;
 
-        if (distanceBelow > 0 && pctBelow <= 0.5) {
+        const stillBelow = currentPrice < zone.bottom;
+        const notTooFar = pctBelow <= 0.5;
+
+        if (stillBelow && notTooFar) {
           // SELL STOP
           const entry = zone.bottom - buffer;
           const stopLoss = zone.top + buffer;
@@ -585,7 +600,7 @@ export function buildSignal(
             score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : score >= 35 ? "LOW" : "NEUTRAL";
 
           notes.push(`Zone: supply ${zone.bottom.toFixed(5)} - ${zone.top.toFixed(5)}`);
-          notes.push(`Supply bounce confirmed — price closed below zone bottom`);
+          notes.push(`Supply bounce confirmed — price currently below zone bottom`);
           notes.push(`Entry (SELL STOP): ${entry.toFixed(5)}`);
           notes.push(`SL: ${stopLoss.toFixed(5)} (risk ${riskPips} pips)`);
           notes.push(`Price currently ${pctBelow.toFixed(2)}% below zone bottom`);
@@ -742,16 +757,12 @@ export function buildSignal(
     entry = currentPrice;
   }
 
-  // ===== SL (guaranteed on the correct side of entry) =====
+  // ===== SL (guaranteed on correct side of entry) =====
   let stopLoss: number;
   if (direction === "long") {
-    // For a long, SL must be BELOW entry.
-    // Use zone.bottom - buffer, but if entry is inside the zone we need
-    // to push SL below the ENTRY, not just below the zone.
     const slFromZone = activeZone.bottom - buffer;
     stopLoss = Math.min(slFromZone, entry - buffer);
   } else {
-    // For a short, SL must be ABOVE entry.
     const slFromZone = activeZone.top + buffer;
     stopLoss = Math.max(slFromZone, entry + buffer);
   }
