@@ -1,15 +1,14 @@
 // src/lib/signal.ts
-// Signal orchestrator with:
-//   - Cross-source price verification
-//   - Timeframe-scaled SL
-//   - Fibonacci extension TPs (1.272 / 1.618 / 2.0)
+// Signal orchestrator — ATR-based SL, Fibonacci TPs, no STOP orders.
 //
-// TPs are calculated from the zone's swing range:
-//   TP1 = swing end ± 1.272 × swing range
-//   TP2 = swing end ± 1.618 × swing range
-//   TP3 = swing end ± 2.0   × swing range
-// If a TP lands on the wrong side of entry (rare edge case), it falls back
-// to R:R multiples so the order stays valid.
+// SL: entry ± 2.0 × ATR(14)
+// TPs: Fibonacci extensions of the zone's swing (1.272 / 1.618 / 2.0)
+// Orders: BUY, SELL, BUY LIMIT, SELL LIMIT, NEUTRAL only.
+//         No BUY STOP / SELL STOP — removed per cheat-sheet doctrine.
+//
+// Zone filtering:
+//   - Price must be INSIDE the zone, or within 0.5% of it
+//   - Zones further than 0.5% away → NEUTRAL
 
 import type { Candle } from "@/lib/data/candles";
 import type { Overlays } from "@/lib/overlays";
@@ -22,10 +21,9 @@ import {
 } from "@/lib/zone-strategy";
 
 export type SignalDirection = "long" | "short" | "neutral";
-export type OrderType = "market" | "limit" | "stop" | "none";
+export type OrderType = "market" | "limit" | "none";
 export type SignalLabel =
-  | "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT"
-  | "BUY STOP" | "SELL STOP" | "NEUTRAL";
+  | "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT" | "NEUTRAL";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "NEUTRAL";
 
 export interface SignalZone {
@@ -86,6 +84,8 @@ export interface TradingSignal {
   };
 }
 
+// ===== HELPERS =====
+
 function calcPipSize(pair: string): number {
   if (pair.includes("XAU")) return 0.10;
   if (pair.includes("XAG")) return 0.01;
@@ -96,69 +96,25 @@ function calcPipSize(pair: string): number {
   return 0.0001;
 }
 
-function minBufferPips(pair: string, timeframe: string): number {
-  const isGold = pair.includes("XAU");
-  const isSilver = pair.includes("XAG");
-  const isBTC = pair.includes("BTC");
-  const isETH = pair.includes("ETH");
-  const isJPY = pair.includes("JPY");
+// ATR(14) — average true range over the last 14 candles
+function calcATR(candles: Candle[], period: number = 14): number {
+  if (candles.length < period + 1) {
+    // Fallback: average candle range over what we have
+    const ranges = candles.map((c) => c.high - c.low);
+    return ranges.reduce((s, r) => s + r, 0) / Math.max(ranges.length, 1);
+  }
 
-  if (isGold) {
-    switch (timeframe) {
-      case "1m": return 20;
-      case "5m": return 30;
-      case "15m": return 40;
-      case "30m": return 50;
-      case "1H": return 80;
-      case "4H": return 150;
-      case "1D": return 300;
-      case "1W": return 500;
-      default: return 50;
-    }
+  const trs: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const h = candles[i].high;
+    const l = candles[i].low;
+    const pc = candles[i - 1].close;
+    trs.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
   }
-  if (isSilver) {
-    switch (timeframe) {
-      case "1m": return 5;
-      case "15m": return 10;
-      case "1H": return 20;
-      case "4H": return 40;
-      default: return 15;
-    }
-  }
-  if (isBTC) {
-    switch (timeframe) {
-      case "1m": return 100;
-      case "15m": return 300;
-      case "1H": return 500;
-      case "4H": return 1000;
-      default: return 300;
-    }
-  }
-  if (isETH) {
-    switch (timeframe) {
-      case "1H": return 50;
-      default: return 20;
-    }
-  }
-  if (isJPY) {
-    switch (timeframe) {
-      case "1m": return 5;
-      case "15m": return 8;
-      case "1H": return 15;
-      case "4H": return 30;
-      default: return 10;
-    }
-  }
-  switch (timeframe) {
-    case "1m": return 5;
-    case "5m": return 8;
-    case "15m": return 12;
-    case "30m": return 15;
-    case "1H": return 20;
-    case "4H": return 40;
-    case "1D": return 80;
-    default: return 15;
-  }
+
+  // Wilder's smoothing (standard ATR)
+  const slice = trs.slice(-period);
+  return slice.reduce((s, v) => s + v, 0) / period;
 }
 
 function getSession(): { name: string; favorable: boolean } {
@@ -186,6 +142,8 @@ function nearestRoundNumber(
   const distance = Math.abs(price - nearest);
   return { level: nearest, distancePct: (distance / price) * 100 };
 }
+
+// ===== CONFLUENCE CHECKS =====
 
 function checkSupertrendAligned(overlays: Overlays, direction: "long" | "short"): boolean {
   const st = overlays.supertrend;
@@ -241,90 +199,27 @@ function checkFVGNear(overlays: Overlays, currentPrice: number, direction: "long
   return false;
 }
 
-function selectOrderType(
-  direction: "long" | "short",
-  currentPrice: number,
-  zone: SupplyDemandZone,
-  entryCandleType: string
-): { orderType: OrderType; signalLabel: SignalLabel; entryLevel: number } {
-  const priceInsideZone = currentPrice >= zone.bottom && currentPrice <= zone.top;
-  const priceAboveZone = currentPrice > zone.top;
-  const priceBelowZone = currentPrice < zone.bottom;
-
-  let orderType: OrderType;
-  let signalLabel: SignalLabel;
-  let entryLevel: number;
-
-  if (direction === "long") {
-    if (priceInsideZone) {
-      if (entryCandleType !== "none") {
-        orderType = "market"; signalLabel = "BUY"; entryLevel = currentPrice;
-      } else {
-        orderType = "limit"; signalLabel = "BUY LIMIT"; entryLevel = zone.top;
-      }
-    } else if (priceAboveZone) {
-      orderType = "limit"; signalLabel = "BUY LIMIT"; entryLevel = zone.top;
-    } else {
-      orderType = "stop"; signalLabel = "BUY STOP"; entryLevel = zone.top;
-    }
-  } else {
-    if (priceInsideZone) {
-      if (entryCandleType !== "none") {
-        orderType = "market"; signalLabel = "SELL"; entryLevel = currentPrice;
-      } else {
-        orderType = "limit"; signalLabel = "SELL LIMIT"; entryLevel = zone.bottom;
-      }
-    } else if (priceBelowZone) {
-      orderType = "limit"; signalLabel = "SELL LIMIT"; entryLevel = zone.bottom;
-    } else {
-      orderType = "stop"; signalLabel = "SELL STOP"; entryLevel = zone.bottom;
-    }
-  }
-
-  return { orderType, signalLabel, entryLevel };
-}
-
-function validateOrderAgainstPrice(
-  orderType: OrderType,
-  signalLabel: SignalLabel,
-  direction: "long" | "short",
-  entryLevel: number,
-  currentPrice: number
-): { orderType: OrderType; signalLabel: SignalLabel } {
-  if (orderType === "market" || orderType === "none") return { orderType, signalLabel };
-  if (direction === "long") {
-    if (orderType === "limit" && entryLevel >= currentPrice) return { orderType: "stop", signalLabel: "BUY STOP" };
-    if (orderType === "stop" && entryLevel <= currentPrice) return { orderType: "limit", signalLabel: "BUY LIMIT" };
-  } else {
-    if (orderType === "limit" && entryLevel <= currentPrice) return { orderType: "stop", signalLabel: "SELL STOP" };
-    if (orderType === "stop" && entryLevel >= currentPrice) return { orderType: "limit", signalLabel: "SELL LIMIT" };
-  }
-  return { orderType, signalLabel };
-}
-
 // ===== FIBONACCI TPs =====
-// Compute TPs from the zone's swing range.
-// For a long: swingStart = zone.bottom, swingEnd = zone.top
-// For a short: swingStart = zone.top, swingEnd = zone.bottom
-// TPs = swingEnd + direction × swingRange × extension
+// TPs from the zone's swing range, extending outward.
+// For a long: swing from zone.bottom → zone.top, TPs extend ABOVE zone.top.
+// For a short: swing from zone.top → zone.bottom, TPs extend BELOW zone.bottom.
 function computeFibonacciTPs(
   direction: "long" | "short",
   entry: number,
   stopLoss: number,
-  zone: SupplyDemandZone,
-  pipSize: number
+  zone: SupplyDemandZone
 ): { tp1: number; tp2: number; tp3: number } {
   const swingStart = direction === "long" ? zone.bottom : zone.top;
   const swingEnd = direction === "long" ? zone.top : zone.bottom;
   const swingRange = Math.abs(swingEnd - swingStart);
   const dirSign = direction === "long" ? 1 : -1;
 
-  // Fibonacci extension levels
-  let tp1 = swingEnd + dirSign * swingRange * 0.272; // 1.272 extension
-  let tp2 = swingEnd + dirSign * swingRange * 0.618; // 1.618 extension
-  let tp3 = swingEnd + dirSign * swingRange * 1.0;   // 2.0 extension
+  let tp1 = swingEnd + dirSign * swingRange * 0.272; // 1.272 ext
+  let tp2 = swingEnd + dirSign * swingRange * 0.618; // 1.618 ext
+  let tp3 = swingEnd + dirSign * swingRange * 1.0;   // 2.0 ext
 
-  // Ensure TPs are on the correct side of entry — fall back to R:R if not
+  // Safety: if TPs end up on the wrong side of entry, fall back to
+  // ATR-like R:R from the actual risk so the order stays placeable.
   const risk = Math.abs(entry - stopLoss);
 
   if (direction === "long") {
@@ -339,6 +234,8 @@ function computeFibonacciTPs(
 
   return { tp1, tp2, tp3 };
 }
+
+// ===== MAIN =====
 
 export function buildSignal(
   pair: string,
@@ -405,16 +302,28 @@ export function buildSignal(
     };
   }
 
+  // ===== ATR =====
+  const atr = calcATR(candles, 14);
+  const slDistance = atr * 2.0; // SL = entry ± 2.0 × ATR
+
+  // ===== ZONE SELECTION — price must be INSIDE or within 0.5% of the zone =====
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
-  const minPips = minBufferPips(pair, timeframe);
-  const buffer = minPips * pipSize;
 
   const activeZone = sortedZones.find((z) => {
+    // Inside the zone
     if (currentPrice >= z.bottom && currentPrice <= z.top) return true;
-    if (z.type === "demand" && currentPrice > z.top) return ((currentPrice - z.top) / z.top) * 100 <= 0.5;
-    if (z.type === "supply" && currentPrice < z.bottom) return ((z.bottom - currentPrice) / z.bottom) * 100 <= 0.5;
-    if (z.type === "demand" && currentPrice < z.bottom) return ((z.bottom - currentPrice) / z.bottom) * 100 <= 0.5;
-    if (z.type === "supply" && currentPrice > z.top) return ((currentPrice - z.top) / z.top) * 100 <= 0.5;
+
+    // Demand zone — price above it, approaching downward
+    if (z.type === "demand" && currentPrice > z.top) {
+      return ((currentPrice - z.top) / z.top) * 100 <= 0.5;
+    }
+
+    // Supply zone — price below it, approaching upward
+    if (z.type === "supply" && currentPrice < z.bottom) {
+      return ((z.bottom - currentPrice) / z.bottom) * 100 <= 0.5;
+    }
+
+    // Otherwise: price is far from the zone → NOT active (no STOP orders)
     return false;
   });
 
@@ -428,7 +337,7 @@ export function buildSignal(
       zone: { type: nearest.type, top: nearest.top, bottom: nearest.bottom, strength: 0, distanceToPrice: nearest.distanceToPrice },
       entryCandle: null,
       confluences: baseConfluences, confidence: "NEUTRAL", score: 0,
-      neutralReason: `Price not at zone. Nearest ${nearest.type} at ${nearest.bottom.toFixed(5)} - ${nearest.top.toFixed(5)}`,
+      neutralReason: `Price is ${(nearest.distanceToPrice).toFixed(5)} away from nearest ${nearest.type} zone — waiting for price to reach it`,
       notes, priceVerification,
     };
   }
@@ -437,27 +346,37 @@ export function buildSignal(
   const signalDirection = direction === "long" ? "bullish" : "bearish";
   const entryCandle = detectEntrySignal(zoneCandles, signalDirection);
 
-  const initial = selectOrderType(direction, currentPrice, activeZone, entryCandle.type);
-  const validated = validateOrderAgainstPrice(initial.orderType, initial.signalLabel, direction, initial.entryLevel, currentPrice);
+  const priceInsideZone = currentPrice >= activeZone.bottom && currentPrice <= activeZone.top;
 
-  const orderType = validated.orderType;
-  const signalLabel = validated.signalLabel;
-  const entryLevel = initial.entryLevel;
+  // ===== ORDER TYPE — NO STOP ORDERS =====
+  let orderType: OrderType;
+  let signalLabel: SignalLabel;
+  let entryLevel: number;
 
-  // SL — timeframe-scaled
-  const rawSL = direction === "long" ? entryLevel - buffer : entryLevel + buffer;
+  if (priceInsideZone && entryCandle.type !== "none") {
+    // Inside zone + confirmation → market
+    orderType = "market";
+    signalLabel = direction === "long" ? "BUY" : "SELL";
+    entryLevel = currentPrice;
+  } else {
+    // Either inside zone without confirmation, OR approaching zone
+    // → pending limit order at zone edge
+    orderType = "limit";
+    signalLabel = direction === "long" ? "BUY LIMIT" : "SELL LIMIT";
+    entryLevel = direction === "long" ? activeZone.top : activeZone.bottom;
+  }
 
-  // TPs — Fibonacci
-  const fib = computeFibonacciTPs(direction, entryLevel, rawSL, activeZone, pipSize);
-  const rawTP1 = fib.tp1;
-  const rawTP2 = fib.tp2;
-  const rawTP3 = fib.tp3;
+  // ===== SL — ATR-based =====
+  const rawSL = direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
+
+  // ===== TPs — Fibonacci =====
+  const fib = computeFibonacciTPs(direction, entryLevel, rawSL, activeZone);
 
   const riskPips = Math.round(Math.abs(entryLevel - rawSL) / pipSize);
   const rewardPips: [number, number, number] = [
-    Math.round(Math.abs(rawTP1 - entryLevel) / pipSize),
-    Math.round(Math.abs(rawTP2 - entryLevel) / pipSize),
-    Math.round(Math.abs(rawTP3 - entryLevel) / pipSize),
+    Math.round(Math.abs(fib.tp1 - entryLevel) / pipSize),
+    Math.round(Math.abs(fib.tp2 - entryLevel) / pipSize),
+    Math.round(Math.abs(fib.tp3 - entryLevel) / pipSize),
   ];
   const riskReward: [string, string, string] = [
     riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
@@ -492,10 +411,10 @@ export function buildSignal(
 
   notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
   notes.push(`Current price: ${currentPrice.toFixed(5)}`);
+  notes.push(`ATR(14): ${atr.toFixed(5)} | SL distance: ${slDistance.toFixed(5)} (2.0 × ATR)`);
   notes.push(`Entry (${signalLabel}): ${entryLevel.toFixed(5)}`);
-  notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips (${timeframe} scaled)`);
-  notes.push(`TPs: Fibonacci extensions 1.272 / 1.618 / 2.0`);
-  notes.push(`R:R = 1:${riskReward[0]} / 1:${riskReward[1]} / 1:${riskReward[2]}`);
+  notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips`);
+  notes.push(`TPs: Fibonacci 1.272 / 1.618 / 2.0 of swing`);
   notes.push(`Session: ${sessionInfo.name}`);
 
   return {
@@ -503,9 +422,9 @@ export function buildSignal(
     direction, orderType, signalLabel,
     entry: entryLevel,
     stopLoss: rawSL,
-    takeProfit1: rawTP1,
-    takeProfit2: rawTP2,
-    takeProfit3: rawTP3,
+    takeProfit1: fib.tp1,
+    takeProfit2: fib.tp2,
+    takeProfit3: fib.tp3,
     riskPips, rewardPips, riskReward,
     zone: { type: activeZone.type, top: activeZone.top, bottom: activeZone.bottom, strength: 0, distanceToPrice: activeZone.distanceToPrice },
     entryCandle: {

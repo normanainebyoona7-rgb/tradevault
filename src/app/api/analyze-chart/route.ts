@@ -1,6 +1,7 @@
 // src/app/api/analyze-chart/route.ts
-// Analyzes chart with cross-source price verification, Fibonacci TPs,
-// and timeframe-scaled SL. Response shape preserved for the admin UI.
+// Analyzes chart with cross-source price verification, ATR-based SL,
+// Fibonacci TPs. STOP orders removed — only BUY, SELL, BUY LIMIT,
+// SELL LIMIT, NEUTRAL are possible.
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
@@ -44,7 +45,9 @@ export async function POST(request: Request) {
     // ===== NEUTRAL PATH =====
     if (signal.direction === "neutral") {
       return NextResponse.json({
-        status: signal.neutralReason?.includes("Price feed") ? "no_setup" : "watching",
+        status: signal.neutralReason?.includes("Price feed")
+          ? "no_setup"
+          : "watching",
         message: signal.neutralReason || "No setup",
         analysis: signal.neutralReason || "No setup",
         signal: {
@@ -112,7 +115,7 @@ export async function POST(request: Request) {
       lots,
     };
 
-    // Fibonacci levels for the admin panel display
+    // Fibonacci levels for display
     const swingStart =
       signal.zone?.type === "demand"
         ? signal.zone.bottom
@@ -171,11 +174,6 @@ export async function POST(request: Request) {
       uiOrderDesc = isLong
         ? "Buy Limit — place pending below price"
         : "Sell Limit — place pending above price";
-    } else if (signal.orderType === "stop") {
-      uiOrderType = isLong ? "BUY_STOP" : "SELL_STOP";
-      uiOrderDesc = isLong
-        ? "Buy Stop — place pending above price"
-        : "Sell Stop — place pending below price";
     } else {
       uiOrderType = "NONE";
       uiOrderDesc = "No order";
@@ -187,7 +185,7 @@ export async function POST(request: Request) {
 
 📍 Zone: ${signal.zone?.type.toUpperCase()} ${signal.zone?.bottom.toFixed(5)} - ${signal.zone?.top.toFixed(5)}
 🎯 Entry: ${signal.entry?.toFixed(5)}
-🛑 SL: ${signal.stopLoss?.toFixed(5)}
+🛑 SL (2× ATR): ${signal.stopLoss?.toFixed(5)}
 ✅ TP1 (1.272 Fib): ${signal.takeProfit1?.toFixed(5)}
 ✅ TP2 (1.618 Fib): ${signal.takeProfit2?.toFixed(5)}
 ✅ TP3 (2.0 Fib): ${signal.takeProfit3?.toFixed(5)}
