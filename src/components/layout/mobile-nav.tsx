@@ -2,67 +2,53 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  BookOpen,
+  Calculator,
+  LayoutDashboard,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 
 const navigation = [
-  { name: "Home", href: "/dashboard", icon: "📊" },
-  { name: "Calculator", href: "/calculator", icon: "🧮" },
-  { name: "Journal", href: "/journal", icon: "📓" },
-  { name: "AI", href: "/ai-analysis", icon: "🤖" },
-  { name: "Settings", href: "/settings", icon: "⚙️" },
+  { name: "Home", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Calculator", href: "/calculator", icon: Calculator },
+  { name: "Journal", href: "/journal", icon: BookOpen },
+  { name: "AI", href: "/ai-analysis", icon: Sparkles },
+  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 export function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <nav
-      style={{
-        position: "fixed",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        zIndex: 50,
-        background: "#fff",
-        borderTop: "1px solid #e5e7eb",
-        display: "none",
-        justifyContent: "space-around",
-        padding: "8px 0",
-      }}
-      className="mobile-nav-only"
-    >
-      {navigation.map((item) => {
-        const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-        return (
-          <Link
-            key={item.name}
-            href={item.href}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "4px",
-              textDecoration: "none",
-              color: isActive ? "#1c69e3" : "#6b7280",
-              fontSize: "10px",
-              fontWeight: isActive ? "700" : "500",
-            }}
-          >
-            <span style={{ fontSize: "20px" }}>{item.icon}</span>
-            {item.name}
-          </Link>
-        );
-      })}
-
-      <style>{`
-        .mobile-nav-only {
-          display: none !important;
-        }
-        @media (max-width: 768px) {
-          .mobile-nav-only {
-            display: flex !important;
-          }
-        }
-      `}</style>
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden">
+      <div className="grid grid-cols-5">
+        {navigation.map((item) => {
+          const isActive =
+            pathname === item.href || pathname.startsWith(item.href + "/");
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.name}
+              href={item.href}
+              aria-current={isActive ? "page" : undefined}
+              className={`flex flex-col items-center gap-1 py-2 text-[10px] font-medium transition-colors ${
+                isActive ? "text-primary" : "text-muted-foreground"
+              }`}
+            >
+              <span
+                className={`flex h-8 w-12 items-center justify-center rounded-lg transition-colors ${
+                  isActive ? "bg-primary/10" : ""
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+              </span>
+              {item.name}
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 }

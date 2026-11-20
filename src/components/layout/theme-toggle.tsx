@@ -1,34 +1,21 @@
 "use client";
 
 import { useTheme } from "@/components/providers/theme-provider";
+import { Moon, Sun } from "lucide-react";
 
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
+  const isDark = theme === "dark";
 
   return (
     <button
+      type="button"
       onClick={toggleTheme}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "10px",
-        width: "100%",
-        padding: "12px 16px",
-        borderRadius: "8px",
-        border: "1px solid #e5e7eb",
-        background: theme === "dark" ? "#334155" : "#f9fafb",
-        color: theme === "dark" ? "#f1f5f9" : "#111827",
-        cursor: "pointer",
-        fontSize: "14px",
-        fontWeight: "600",
-        transition: "all 0.3s ease",
-      }}
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={isDark ? "Light mode" : "Dark mode"}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
-      <span style={{ fontSize: "18px" }}>
-        {theme === "dark" ? "☀️" : "🌙"}
-      </span>
-      {theme === "dark" ? "Light Mode" : "Dark Mode"}
+      {isDark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
     </button>
   );
 }

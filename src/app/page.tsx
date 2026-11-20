@@ -2,434 +2,481 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import "./animations.css";
+import { Logo } from "@/components/layout/logo";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import {
+  ArrowDownRight,
+  ArrowRight,
+  ArrowUpRight,
+  BarChart3,
+  BookOpen,
+  Calculator,
+  Check,
+  Crown,
+  Globe2,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
+
+const features = [
+  {
+    icon: Calculator,
+    title: "Position size calculator",
+    description:
+      "Size every trade precisely across 40+ forex pairs with live risk control.",
+  },
+  {
+    icon: BookOpen,
+    title: "Trade journaling",
+    description:
+      "Log trades in seconds with screenshots, tags, notes and structured reviews.",
+  },
+  {
+    icon: BarChart3,
+    title: "Advanced analytics",
+    description:
+      "Win rate, profit factor, R-multiples and equity curves in one dashboard.",
+  },
+  {
+    icon: Sparkles,
+    title: "AI chart analysis",
+    description:
+      "Upload a chart and get structured, rule-based signal suggestions.",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Your data stays yours",
+    description:
+      "Private accounts, encrypted credentials and no data reselling. Ever.",
+  },
+  {
+    icon: Globe2,
+    title: "Multi-market support",
+    description:
+      "Forex, commodities and crypto pairs — one journal for your whole book.",
+  },
+];
+
+const plans = [
+  {
+    name: "Free",
+    price: "$0",
+    note: "Forever",
+    features: [
+      "Position size calculator",
+      "50 trade limit",
+      "Basic analytics",
+    ],
+    cta: "Start free",
+    highlight: false,
+  },
+  {
+    name: "VIP",
+    price: "UGX 55,000",
+    note: "One-time payment",
+    features: [
+      "Unlimited trades",
+      "AI chart analysis",
+      "Advanced analytics",
+    ],
+    cta: "Get VIP",
+    highlight: true,
+  },
+  {
+    name: "VVIP",
+    price: "UGX 150,000",
+    note: "One-time payment",
+    features: [
+      "Everything in VIP",
+      "Full AI signals (TP1 · TP2 · TP3)",
+      "Priority support",
+    ],
+    cta: "Get VVIP",
+    highlight: false,
+  },
+];
+
+const stats = [
+  { value: "10,000+", label: "Active traders" },
+  { value: "1M+", label: "Trades logged" },
+  { value: "40+", label: "Forex pairs" },
+  { value: "4.9/5", label: "Average rating" },
+];
 
 export default function LandingPage() {
-  const [isDark, setIsDark] = useState(false);
-  const [isVisible, setIsVisible] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
   const [freeSignals, setFreeSignals] = useState<any[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem("tradevault_theme");
-    if (saved === "dark") {
-      setIsDark(true);
-      document.body.style.background = "#0f172a";
-      document.body.style.color = "#f1f5f9";
-    }
-    setTimeout(() => setIsVisible(true), 100);
-
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-
-    // Fetch free signals with expiry check
     fetch("/api/signals")
       .then((res) => res.json())
       .then((data) => {
         if (data.signals) {
           const now = Date.now();
-          const expiryTime = 24 * 60 * 60 * 1000; // 24 hours
-          
+          const expiryTime = 24 * 60 * 60 * 1000;
+
           const activeSignals = data.signals
             .filter((s: any) => {
               if (s.isActive === false) return false;
-              
-              const signalTime = new Date(s.createdAt || s.timestamp || Date.now()).getTime();
-              const isExpired = now - signalTime > expiryTime;
-              
-              return !isExpired;
+              const signalTime = new Date(
+                s.createdAt || s.timestamp || Date.now()
+              ).getTime();
+              return now - signalTime <= expiryTime;
             })
             .slice(0, 3);
-          
+
           setFreeSignals(activeSignals);
         }
       })
       .catch(() => {});
-
-    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const toggleTheme = () => {
-    setIsDark(!isDark);
-    if (!isDark) {
-      document.body.style.background = "#0f172a";
-      document.body.style.color = "#f1f5f9";
-      localStorage.setItem("tradevault_theme", "dark");
-    } else {
-      document.body.style.background = "#ffffff";
-      document.body.style.color = "#111827";
-      localStorage.setItem("tradevault_theme", "light");
-    }
-  };
-
   return (
-    <div style={{ minHeight: "100vh", background: isDark ? "#0f172a" : "#ffffff", transition: "all 0.5s ease" }}>
-      {/* Navbar */}
-      <nav className="animate-fadeInDown" style={{
-        position: "fixed", top: 0, left: 0, right: 0, zIndex: 100,
-        background: isDark ? "rgba(15,23,42,0.95)" : "rgba(255,255,255,0.95)",
-        backdropFilter: "blur(10px)",
-        borderBottom: "1px solid #e5e7eb",
-        height: isMobile ? "56px" : "64px",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: isMobile ? "0 10px" : "0 20px",
-      }}>
-        <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: "8px" }}>
-          <img
-            src="/logo.png"
-            alt="TradeVault"
-            className="animate-float"
-            style={{
-              width: isMobile ? "28px" : "36px",
-              height: isMobile ? "28px" : "36px",
-              borderRadius: "8px",
-              objectFit: "cover",
-            }}
+    <div className="min-h-screen bg-background text-foreground">
+      {/* Navigation */}
+      <header className="fixed inset-x-0 top-0 z-50 border-b border-border bg-card/85 backdrop-blur-xl supports-[backdrop-filter]:bg-card/70">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+          <Logo />
+
+          <div className="flex-1" />
+
+          <Link
+            href="/calculator"
+            className="hidden rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:inline-flex"
+          >
+            Calculator
+          </Link>
+          <Link
+            href="/login"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Log in
+          </Link>
+          <ThemeToggle />
+          <Link
+            href="/register"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-gradient px-3.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:px-4"
+          >
+            Get started
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      </header>
+
+      <main className="pt-16">
+        {/* Hero */}
+        <section className="relative overflow-hidden bg-card">
+          <div className="pointer-events-none absolute inset-0 bg-hero-radial" aria-hidden="true" />
+          <div
+            className="pointer-events-none absolute inset-0 bg-grid-emerald [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
+            aria-hidden="true"
           />
-          <span style={{ fontSize: isMobile ? "16px" : "20px", fontWeight: "800", color: isDark ? "#fff" : "#111827" }}>
-            Trade<span style={{ color: "#1c69e3" }}>Vault</span>
-          </span>
-        </Link>
 
-        <div style={{ display: "flex", gap: isMobile ? "8px" : "14px", alignItems: "center" }}>
-          <button onClick={toggleTheme} className="hover-scale" style={{ background: "none", border: "none", cursor: "pointer", fontSize: isMobile ? "16px" : "20px" }}>
-            {isDark ? "☀️" : "🌙"}
-          </button>
-          <Link href="/login" className="hover-scale" style={{
-            textDecoration: "none",
-            color: isDark ? "#cbd5e1" : "#6b7280",
-            fontSize: isMobile ? "12px" : "14px",
-            whiteSpace: "nowrap",
-          }}>
-            Login
-          </Link>
-          <Link href="/register" className="hover-lift" style={{
-            textDecoration: "none",
-            background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-            color: "#fff",
-            padding: isMobile ? "8px 12px" : "10px 20px",
-            borderRadius: "8px",
-            fontSize: isMobile ? "12px" : "14px",
-            fontWeight: "600",
-            whiteSpace: "nowrap",
-          }}>
-            Get Started
-          </Link>
-        </div>
-      </nav>
+          <div className="relative mx-auto max-w-7xl px-4 py-20 text-center sm:px-6 sm:py-28 lg:px-8">
+            <span className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3.5 py-1.5 text-xs font-semibold text-primary">
+              <Zap className="h-3.5 w-3.5" />
+              Free position size calculator included
+            </span>
 
-      {/* Hero */}
-      <section className={isVisible ? "animate-fadeInUp" : ""} style={{
-        padding: isMobile ? "80px 16px 60px" : "120px 20px 80px",
-        textAlign: "center",
-        background: isDark ? "linear-gradient(180deg, #1e293b 0%, #0f172a 100%)" : "linear-gradient(180deg, #eff6ff 0%, #ffffff 100%)",
-      }}>
-        <div className="animate-zoomIn delay-1" style={{
-          display: "inline-block", background: isDark ? "#1e293b" : "#dbeafe",
-          color: "#1c69e3", padding: isMobile ? "4px 12px" : "6px 16px",
-          borderRadius: "999px",
-          fontSize: isMobile ? "12px" : "14px", fontWeight: "600", marginBottom: "16px",
-        }}>
-          ⚡ Free Position Size Calculator Included
-        </div>
+            <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold leading-[1.08] text-foreground sm:text-5xl lg:text-6xl">
+              The smartest{" "}
+              <span className="text-gradient">forex trading journal</span>
+            </h1>
 
-        <h1 className="animate-fadeInUp delay-2" style={{
-          fontSize: isMobile ? "28px" : "42px",
-          fontWeight: "800", marginBottom: "16px",
-          color: isDark ? "#fff" : "#111827",
-          lineHeight: "1.2",
-        }}>
-          The Smartest{" "}
-          <span className="text-gradient-animated" style={{
-            background: "linear-gradient(270deg, #1c69e3, #783ff5, #448bff, #00b9a2)",
-            backgroundSize: "300% 300%",
-            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-            animation: "gradientShift 5s ease infinite",
-          }}>
-            Forex Trading Journal
-          </span>
-        </h1>
+            <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+              Track every trade, understand your edge and size positions
+              precisely. One clean dashboard built for serious traders.
+            </p>
 
-        <p className="animate-fadeInUp delay-3" style={{
-          fontSize: isMobile ? "14px" : "18px",
-          color: isDark ? "#cbd5e1" : "#6b7280",
-          maxWidth: "600px", margin: "0 auto 32px",
-          padding: isMobile ? "0 10px" : "0",
-        }}>
-          Track your trades, analyze performance, and calculate position sizes.
-          All in one beautiful dashboard built for serious traders.
-        </p>
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <Link
+                href="/register"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-gradient px-6 text-sm font-semibold text-white shadow-glow transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-auto"
+              >
+                Start journaling free
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/calculator"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card px-6 text-sm font-semibold text-foreground shadow-sm transition-colors hover:bg-muted sm:w-auto"
+              >
+                <Calculator className="h-4 w-4 text-primary" />
+                Try the calculator
+              </Link>
+            </div>
 
-        <div className="animate-fadeInUp delay-4" style={{
-          display: "flex", gap: isMobile ? "10px" : "14px",
-          justifyContent: "center", flexWrap: "wrap",
-        }}>
-          <Link href="/register" className="hover-lift animate-glow" style={{
-            textDecoration: "none",
-            background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-            color: "#fff",
-            padding: isMobile ? "12px 20px" : "16px 32px",
-            borderRadius: "8px",
-            fontSize: isMobile ? "14px" : "16px",
-            fontWeight: "700",
-            boxShadow: "0 10px 25px rgba(28,105,227,0.4)",
-          }}>
-            🚀 Start Journaling Free
-          </Link>
-          <Link href="/calculator" className="hover-lift" style={{
-            textDecoration: "none",
-            background: isDark ? "#1e293b" : "#ffffff",
-            color: isDark ? "#f1f5f9" : "#111827",
-            padding: isMobile ? "12px 20px" : "16px 32px",
-            borderRadius: "8px",
-            fontSize: isMobile ? "14px" : "16px",
-            fontWeight: "700",
-            border: "1px solid #d1d5db",
-          }}>
-            🧮 Try Calculator
-          </Link>
-        </div>
-      </section>
-
-      {/* Free Signals with expiry */}
-      {freeSignals.length > 0 && (
-        <section className="animate-fadeInUp delay-2" style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
-          <h2 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
-            📡 Free Trading Signals
-          </h2>
-          <p style={{ textAlign: "center", color: "#6b7280", marginBottom: "32px", fontSize: isMobile ? "14px" : "16px" }}>
-            Get a taste of our premium signals (expires in 24h)
-          </p>
-
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))",
-            gap: isMobile ? "16px" : "20px",
-            maxWidth: "1000px", margin: "0 auto",
-          }}>
-            {freeSignals.map((signal: any, i: number) => (
-              <div key={signal._id || i} className="hover-lift" style={{
-                background: isDark ? "#1e293b" : "#ffffff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "12px",
-                padding: "20px",
-                transition: "all 0.3s ease",
-                cursor: "pointer",
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                  <span style={{ fontWeight: "700", fontSize: "16px", color: isDark ? "#fff" : "#111827" }}>
-                    {signal.pair}
-                  </span>
-                  <span style={{
-                    padding: "4px 10px",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    fontWeight: "700",
-                    background: signal.direction === "long" ? "#dcfce7" : "#fee2e2",
-                    color: signal.direction === "long" ? "#16a34a" : "#dc2626",
-                  }}>
-                    {signal.direction?.toUpperCase()}
-                  </span>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginBottom: "16px" }}>
-                  <div style={{ padding: "8px", background: isDark ? "#0f172a" : "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "11px", color: "#6b7280" }}>Entry</p>
-                    <p style={{ fontWeight: "700", fontSize: "14px", color: isDark ? "#f1f5f9" : "#111827" }}>{signal.entry}</p>
-                  </div>
-                  <div style={{ padding: "8px", background: "#fef2f2", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "11px", color: "#6b7280" }}>Stop Loss</p>
-                    <p style={{ fontWeight: "700", fontSize: "14px", color: "#dc2626" }}>{signal.stopLoss}</p>
-                  </div>
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginBottom: "16px" }}>
-                  <div style={{ padding: "8px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "11px", color: "#6b7280" }}>TP1</p>
-                    <p style={{ fontWeight: "700", fontSize: "13px", color: "#16a34a" }}>{signal.takeProfit1}</p>
-                  </div>
-                  <div style={{ padding: "8px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "11px", color: "#6b7280" }}>TP2</p>
-                    <p style={{ fontWeight: "700", fontSize: "13px", color: "#16a34a" }}>{signal.takeProfit2}</p>
-                  </div>
-                  <div style={{ padding: "8px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "11px", color: "#6b7280" }}>TP3</p>
-                    <p style={{ fontWeight: "700", fontSize: "13px", color: "#16a34a" }}>{signal.takeProfit3}</p>
-                  </div>
-                </div>
-
-                <div style={{ textAlign: "center", paddingTop: "12px", borderTop: "1px solid #e5e7eb" }}>
-                  <Link href="/register" style={{
-                    color: "#1c69e3",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                    textDecoration: "none",
-                  }}>
-                    Get Full Access →
-                  </Link>
-                </div>
-              </div>
-            ))}
+            <ul className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-medium text-muted-foreground sm:text-sm">
+              <li className="inline-flex items-center gap-1.5">
+                <Check className="h-4 w-4 text-primary" />
+                No credit card required
+              </li>
+              <li className="inline-flex items-center gap-1.5">
+                <Check className="h-4 w-4 text-primary" />
+                Free plan forever
+              </li>
+              <li className="inline-flex items-center gap-1.5">
+                <Check className="h-4 w-4 text-primary" />
+                Cancel anytime
+              </li>
+            </ul>
           </div>
         </section>
-      )}
 
-      {/* Features */}
-      <section style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
-        <h2 className="animate-fadeInUp" style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
-          Everything You Need to Trade Smarter
-        </h2>
-        <p className="animate-fadeInUp delay-1" style={{ textAlign: "center", color: "#6b7280", marginBottom: "40px", fontSize: isMobile ? "14px" : "16px" }}>
-          Powerful tools designed by traders, for traders.
-        </p>
+        {/* Features */}
+        <section id="features" className="border-t border-border py-20">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-2xl text-center">
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+                Platform
+              </p>
+              <h2 className="mt-2 text-3xl font-bold text-foreground sm:text-4xl">
+                Everything you need to trade smarter
+              </h2>
+              <p className="mt-3 text-base text-muted-foreground">
+                Purpose-built tools designed by traders, for traders.
+              </p>
+            </div>
 
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "repeat(auto-fit, minmax(150px, 1fr))" : "repeat(auto-fit, minmax(250px, 1fr))",
-          gap: isMobile ? "12px" : "20px",
-          maxWidth: "1200px", margin: "0 auto",
-        }}>
-          {[
-            { icon: "🧮", title: "Position Size Calculator", desc: "Calculate optimal position sizes with 40+ forex pairs." },
-            { icon: "📓", title: "Trade Journaling", desc: "Log trades in seconds with screenshots, tags, and notes." },
-            { icon: "📊", title: "Advanced Analytics", desc: "Win rate, profit factor, R-multiples, and more." },
-            { icon: "🤖", title: "AI Chart Analysis", desc: "Upload charts and get AI-powered trading signals." },
-            { icon: "🛡️", title: "Your Data, Secure", desc: "Your trades are private and encrypted." },
-            { icon: "🌍", title: "Multi-Market Support", desc: "Forex, commodities, and crypto." },
-          ].map((feature, i) => (
-            <div key={i} className="hover-lift animate-fadeInUp" style={{
-              background: isDark ? "#1e293b" : "#ffffff",
-              border: "1px solid #e5e7eb", borderRadius: "12px",
-              padding: isMobile ? "16px" : "24px",
-              textAlign: "center",
-              transition: "all 0.3s ease", cursor: "pointer",
-              animationDelay: `${i * 0.1}s`,
-            }}>
-              <div className="animate-float" style={{
-                width: isMobile ? "40px" : "48px",
-                height: isMobile ? "40px" : "48px",
-                borderRadius: "12px",
-                background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                margin: "0 auto 16px", fontSize: isMobile ? "20px" : "24px",
-              }}>
-                {feature.icon}
+            <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {features.map((feature) => {
+                const Icon = feature.icon;
+                return (
+                  <div
+                    key={feature.title}
+                    className="rounded-2xl border border-border bg-card p-6 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-card-hover"
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <h3 className="mt-4 text-base font-semibold text-foreground">
+                      {feature.title}
+                    </h3>
+                    <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                      {feature.description}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {/* Free signals */}
+        {freeSignals.length > 0 && (
+          <section className="border-t border-border bg-muted/40 py-20">
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+              <div className="mx-auto max-w-2xl text-center">
+                <span className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/5 px-3.5 py-1.5 text-xs font-semibold text-primary">
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  Live preview
+                </span>
+                <h2 className="mt-4 text-3xl font-bold text-foreground sm:text-4xl">
+                  Free trading signals
+                </h2>
+                <p className="mt-3 text-base text-muted-foreground">
+                  A sample of our premium signals. Each preview expires after 24 hours.
+                </p>
               </div>
-              <h3 style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: "700", color: isDark ? "#fff" : "#111827", marginBottom: "8px" }}>
-                {feature.title}
-              </h3>
-              <p style={{ color: "#6b7280", fontSize: isMobile ? "12px" : "14px" }}>{feature.desc}</p>
+
+              <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {freeSignals.map((signal: any, i: number) => {
+                  const isLong = signal.direction === "long";
+                  return (
+                    <div
+                      key={signal._id || i}
+                      className="rounded-2xl border border-border bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-base font-bold tracking-tight text-foreground">
+                          {signal.pair}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${
+                            isLong
+                              ? "bg-primary/10 text-primary"
+                              : "bg-destructive/10 text-destructive"
+                          }`}
+                        >
+                          {isLong ? (
+                            <ArrowUpRight className="h-3 w-3" />
+                          ) : (
+                            <ArrowDownRight className="h-3 w-3" />
+                          )}
+                          {signal.direction}
+                        </span>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-lg bg-muted/60 px-3 py-2.5 text-center">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Entry
+                          </p>
+                          <p className="mt-0.5 text-sm font-semibold text-foreground">
+                            {signal.entry}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-destructive/5 px-3 py-2.5 text-center">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Stop loss
+                          </p>
+                          <p className="mt-0.5 text-sm font-semibold text-destructive">
+                            {signal.stopLoss}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {[signal.takeProfit1, signal.takeProfit2, signal.takeProfit3].map(
+                          (tp, index) => (
+                            <div
+                              key={index}
+                              className="rounded-lg bg-primary/5 px-2 py-2.5 text-center"
+                            >
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                TP{index + 1}
+                              </p>
+                              <p className="mt-0.5 text-xs font-semibold text-primary">
+                                {tp}
+                              </p>
+                            </div>
+                          )
+                        )}
+                      </div>
+
+                      <Link
+                        href="/register"
+                        className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-primary hover:underline"
+                      >
+                        Get full access
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          ))}
-        </div>
-      </section>
+          </section>
+        )}
 
-      {/* Stats */}
-      <section className="animate-pulse" style={{
-        padding: isMobile ? "40px 16px" : "60px 20px",
-        background: "linear-gradient(-45deg, #1c69e3, #783ff5, #448bff, #00b9a2)",
-        backgroundSize: "400% 400%",
-        animation: "gradientShift 10s ease infinite",
-      }}>
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: isMobile ? "16px" : "20px",
-          maxWidth: "1200px", margin: "0 auto", textAlign: "center",
-        }}>
-          {[
-            { value: "10,000+", label: "Active Traders" },
-            { value: "1M+", label: "Trades Logged" },
-            { value: "40+", label: "Forex Pairs" },
-            { value: "4.9★", label: "User Rating" },
-          ].map((stat, i) => (
-            <div key={i} className="animate-zoomIn" style={{ animationDelay: `${i * 0.15}s` }}>
-              <p style={{ fontSize: isMobile ? "24px" : "32px", fontWeight: "800", color: "#fff" }}>{stat.value}</p>
-              <p style={{ color: "rgba(255,255,255,0.8)", fontSize: isMobile ? "12px" : "16px" }}>{stat.label}</p>
+        {/* Stats */}
+        <section className="py-16">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="overflow-hidden rounded-3xl bg-brand-gradient-deep px-6 py-12 ring-1 ring-white/10 sm:px-10">
+              <div className="grid grid-cols-2 gap-8 lg:grid-cols-4">
+                {stats.map((stat) => (
+                  <div key={stat.label} className="text-center">
+                    <p className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                      {stat.value}
+                    </p>
+                    <p className="mt-1 text-sm text-emerald-100/70">{stat.label}</p>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Pricing */}
-      <section style={{ padding: isMobile ? "40px 16px" : "60px 20px" }}>
-        <h2 className="animate-fadeInUp" style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", textAlign: "center", color: isDark ? "#fff" : "#111827", marginBottom: "12px" }}>
-          Simple Pricing
-        </h2>
-        <p className="animate-fadeInUp delay-1" style={{ textAlign: "center", color: "#6b7280", marginBottom: "40px", fontSize: isMobile ? "12px" : "16px" }}>
-          Pay via Airtel: 0701179229 | MTN: 0783362906
-        </p>
-
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: isMobile ? "16px" : "20px",
-          maxWidth: "1200px", margin: "0 auto",
-        }}>
-          <div className="hover-lift animate-fadeInLeft" style={{
-            background: isDark ? "#1e293b" : "#ffffff",
-            border: "1px solid #e5e7eb", borderRadius: "12px",
-            padding: "28px", textAlign: "center",
-          }}>
-            <h3 style={{ fontSize: "20px", fontWeight: "700", marginBottom: "8px", color: isDark ? "#fff" : "#111827" }}>Free</h3>
-            <p style={{ fontSize: "32px", fontWeight: "800", marginBottom: "16px", color: isDark ? "#fff" : "#111827" }}>$0</p>
-            <ul style={{ listStyle: "none", marginBottom: "24px", color: "#6b7280", fontSize: "14px" }}>
-              <li style={{ padding: "6px 0" }}>✅ Position Size Calculator</li>
-              <li style={{ padding: "6px 0" }}>✅ 50 Trade Limit</li>
-              <li style={{ padding: "6px 0" }}>✅ Basic Analytics</li>
-            </ul>
-            <Link href="/register" style={{
-              textDecoration: "none", display: "block", background: "#e5e7eb",
-              color: "#111827", padding: "12px", borderRadius: "8px", fontWeight: "600",
-            }}>Start Free</Link>
           </div>
+        </section>
 
-          <div className="hover-lift animate-fadeInUp animate-glow" style={{
-            background: "linear-gradient(180deg, #1c69e3, #783ff5)", borderRadius: "12px",
-            padding: "28px", textAlign: "center", color: "#fff",
-            boxShadow: "0 10px 30px rgba(28,105,227,0.3)",
-          }}>
-            <h3 style={{ fontSize: "20px", fontWeight: "700", marginBottom: "8px" }}>VIP</h3>
-            <p style={{ fontSize: "32px", fontWeight: "800", marginBottom: "16px" }}>UGX 55,000</p>
-            <ul style={{ listStyle: "none", marginBottom: "24px", fontSize: "14px" }}>
-              <li style={{ padding: "6px 0" }}>✅ Unlimited Trades</li>
-              <li style={{ padding: "6px 0" }}>✅ AI Chart Analysis</li>
-              <li style={{ padding: "6px 0" }}>✅ Advanced Analytics</li>
-            </ul>
-            <Link href="/register" style={{
-              textDecoration: "none", display: "block", background: "#fff",
-              color: "#1c69e3", padding: "12px", borderRadius: "8px", fontWeight: "700",
-            }}>Get VIP</Link>
-          </div>
+        {/* Pricing */}
+        <section className="border-t border-border py-20">
+          <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-2xl text-center">
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">
+                Pricing
+              </p>
+              <h2 className="mt-2 text-3xl font-bold text-foreground sm:text-4xl">
+                Simple, transparent pricing
+              </h2>
+              <p className="mt-3 text-base text-muted-foreground">
+                Pay via Airtel: 0701179229 &nbsp;·&nbsp; MTN: 0783362906
+              </p>
+            </div>
 
-          <div className="hover-lift animate-fadeInRight" style={{
-            background: "linear-gradient(180deg, #783ff5, #1c69e3)", borderRadius: "12px",
-            padding: "28px", textAlign: "center", color: "#fff",
-          }}>
-            <h3 style={{ fontSize: "20px", fontWeight: "700", marginBottom: "8px" }}>VVIP</h3>
-            <p style={{ fontSize: "32px", fontWeight: "800", marginBottom: "16px" }}>UGX 150,000</p>
-            <ul style={{ listStyle: "none", marginBottom: "24px", fontSize: "14px" }}>
-              <li style={{ padding: "6px 0" }}>✅ Everything in VIP</li>
-              <li style={{ padding: "6px 0" }}>✅ Full AI (TP1, TP2, TP3)</li>
-              <li style={{ padding: "6px 0" }}>✅ Priority Support</li>
-            </ul>
-            <Link href="/register" style={{
-              textDecoration: "none", display: "block", background: "#fff",
-              color: "#783ff5", padding: "12px", borderRadius: "8px", fontWeight: "700",
-            }}>Get VVIP</Link>
+            <div className="mt-12 grid gap-5 lg:grid-cols-3">
+              {plans.map((plan) => {
+                const inner = (
+                  <div className="flex h-full flex-col rounded-[15px] bg-card p-7">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-semibold text-foreground">
+                        {plan.name}
+                      </h3>
+                      {plan.highlight && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-primary">
+                          <Crown className="h-3 w-3" />
+                          Popular
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-3 text-3xl font-bold tracking-tight text-foreground">
+                      {plan.price}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">{plan.note}</p>
+
+                    <ul className="mt-6 flex-1 space-y-2.5">
+                      {plan.features.map((feature) => (
+                        <li
+                          key={feature}
+                          className="flex items-start gap-2 text-sm text-muted-foreground"
+                        >
+                          <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                          {feature}
+                        </li>
+                      ))}
+                    </ul>
+
+                    <Link
+                      href="/register"
+                      className={`mt-7 inline-flex h-10 items-center justify-center rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                        plan.highlight
+                          ? "bg-brand-gradient text-white hover:opacity-90"
+                          : "border border-border bg-card text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {plan.cta}
+                    </Link>
+                  </div>
+                );
+
+                return plan.highlight ? (
+                  <div
+                    key={plan.name}
+                    className="rounded-2xl bg-brand-gradient p-px shadow-glow"
+                  >
+                    {inner}
+                  </div>
+                ) : (
+                  <div
+                    key={plan.name}
+                    className="rounded-2xl border border-border shadow-card"
+                  >
+                    {inner}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </main>
 
       {/* Footer */}
-      <footer className="animate-fadeInUp" style={{
-        padding: "30px 20px", background: isDark ? "#1e293b" : "#f9fafb",
-        borderTop: "1px solid #e5e7eb", textAlign: "center", color: "#6b7280",
-      }}>
-        <p>© 2026 TradeVault. All rights reserved.</p>
+      <footer className="border-t border-border bg-card">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row sm:px-6 lg:px-8">
+          <Logo />
+          <div className="flex items-center gap-5 text-sm text-muted-foreground">
+            <Link href="/calculator" className="hover:text-foreground">
+              Calculator
+            </Link>
+            <Link href="/login" className="hover:text-foreground">
+              Log in
+            </Link>
+            <Link href="/register" className="hover:text-foreground">
+              Register
+            </Link>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            © {new Date().getFullYear()} TradeVault. All rights reserved.
+          </p>
+        </div>
       </footer>
     </div>
   );

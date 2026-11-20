@@ -18,29 +18,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
-    const saved = localStorage.getItem("tradevault_theme") as Theme | null;
+    const saved = localStorage.getItem("tradevault_theme");
     if (saved === "dark" || saved === "light") {
       setTheme(saved);
     }
   }, []);
 
   useEffect(() => {
-    const root = document.documentElement;
-    const body = document.body;
-
-    if (theme === "dark") {
-      root.style.background = "#0f172a";
-      root.style.color = "#f1f5f9";
-      body.style.background = "#0f172a";
-      body.style.color = "#f1f5f9";
-      body.classList.add("dark");
-    } else {
-      root.style.background = "#ffffff";
-      root.style.color = "#111827";
-      body.style.background = "#f9fafb";
-      body.style.color = "#111827";
-      body.classList.remove("dark");
-    }
+    document.documentElement.classList.toggle("dark", theme === "dark");
   }, [theme]);
 
   const toggleTheme = useCallback(() => {

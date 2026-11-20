@@ -2,20 +2,31 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ThemeToggle } from "./theme-toggle";
-import { useState, useEffect } from "react";
-import { LogOut } from "lucide-react";
+import { useEffect } from "react";
+import {
+  BookOpen,
+  Calculator,
+  CandlestickChart,
+  Crown,
+  GraduationCap,
+  LayoutDashboard,
+  LineChart,
+  LogOut,
+  Newspaper,
+  Settings,
+  Sparkles,
+} from "lucide-react";
 
 const navigation = [
-  { name: "Dashboard", href: "/dashboard", icon: "📊" },
-  { name: "Calculator", href: "/calculator", icon: "🧮" },
-  { name: "Journal", href: "/journal", icon: "📓" },
-  { name: "Charts", href: "/charts", icon: "📈" },
-  { name: "Analytics", href: "/analytics", icon: "📉" },
-  { name: "AI Analysis", href: "/ai-analysis", icon: "🤖" },
-  { name: "Education", href: "/education", icon: "🧠" },
-  { name: "News", href: "/news", icon: "📰" },
-  { name: "Settings", href: "/settings", icon: "⚙️" },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { name: "Calculator", href: "/calculator", icon: Calculator },
+  { name: "Journal", href: "/journal", icon: BookOpen },
+  { name: "Charts", href: "/charts", icon: CandlestickChart },
+  { name: "Analytics", href: "/analytics", icon: LineChart },
+  { name: "AI Analysis", href: "/ai-analysis", icon: Sparkles },
+  { name: "Education", href: "/education", icon: GraduationCap },
+  { name: "News", href: "/news", icon: Newspaper },
+  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 interface SidebarProps {
@@ -25,24 +36,18 @@ interface SidebarProps {
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // Close sidebar on route change (mobile only)
-  useEffect(() => {
-    if (isMobile && isOpen) {
-      onClose();
-    }
+    onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
+
+  useEffect(() => {
+    document.body.style.overflow = isOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isOpen]);
 
   const handleLogout = async () => {
     try {
@@ -55,119 +60,79 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* Overlay for mobile - clicking outside closes sidebar */}
-      {isOpen && isMobile && (
+      {isOpen && (
         <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0, 0, 0, 0.5)",
-            zIndex: 39,
-            cursor: "pointer",
-          }}
+          className="fixed inset-0 top-16 z-40 bg-foreground/40 backdrop-blur-sm lg:hidden"
           onClick={onClose}
+          aria-hidden="true"
         />
       )}
 
       <aside
-        style={{
-          position: "fixed",
-          left: isOpen ? "0" : "-240px",
-          top: "64px",
-          bottom: 0,
-          width: "240px",
-          background: "#ffffff",
-          borderRight: "1px solid #e5e7eb",
-          zIndex: 40,
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          transition: "left 0.3s ease-in-out",
-          boxShadow: isOpen ? "2px 0 8px rgba(0,0,0,0.1)" : "none",
-        }}
+        className={`fixed bottom-0 left-0 top-16 z-50 flex w-64 flex-col border-r border-border bg-card transition-transform duration-300 ease-out lg:translate-x-0 ${
+          isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
+        }`}
       >
-        <nav style={{ flex: 1, padding: "16px 12px" }}>
-          {navigation.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                onClick={isMobile ? onClose : undefined}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "12px",
-                  padding: "12px 16px",
-                  borderRadius: "8px",
-                  marginBottom: "4px",
-                  textDecoration: "none",
-                  background: isActive ? "#dbeafe" : "transparent",
-                  color: isActive ? "#1c69e3" : "#6b7280",
-                  fontWeight: isActive ? "700" : "500",
-                  fontSize: "14px",
-                  transition: "all 0.2s ease",
-                }}
-              >
-                <span style={{ fontSize: "18px" }}>{item.icon}</span>
-                {item.name}
-              </Link>
-            );
-          })}
-
-          {/* Logout Button */}
-          <button
-            onClick={handleLogout}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              width: "100%",
-              padding: "12px 16px",
-              borderRadius: "8px",
-              marginTop: "8px",
-              marginBottom: "4px",
-              border: "1px solid #fecaca",
-              background: "#fef2f2",
-              color: "#dc2626",
-              fontWeight: "600",
-              fontSize: "14px",
-              cursor: "pointer",
-              transition: "all 0.2s ease",
-            }}
-          >
-            <LogOut size={18} />
-            Logout
-          </button>
+        <nav className="flex-1 overflow-y-auto px-3 pb-4 pt-5">
+          <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Workspace
+          </p>
+          <ul className="space-y-0.5">
+            {navigation.map((item) => {
+              const isActive =
+                pathname === item.href || pathname.startsWith(item.href + "/");
+              const Icon = item.icon;
+              return (
+                <li key={item.name}>
+                  <Link
+                    href={item.href}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                      isActive
+                        ? "bg-primary/10 font-semibold text-primary"
+                        : "font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    <Icon
+                      className={`h-[18px] w-[18px] shrink-0 ${
+                        isActive
+                          ? "text-primary"
+                          : "text-muted-foreground/80 group-hover:text-foreground"
+                      }`}
+                    />
+                    {item.name}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         </nav>
 
-        {/* Theme Toggle */}
-        <div style={{ padding: "12px", borderTop: "1px solid #e5e7eb" }}>
-          <ThemeToggle />
-        </div>
+        <div className="space-y-3 border-t border-border p-3">
+          <div className="rounded-xl bg-brand-gradient p-4 text-white shadow-glow">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Crown className="h-4 w-4" />
+              Go Pro
+            </div>
+            <p className="mt-1 text-xs leading-relaxed text-white/85">
+              Unlimited trades, AI analysis and priority support.
+            </p>
+            <Link
+              href="/settings"
+              className="mt-3 flex h-8 w-full items-center justify-center rounded-lg bg-white text-xs font-semibold text-primary-hover transition-colors hover:bg-emerald-50"
+            >
+              Upgrade
+            </Link>
+          </div>
 
-        {/* Upgrade Card */}
-        <div style={{ padding: "16px", borderTop: "1px solid #e5e7eb" }}>
-          <Link
-            href="/settings"
-            onClick={isMobile ? onClose : undefined}
-            style={{
-              display: "block",
-              textAlign: "center",
-              padding: "10px",
-              background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-              color: "#fff",
-              borderRadius: "8px",
-              textDecoration: "none",
-              fontWeight: "600",
-              fontSize: "14px",
-            }}
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
           >
-            Upgrade to Pro
-          </Link>
+            <LogOut className="h-[18px] w-[18px]" />
+            Log out
+          </button>
         </div>
       </aside>
     </>

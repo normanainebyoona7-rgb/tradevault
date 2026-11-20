@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { Logo } from "./logo";
 import { ThemeToggle } from "./theme-toggle";
-import { Menu, User, LogOut, Home, Settings } from "lucide-react";
+import { Home, LogOut, Menu, Settings } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 
 interface HeaderProps {
@@ -12,7 +13,6 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [userName, setUserName] = useState("");
-  const [isMobile, setIsMobile] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,22 +25,21 @@ export function Header({ onMenuClick }: HeaderProps) {
       })
       .catch(() => {});
 
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setUserMenuOpen(false);
       }
     };
 
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setUserMenuOpen(false);
+    };
+
     document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
     return () => {
-      window.removeEventListener("mousedown", handleClickOutside);
-      window.removeEventListener('resize', checkMobile);
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
     };
   }, []);
 
@@ -53,200 +52,96 @@ export function Header({ onMenuClick }: HeaderProps) {
     }
   };
 
+  const initials = userName
+    ? userName
+        .split(/[\s@.]+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase())
+        .join("")
+    : null;
+
   return (
-    <header
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: isMobile ? "56px" : "64px",
-        background: "#ffffff",
-        borderBottom: "1px solid #e5e7eb",
-        zIndex: 50,
-        display: "flex",
-        alignItems: "center",
-        padding: isMobile ? "0 8px" : "0 16px",
-        gap: isMobile ? "6px" : "12px",
-      }}
-    >
-      {/* Menu Toggle Button */}
-      <button
-        onClick={onMenuClick}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: isMobile ? "36px" : "40px",
-          height: isMobile ? "36px" : "40px",
-          borderRadius: "8px",
-          border: "1px solid #e5e7eb",
-          background: "transparent",
-          cursor: "pointer",
-          color: "#6b7280",
-          transition: "all 0.2s ease",
-          flexShrink: 0,
-        }}
-        aria-label="Toggle sidebar"
-      >
-        <Menu size={isMobile ? 18 : 20} />
-      </button>
-
-      {/* Logo */}
-      <Link
-        href="/"
-        style={{
-          textDecoration: "none",
-          color: "inherit",
-          fontSize: isMobile ? "14px" : "18px",
-          fontWeight: "700",
-          display: "flex",
-          alignItems: "center",
-          gap: isMobile ? "4px" : "8px",
-          flexShrink: 0,
-        }}
-      >
-        <img 
-          src="/logo.png" 
-          alt="TradeVault" 
-          style={{ 
-            width: isMobile ? "24px" : "28px", 
-            height: isMobile ? "24px" : "28px", 
-            borderRadius: "6px" 
-          }}
-        />
-        {!isMobile && "TradeVault"}
-      </Link>
-
-      {/* Spacer */}
-      <div style={{ flex: 1 }} />
-
-      {/* Home Button - Hide text on very small screens */}
-      <Link
-        href="/"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: isMobile ? "0" : "6px",
-          padding: isMobile ? "6px" : "8px 12px",
-          borderRadius: "8px",
-          textDecoration: "none",
-          color: "#6b7280",
-          fontSize: isMobile ? "0" : "14px",
-          fontWeight: "500",
-          transition: "all 0.2s ease",
-          flexShrink: 0,
-        }}
-        aria-label="Home"
-      >
-        <Home size={isMobile ? 16 : 16} />
-        {!isMobile && "Home"}
-      </Link>
-
-      {/* Theme Toggle */}
-      <div style={{ flexShrink: 0 }}>
-        <ThemeToggle />
-      </div>
-
-      {/* User Menu */}
-      <div style={{ position: "relative", flexShrink: 0 }} ref={menuRef}>
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-border bg-card/85 backdrop-blur-xl supports-[backdrop-filter]:bg-card/70">
+      <div className="flex h-16 items-center gap-2 px-3 sm:gap-3 sm:px-4 lg:px-6">
         <button
-          onClick={() => setUserMenuOpen(!userMenuOpen)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: isMobile ? "32px" : "40px",
-            height: isMobile ? "32px" : "40px",
-            borderRadius: "50%",
-            border: "1px solid #e5e7eb",
-            background: "#f9fafb",
-            cursor: "pointer",
-            color: "#6b7280",
-            transition: "all 0.2s ease",
-          }}
-          aria-label="User menu"
+          type="button"
+          onClick={onMenuClick}
+          aria-label="Open navigation"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background lg:hidden"
         >
-          <User size={isMobile ? 16 : 18} />
+          <Menu className="h-5 w-5" />
         </button>
 
-        {/* Dropdown Menu */}
-        {userMenuOpen && (
-          <div
-            style={{
-              position: "absolute",
-              right: 0,
-              top: isMobile ? "40px" : "48px",
-              width: isMobile ? "180px" : "200px",
-              background: "#ffffff",
-              border: "1px solid #e5e7eb",
-              borderRadius: "8px",
-              boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-              zIndex: 60,
-              padding: "8px",
-            }}
+        <Logo />
+
+        <div className="flex-1" />
+
+        <Link
+          href="/"
+          className="hidden items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
+        >
+          <Home className="h-4 w-4" />
+          Home
+        </Link>
+
+        <ThemeToggle />
+
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            onClick={() => setUserMenuOpen((open) => !open)}
+            aria-label="Account menu"
+            aria-expanded={userMenuOpen}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-gradient text-xs font-semibold text-white shadow-sm ring-1 ring-primary/20 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
-            {userName && (
-              <div
-                style={{
-                  padding: "8px 12px",
-                  fontSize: "13px",
-                  color: "#6b7280",
-                  borderBottom: "1px solid #e5e7eb",
-                  marginBottom: "4px",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {userName}
-              </div>
+            {initials || (
+              <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" aria-hidden="true">
+                <circle cx="12" cy="8.5" r="3.5" stroke="currentColor" strokeWidth="1.8" />
+                <path
+                  d="M5 19.5c1.6-3 4-4.5 7-4.5s5.4 1.5 7 4.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
             )}
+          </button>
 
-            <button
-              onClick={() => {
-                setUserMenuOpen(false);
-                window.location.href = "/settings";
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: "6px",
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                color: "#374151",
-                fontSize: "14px",
-              }}
-            >
-              <Settings size={16} />
-              Settings
-            </button>
+          {userMenuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-card">
+              {userName && (
+                <div className="border-b border-border px-3 py-2.5">
+                  <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                    Signed in
+                  </p>
+                  <p className="truncate text-sm font-medium text-foreground">{userName}</p>
+                </div>
+              )}
 
-            <button
-              onClick={handleLogout}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: "6px",
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                color: "#dc2626",
-                fontSize: "14px",
-              }}
-            >
-              <LogOut size={16} />
-              Logout
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={() => {
+                  setUserMenuOpen(false);
+                  window.location.href = "/settings";
+                }}
+                className="mt-1 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                <Settings className="h-4 w-4 text-muted-foreground" />
+                Settings
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10"
+              >
+                <LogOut className="h-4 w-4" />
+                Log out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );
