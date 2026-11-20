@@ -214,16 +214,16 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
     }
   }
 
-  // Keep only relevant zones
+  // Keep zones that are still relevant to current price
   const relevantZones = zones.filter((z) => {
     if (z.index > candles.length - 5) return false;
 
     if (z.type === "demand") {
-      return z.bottom > currentPrice - avg * 3;
+      return z.bottom > currentPrice - avg * 8;
     }
 
     if (z.type === "supply") {
-      return z.top < currentPrice + avg * 3;
+      return z.top < currentPrice + avg * 8;
     }
 
     return true;
@@ -231,7 +231,7 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
 
   relevantZones.sort((a, b) => a.distanceToPrice - b.distanceToPrice);
 
-  return relevantZones.slice(0, 5);
+  return relevantZones.slice(0, 10);
 }
 
 // ===== STEP 2: DETECT ENTRY SIGNALS =====

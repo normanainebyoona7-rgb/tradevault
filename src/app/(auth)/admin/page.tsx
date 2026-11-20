@@ -3,10 +3,124 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { LiveChart } from "@/components/charts/LiveChart";
+import {
+  Activity,
+  ArrowLeft,
+  BarChart3,
+  Check,
+  CircleCheck,
+  CirclePause,
+  Crosshair,
+  Eye,
+  Gem,
+  KeyRound,
+  Layers,
+  Link2,
+  Loader2,
+  Lock,
+  LocateFixed,
+  Percent,
+  Plus,
+  Radar,
+  Settings,
+  Shield,
+  StickyNote,
+  Target,
+  Timer,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+  Users,
+  Wallet,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 
 const ADMIN_EMAIL = "normanainebyoona7@gmail.com";
 const ADMIN_PASSWORD = "norman2026";
 const TIMEFRAMES = ["5m", "15m", "30m", "1H", "4H", "1D"];
+
+/* ---------- presentational helpers ---------- */
+
+const PANEL = "rounded-2xl border border-border bg-card p-5 shadow-card";
+const ROW = "rounded-xl border border-border bg-card p-4";
+const INPUT =
+  "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40";
+const LABEL = "mb-1.5 block text-sm font-semibold";
+const BTN_PRIMARY =
+  "inline-flex items-center justify-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:opacity-60";
+const BTN_SECONDARY =
+  "inline-flex items-center justify-center gap-2 rounded-lg border border-border px-3.5 py-2 text-sm font-semibold text-foreground transition hover:bg-accent";
+const BTN_DANGER =
+  "inline-flex items-center justify-center gap-2 rounded-lg border border-rose-500/40 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-400";
+const BTN_CHIP =
+  "inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground transition hover:bg-accent";
+const BADGE_BASE = "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold";
+const BADGE_POSITIVE = `${BADGE_BASE} bg-emerald-500/15 text-emerald-700 dark:text-emerald-400`;
+const BADGE_NEGATIVE = `${BADGE_BASE} bg-rose-500/15 text-rose-700 dark:text-rose-400`;
+const BADGE_NEUTRAL = `${BADGE_BASE} bg-muted text-muted-foreground`;
+const TH = "whitespace-nowrap px-3 py-3 text-left sm:px-4";
+const TD = "px-3 py-3 sm:px-4";
+const TABLE = "w-full min-w-[560px] text-sm";
+const THEAD_ROW =
+  "border-b border-border bg-surface text-xs uppercase tracking-wide text-muted-foreground";
+const TBODY_ROW = "border-b border-border last:border-0";
+
+function tierBadgeClass(tier?: string) {
+  if (tier === "vvip") return BADGE_POSITIVE;
+  if (tier === "vip") return `${BADGE_BASE} bg-accent text-accent-foreground`;
+  return BADGE_NEUTRAL;
+}
+
+function Section({
+  icon: Icon,
+  title,
+  children,
+  className = "mb-3",
+}: {
+  icon: LucideIcon;
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`rounded-xl border border-border bg-muted/60 p-3 ${className}`}>
+      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        <Icon className="h-3.5 w-3.5 text-primary" />
+        {title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  tone = "default",
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: React.ReactNode;
+  tone?: "default" | "positive" | "negative";
+}) {
+  const toneClass =
+    tone === "positive"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : tone === "negative"
+        ? "text-rose-600 dark:text-rose-400"
+        : "text-foreground";
+  return (
+    <div className={ROW}>
+      <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-primary">
+        <Icon className="h-4 w-4" />
+      </div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`text-2xl font-bold tracking-tight ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
 
 export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -287,78 +401,121 @@ export default function AdminPage() {
     return `${hours}h ${mins}m`;
   };
 
-  if (isChecking) return <div style={{ textAlign: "center", padding: "40px" }}>Checking access...</div>;
+  if (isChecking)
+    return (
+      <div className="mx-auto w-full max-w-6xl space-y-6">
+        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Checking access...
+        </div>
+      </div>
+    );
 
   if (!isAdmin) {
     return (
-      <div style={{ textAlign: "center", padding: "60px" }}>
-        <p style={{ fontSize: "48px" }}>🔒</p>
-        <h1 style={{ fontSize: "24px", fontWeight: "700", marginBottom: "8px" }}>Access Denied</h1>
-        <Link href="/dashboard" style={{ color: "#1c69e3" }}>Go to Dashboard</Link>
+      <div className="mx-auto w-full max-w-6xl space-y-6">
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-14 text-center shadow-card">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-rose-500/10 text-rose-600 dark:text-rose-400">
+            <Lock className="h-6 w-6" />
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight">Access denied</h1>
+          <p className="text-sm text-muted-foreground">
+            This area is restricted to administrators.
+          </p>
+          <Link href="/dashboard" className={BTN_SECONDARY}>
+            <ArrowLeft className="h-4 w-4" />
+            Go to dashboard
+          </Link>
+        </div>
       </div>
     );
   }
 
   if (isLocked) {
     return (
-      <div style={{ maxWidth: "400px", margin: "0 auto", padding: isMobile ? "40px 16px" : "60px 24px", textAlign: "center" }}>
-        <p style={{ fontSize: "48px" }}>🔐</p>
-        <h1 style={{ fontSize: "24px", fontWeight: "700", marginBottom: "16px" }}>Admin Login</h1>
-        {passwordError && <p style={{ color: "#dc2626", marginBottom: "12px" }}>{passwordError}</p>}
-        <input
-          type="password"
-          value={adminPassword}
-          onChange={(e) => setAdminPassword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
-          placeholder="Enter password"
-          style={{ width: "100%", padding: "12px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px" }}
-        />
-        <button onClick={handleUnlock} style={{ width: "100%", padding: "12px", background: "#1c69e3", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>
-          Unlock Admin Panel
-        </button>
+      <div className="mx-auto w-full max-w-6xl space-y-6">
+        <div className={`mx-auto w-full max-w-sm ${PANEL} text-center`}>
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent text-primary">
+            <KeyRound className="h-6 w-6" />
+          </div>
+          <h1 className="mb-1 text-xl font-bold tracking-tight">Admin login</h1>
+          <p className="mb-4 text-sm text-muted-foreground">
+            Enter the admin password to continue
+          </p>
+          {passwordError && (
+            <p className="mb-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm font-semibold text-rose-700 dark:text-rose-400">
+              {passwordError}
+            </p>
+          )}
+          <input
+            type="password"
+            value={adminPassword}
+            onChange={(e) => setAdminPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleUnlock()}
+            placeholder="Enter password"
+            className={`${INPUT} mb-3`}
+          />
+          <button onClick={handleUnlock} className={`${BTN_PRIMARY} w-full`}>
+            <Shield className="h-4 w-4" />
+            Unlock admin panel
+          </button>
+        </div>
       </div>
     );
   }
 
-  const tabStyle = {
-    padding: isMobile ? "8px 12px" : "10px 20px",
-    borderRadius: "8px",
-    fontWeight: "600",
-    cursor: "pointer",
-    border: "none",
-    fontSize: isMobile ? "12px" : "14px",
-    whiteSpace: "nowrap" as const,
-  };
+  const TABS: { id: "auto" | "signals" | "users" | "analytics"; label: string; icon: LucideIcon }[] = [
+    { id: "auto", label: "Zone strategy", icon: Crosshair },
+    { id: "signals", label: `Signals (${signals.length})`, icon: Activity },
+    { id: "users", label: `Users (${users.length})`, icon: Users },
+    { id: "analytics", label: "Analytics", icon: BarChart3 },
+  ];
+
+  const tabClass = (active: boolean) =>
+    `inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+      active
+        ? "bg-primary text-primary-foreground shadow-glow"
+        : "bg-muted text-muted-foreground hover:text-foreground"
+    }`;
 
   return (
-    <div style={{ maxWidth: "1000px", margin: "0 auto", padding: isMobile ? "12px" : "24px" }}>
-      <h1 style={{ fontSize: isMobile ? "22px" : "28px", fontWeight: "700", marginBottom: isMobile ? "16px" : "24px" }}>⚙️ Admin Panel</h1>
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Admin panel</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Signals, users and platform analytics
+          </p>
+        </div>
+        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold">
+          <Settings className="h-3.5 w-3.5 text-primary" />
+          Administrator
+        </div>
+      </div>
 
-      <div style={{ display: "flex", gap: isMobile ? "6px" : "12px", marginBottom: isMobile ? "16px" : "24px", flexWrap: "wrap" }}>
-        <button onClick={() => setActiveTab("auto")} style={{ ...tabStyle, background: activeTab === "auto" ? "#1c69e3" : "#e5e7eb", color: activeTab === "auto" ? "#fff" : "#111827" }}>
-          🎯 Zone Strategy
-        </button>
-        <button onClick={() => setActiveTab("signals")} style={{ ...tabStyle, background: activeTab === "signals" ? "#1c69e3" : "#e5e7eb", color: activeTab === "signals" ? "#fff" : "#111827" }}>
-          📊 Signals ({signals.length})
-        </button>
-        <button onClick={() => setActiveTab("users")} style={{ ...tabStyle, background: activeTab === "users" ? "#1c69e3" : "#e5e7eb", color: activeTab === "users" ? "#fff" : "#111827" }}>
-          👥 Users ({users.length})
-        </button>
-        <button onClick={() => setActiveTab("analytics")} style={{ ...tabStyle, background: activeTab === "analytics" ? "#1c69e3" : "#e5e7eb", color: activeTab === "analytics" ? "#fff" : "#111827" }}>
-          📈 Analytics
-        </button>
+      <div className="flex flex-wrap gap-2">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={tabClass(activeTab === tab.id)}>
+              <Icon className="h-3.5 w-3.5" />
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {activeTab === "auto" && (
-        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: isMobile ? "16px" : "24px" }}>
-          <h2 style={{ fontSize: isMobile ? "16px" : "18px", fontWeight: "700", marginBottom: "8px" }}>
-            🎯 Supply/Demand Zone Strategy
-          </h2>
-          <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "16px" }}>
+        <div className={PANEL}>
+          <div className="mb-1 flex items-center gap-2">
+            <Crosshair className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-bold tracking-tight">Supply/Demand zone strategy</h2>
+          </div>
+          <p className="mb-4 text-xs text-muted-foreground">
             Waits for price to reach a zone. Confirms with Large Range Candle (70%), Engulfing (55%), or Pin Bar (45%). SL beyond zone edge. TPs at 2.0 / 3.5 / 6.0 R:R.
           </p>
 
-          <div style={{ marginBottom: "20px" }}>
+          <div className="mb-5">
             <LiveChart
               onPairChange={setAutoPair}
               onTimeframeChange={setAutoTimeframe}
@@ -367,26 +524,18 @@ export default function AdminPage() {
             />
           </div>
 
-          <div style={{ marginBottom: "20px", display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: "150px" }}>
-              <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "6px" }}>Pair</label>
-              <select
-                value={autoPair}
-                onChange={(e) => setAutoPair(e.target.value)}
-                style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "14px" }}
-              >
+          <div className="mb-5 flex flex-wrap gap-3">
+            <div className="min-w-[150px] flex-1">
+              <label className={LABEL}>Pair</label>
+              <select value={autoPair} onChange={(e) => setAutoPair(e.target.value)} className={INPUT}>
                 {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY"].map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
             </div>
-            <div style={{ flex: 1, minWidth: "150px" }}>
-              <label style={{ display: "block", fontSize: "14px", fontWeight: "600", marginBottom: "6px" }}>Timeframe</label>
-              <select
-                value={autoTimeframe}
-                onChange={(e) => setAutoTimeframe(e.target.value)}
-                style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "14px" }}
-              >
+            <div className="min-w-[150px] flex-1">
+              <label className={LABEL}>Timeframe</label>
+              <select value={autoTimeframe} onChange={(e) => setAutoTimeframe(e.target.value)} className={INPUT}>
                 {TIMEFRAMES.map((tf) => (
                   <option key={tf} value={tf}>{tf}</option>
                 ))}
@@ -394,56 +543,57 @@ export default function AdminPage() {
             </div>
           </div>
 
-          <button
-            onClick={handleZoneAnalysis}
-            disabled={autoLoading}
-            style={{
-              width: "100%",
-              padding: "14px",
-              background: autoLoading ? "#9ca3af" : "#7c3aed",
-              color: "#fff",
-              border: "none",
-              borderRadius: "8px",
-              fontWeight: "700",
-              cursor: autoLoading ? "wait" : "pointer",
-              fontSize: "15px",
-            }}
-          >
-            {autoLoading ? "Analyzing..." : "🎯 Analyze Zones"}
+          <button onClick={handleZoneAnalysis} disabled={autoLoading} className={`${BTN_PRIMARY} w-full`}>
+            {autoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
+            {autoLoading ? "Analyzing..." : "Analyze zones"}
           </button>
 
           {autoError && (
-            <div style={{ padding: "12px", background: "#fef2f2", border: "1px solid #fecaca", color: "#dc2626", borderRadius: "8px", marginTop: "16px", fontSize: "14px" }}>
+            <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-sm text-rose-700 dark:text-rose-400">
               {autoError}
             </div>
           )}
 
           {/* WATCHING STATE */}
           {autoStatus === "watching" && autoResult && (
-            <div style={{ marginTop: "20px", padding: "16px", background: "#fef9c3", borderRadius: "8px", border: "1px solid #fde68a", fontSize: isMobile ? "13px" : "14px" }}>
-              <p style={{ fontWeight: "700", color: "#854d0e", marginBottom: "8px" }}>
-                👀 WATCHING — Waiting for setup
+            <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+              <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-700 dark:text-amber-400">
+                <Eye className="h-4 w-4" />
+                Watching — waiting for setup
               </p>
-              <p style={{ color: "#854d0e", fontSize: "13px" }}>
+              <p className="text-xs text-amber-700/90 dark:text-amber-400/90">
                 {autoError || (autoResult.zone ? `Nearest zone: ${autoResult.zone.type} at ${autoResult.zone.bottom?.toFixed(5)} - ${autoResult.zone.top?.toFixed(5)}` : "")}
               </p>
 
               {autoResult.zone && (
-                <div style={{ marginTop: "12px", padding: "10px", background: "#ffffff", borderRadius: "6px" }}>
-                  <p style={{ fontWeight: "700", color: "#854d0e", marginBottom: "6px", fontSize: "12px" }}>
-                    📍 NEAREST ZONE:
+                <div className="mt-3 rounded-lg border border-border bg-card p-3">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
+                    <LocateFixed className="h-3.5 w-3.5" />
+                    Nearest zone
                   </p>
-                  <p style={{ fontSize: "13px", color: "#6b7280" }}>
-                    {autoResult.zone.type === "demand" ? "🟢 Demand" : "🔴 Supply"} {autoResult.zone.bottom?.toFixed(5)} - {autoResult.zone.top?.toFixed(5)}
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {autoResult.zone.type === "demand" ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        Demand
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        Supply
+                      </>
+                    )}{" "}
+                    {autoResult.zone.bottom?.toFixed(5)} - {autoResult.zone.top?.toFixed(5)}
                   </p>
                   {autoResult.entrySignal && autoResult.entrySignal.type !== "none" && (
-                    <p style={{ marginTop: "8px", fontSize: "13px", color: "#6b7280" }}>
-                      Signal: <strong>{autoResult.entrySignal.type}</strong> — {autoResult.entrySignal.reason}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Signal: <strong className="text-foreground">{autoResult.entrySignal.type}</strong> — {autoResult.entrySignal.reason}
                     </p>
                   )}
                   {autoResult.entrySignal && autoResult.entrySignal.type === "none" && (
-                    <p style={{ marginTop: "8px", fontSize: "13px", color: "#854d0e" }}>
-                      ⏸️ No entry signal yet (need LRC, Engulfing, or Pin Bar)
+                    <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                      <CirclePause className="h-3.5 w-3.5" />
+                      No entry signal yet (need LRC, Engulfing, or Pin Bar)
                     </p>
                   )}
                 </div>
@@ -453,41 +603,45 @@ export default function AdminPage() {
 
           {/* NO SETUP STATE */}
           {autoStatus === "no_setup" && (
-            <div style={{ marginTop: "20px", padding: "16px", background: "#f3f4f6", borderRadius: "8px", border: "1px solid #d1d5db", textAlign: "center" }}>
-              <p style={{ fontWeight: "700", color: "#6b7280", marginBottom: "8px" }}>
-                No zones detected
-              </p>
-              <p style={{ color: "#6b7280", fontSize: "13px" }}>
-                Try another timeframe or pair.
-              </p>
+            <div className="mt-5 rounded-xl border border-dashed border-border px-6 py-8 text-center">
+              <Radar className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+              <p className="text-sm font-bold text-muted-foreground">No zones detected</p>
+              <p className="text-xs text-muted-foreground">Try another timeframe or pair.</p>
             </div>
           )}
 
           {/* SIGNAL STATE */}
           {autoStatus === "signal" && autoResult && autoResult.direction !== "neutral" && (
-            <div style={{ marginTop: "20px", padding: "16px", background: "#f3e8ff", borderRadius: "8px", border: "1px solid #d8b4fe", fontSize: isMobile ? "13px" : "14px" }}>
-              <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "12px" }}>
-                ✅ ZONE SIGNAL — {autoPair} ({autoTimeframe})
+            <div className="mt-5 rounded-xl border border-primary/30 bg-accent/60 p-4 text-sm">
+              <p className="mb-3 flex items-center gap-2 text-sm font-bold text-primary">
+                <CircleCheck className="h-4 w-4" />
+                Zone signal — {autoPair} ({autoTimeframe})
               </p>
 
               {/* Direction */}
-              <div style={{
-                padding: "14px",
-                borderRadius: "8px",
-                marginBottom: "12px",
-                textAlign: "center",
-                background: autoResult.direction === "long" ? "#dcfce7" : "#fee2e2",
-                border: `2px solid ${autoResult.direction === "long" ? "#16a34a" : "#dc2626"}`,
-              }}>
-                <p style={{ fontSize: "11px", fontWeight: "600", color: "#6b7280" }}>DIRECTION</p>
-                <p style={{ fontSize: "22px", fontWeight: "800", color: autoResult.direction === "long" ? "#16a34a" : "#dc2626" }}>
-                  {autoResult.direction === "long" ? "📈 BUY (LONG)" : "📉 SELL (SHORT)"}
+              <div
+                className={`mb-3 rounded-xl border-2 p-4 text-center ${
+                  autoResult.direction === "long"
+                    ? "border-emerald-500/50 bg-emerald-500/10"
+                    : "border-rose-500/50 bg-rose-500/10"
+                }`}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Direction</p>
+                <p
+                  className={`flex items-center justify-center gap-2 text-xl font-extrabold ${
+                    autoResult.direction === "long"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}
+                >
+                  {autoResult.direction === "long" ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                  {autoResult.direction === "long" ? "BUY (LONG)" : "SELL (SHORT)"}
                 </p>
-                <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
+                <p className="mt-1 text-xs text-muted-foreground">
                   {autoResult.confidence} confidence — score {autoResult.confidenceScore}/100
                 </p>
                 {autoResult.orderTypeDescription && (
-                  <p style={{ fontSize: "12px", color: "#7c3aed", marginTop: "4px", fontWeight: "600" }}>
+                  <p className="mt-1 text-xs font-semibold text-primary">
                     {autoResult.orderTypeDescription}
                   </p>
                 )}
@@ -495,161 +649,149 @@ export default function AdminPage() {
 
               {/* Zone */}
               {autoResult.zone && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#ffffff", borderRadius: "8px", border: "1px solid #d8b4fe" }}>
-                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "6px", fontSize: "12px" }}>
-                    📍 ZONE
+                <Section icon={LocateFixed} title="Zone">
+                  <p className="flex items-center gap-1.5 text-xs text-foreground">
+                    {autoResult.zone.type === "demand" ? (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        Demand Zone
+                      </>
+                    ) : (
+                      <>
+                        <span className="h-2 w-2 rounded-full bg-rose-500" />
+                        Supply Zone
+                      </>
+                    )}
+                    : {autoResult.zone.bottom?.toFixed(5)} - {autoResult.zone.top?.toFixed(5)}
                   </p>
-                  <p style={{ fontSize: "13px", color: "#374151" }}>
-                    {autoResult.zone.type === "demand" ? "🟢 Demand Zone" : "🔴 Supply Zone"}: {autoResult.zone.bottom?.toFixed(5)} - {autoResult.zone.top?.toFixed(5)}
-                  </p>
-                </div>
+                </Section>
               )}
 
               {/* Entry signal */}
               {autoResult.entrySignal && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#fef3c7", borderRadius: "8px", border: "1px solid #fde68a" }}>
-                  <p style={{ fontWeight: "700", color: "#d97706", marginBottom: "6px", fontSize: "12px" }}>
-                    🎯 ENTRY SIGNAL
-                  </p>
-                  <p style={{ fontSize: "13px", color: "#374151" }}>
+                <Section icon={Target} title="Entry signal">
+                  <p className="text-xs text-foreground">
                     <strong>{autoResult.entrySignal.type?.replace(/_/g, " ").toUpperCase()}</strong> — {autoResult.entrySignal.probability}% probability
                   </p>
-                  <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {autoResult.entrySignal.reason}
                   </p>
-                </div>
+                </Section>
               )}
 
               {/* Levels */}
-              <div style={{ marginBottom: "12px", padding: "12px", background: "#ffffff", borderRadius: "8px", border: "1px solid #d8b4fe" }}>
-                <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px", fontSize: "12px" }}>💰 LEVELS</p>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr 1fr", gap: "8px", fontSize: "13px" }}>
-                  <p>Entry: <strong style={{ color: "#1c69e3" }}>{autoResult.entryPrice?.toFixed(5)}</strong></p>
-                  <p>SL: <strong style={{ color: "#dc2626" }}>{autoResult.stopLossPrice?.toFixed(5)}</strong></p>
+              <Section icon={Wallet} title="Levels">
+                <div className={`grid gap-2 text-xs ${isMobile ? "grid-cols-2" : "grid-cols-3"}`}>
+                  <p>Entry: <strong className="text-primary">{autoResult.entryPrice?.toFixed(5)}</strong></p>
+                  <p>SL: <strong className="text-rose-600 dark:text-rose-400">{autoResult.stopLossPrice?.toFixed(5)}</strong></p>
                   <p>Risk: <strong>{autoResult.riskPips} pips</strong></p>
-                  <p>TP1: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit1Price?.toFixed(5)}</strong></p>
+                  <p>TP1: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit1Price?.toFixed(5)}</strong></p>
                   <p>R:R1: <strong>1:{autoResult.riskReward1}</strong></p>
-                  <p>TP2: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit2Price?.toFixed(5)}</strong></p>
+                  <p>TP2: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit2Price?.toFixed(5)}</strong></p>
                   <p>R:R2: <strong>1:{autoResult.riskReward2}</strong></p>
-                  <p>TP3: <strong style={{ color: "#16a34a" }}>{autoResult.takeProfit3Price?.toFixed(5)}</strong></p>
+                  <p>TP3: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit3Price?.toFixed(5)}</strong></p>
                   <p>R:R3: <strong>1:{autoResult.riskReward3}</strong></p>
                 </div>
-              </div>
+              </Section>
 
               {/* Confluence breakdown */}
               {autoResult.confluenceBreakdown && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#f0f9ff", borderRadius: "8px", border: "1px solid #bae6fd" }}>
-                  <p style={{ fontWeight: "700", color: "#0369a1", marginBottom: "6px", fontSize: "12px" }}>
-                    🔍 CONFLUENCE BREAKDOWN
-                  </p>
-                  <div style={{ fontSize: "12px", color: "#374151", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
-                    <p>{autoResult.confluenceBreakdown.supertrendAligned ? "✅" : "❌"} Supertrend</p>
-                    <p>{autoResult.confluenceBreakdown.rsiAligned ? "✅" : "❌"} RSI</p>
-                    <p>{autoResult.confluenceBreakdown.smaAligned ? "✅" : "❌"} SMA 9/21</p>
-                    <p>{autoResult.confluenceBreakdown.vwapAligned ? "✅" : "❌"} VWAP</p>
-                    <p>{autoResult.confluenceBreakdown.orderBlockNear ? "✅" : "❌"} Order Block</p>
-                    <p>{autoResult.confluenceBreakdown.fvgNear ? "✅" : "❌"} FVG</p>
-                    <p>{autoResult.confluenceBreakdown.roundNumber ? "✅" : "❌"} Round Number</p>
-                    <p>{autoResult.confluenceBreakdown.sessionFavorable ? "✅" : "❌"} Session ({autoResult.confluenceBreakdown.session})</p>
+                <Section icon={Radar} title="Confluence breakdown">
+                  <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
+                    <p>{autoResult.confluenceBreakdown.supertrendAligned ? "Aligned" : "Not aligned"} Supertrend</p>
+                    <p>{autoResult.confluenceBreakdown.rsiAligned ? "Aligned" : "Not aligned"} RSI</p>
+                    <p>{autoResult.confluenceBreakdown.smaAligned ? "Aligned" : "Not aligned"} SMA 9/21</p>
+                    <p>{autoResult.confluenceBreakdown.vwapAligned ? "Aligned" : "Not aligned"} VWAP</p>
+                    <p>{autoResult.confluenceBreakdown.orderBlockNear ? "Nearby" : "None"} Order Block</p>
+                    <p>{autoResult.confluenceBreakdown.fvgNear ? "Nearby" : "None"} FVG</p>
+                    <p>{autoResult.confluenceBreakdown.roundNumber ? "Nearby" : "None"} Round Number</p>
+                    <p>{autoResult.confluenceBreakdown.sessionFavorable ? "Favorable" : "Unfavorable"} Session ({autoResult.confluenceBreakdown.session})</p>
                   </div>
-                </div>
+                </Section>
               )}
 
               {/* Fibonacci */}
               {autoResult.fibonacci && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
-                  <p style={{ fontWeight: "700", color: "#1c69e3", marginBottom: "6px", fontSize: "12px" }}>
-                    📐 FIBONACCI LEVELS
-                  </p>
-                  <div style={{ fontSize: "12px", color: "#6b7280" }}>
+                <Section icon={Percent} title="Fibonacci levels">
+                  <div className="text-xs text-muted-foreground">
                     <p>Swing: {autoResult.fibonacci.swingStart?.toFixed(5)} → {autoResult.fibonacci.swingEnd?.toFixed(5)} ({autoResult.fibonacci.swingRange?.toFixed(5)} range)</p>
-                    <div style={{ marginTop: "6px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+                    <div className="mt-1.5 grid grid-cols-2 gap-1">
                       <p>Ext 1.272: <strong>{autoResult.fibonacci.ext_1_272?.toFixed(5)}</strong></p>
                       <p>Ext 1.618: <strong>{autoResult.fibonacci.ext_1_618?.toFixed(5)}</strong></p>
                       <p>Ext 2.0: <strong>{autoResult.fibonacci.ext_2_0?.toFixed(5)}</strong></p>
                       <p>Ret 0.236: <strong>{autoResult.fibonacci.ret_0_236?.toFixed(5)}</strong></p>
                     </div>
                   </div>
-                </div>
+                </Section>
               )}
 
               {/* Position sizing */}
               {autoResult.positionSizing && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                  <p style={{ fontWeight: "700", color: "#16a34a", marginBottom: "6px", fontSize: "12px" }}>
-                    💰 POSITION SIZING
-                  </p>
-                  <div style={{ fontSize: "12px", color: "#6b7280", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+                <Section icon={Wallet} title="Position sizing">
+                  <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
                     <p>Account: <strong>${autoResult.positionSizing.accountSize}</strong></p>
                     <p>Risk: <strong>{autoResult.positionSizing.riskPercent}% (${autoResult.positionSizing.riskDollars})</strong></p>
                     <p>Stop Distance: <strong>{autoResult.positionSizing.stopDistancePips} pips</strong></p>
                     <p>Position Size: <strong>{autoResult.positionSizing.lots} lots</strong></p>
                   </div>
-                </div>
+                </Section>
               )}
 
               {/* MTF */}
               {autoResult.mtfNote && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#f0fdfa", borderRadius: "8px", border: "1px solid #99f6e4" }}>
-                  <p style={{ fontWeight: "700", color: "#0d9488", marginBottom: "6px", fontSize: "12px" }}>
-                    ⏱️ MTF CONFIRMATION
-                  </p>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>{autoResult.mtfNote}</p>
-                </div>
+                <Section icon={Activity} title="MTF confirmation">
+                  <p className="text-xs text-muted-foreground">{autoResult.mtfNote}</p>
+                </Section>
               )}
 
               {/* Session */}
               {autoResult.session && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#fefce8", borderRadius: "8px", border: "1px solid #fde68a" }}>
-                  <p style={{ fontWeight: "700", color: "#854d0e", marginBottom: "6px", fontSize: "12px" }}>
-                    🕐 SESSION
+                <Section icon={Timer} title="Session">
+                  <p className="text-xs text-muted-foreground">
+                    <strong className="text-foreground">{autoResult.session}</strong> — {autoResult.sessionWeight}
                   </p>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>
-                    <strong>{autoResult.session}</strong> — {autoResult.sessionWeight}
-                  </p>
-                </div>
+                </Section>
               )}
 
               {/* Round number */}
               {autoResult.roundNumberNote && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#fce7f3", borderRadius: "8px", border: "1px solid #fbcfe8" }}>
-                  <p style={{ fontWeight: "700", color: "#be185d", marginBottom: "6px", fontSize: "12px" }}>
-                    🎯 ROUND NUMBER
-                  </p>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>{autoResult.roundNumberNote}</p>
-                </div>
+                <Section icon={Target} title="Round number">
+                  <p className="text-xs text-muted-foreground">{autoResult.roundNumberNote}</p>
+                </Section>
               )}
 
               {/* Trade management */}
               {autoResult.tradeManagement && autoResult.tradeManagement.length > 0 && (
-                <div style={{ marginBottom: "12px", padding: "10px", background: "#faf5ff", borderRadius: "8px", border: "1px solid #e9d5ff" }}>
-                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "6px", fontSize: "12px" }}>
-                    📌 TRADE MANAGEMENT
-                  </p>
-                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                <Section icon={StickyNote} title="Trade management">
+                  <ul className="space-y-0.5 text-xs text-muted-foreground">
                     {autoResult.tradeManagement.map((note: string, i: number) => (
-                      <li key={i} style={{ padding: "2px 0" }}>• {note}</li>
+                      <li key={i} className="flex gap-1.5">
+                        <span className="text-primary">•</span>
+                        {note}
+                      </li>
                     ))}
                   </ul>
-                </div>
+                </Section>
               )}
 
               {/* Confluences */}
               {autoResult.confluences && autoResult.confluences.length > 0 && (
-                <div style={{ padding: "12px", background: "#f5f3ff", borderRadius: "8px", border: "1px solid #ddd6fe" }}>
-                  <p style={{ fontWeight: "700", color: "#7c3aed", marginBottom: "8px" }}>🔗 NOTES:</p>
-                  <ul style={{ listStyle: "none", padding: 0, fontSize: "12px", color: "#6b7280" }}>
+                <div className="rounded-xl border border-border bg-muted/60 p-3">
+                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    <Link2 className="h-3.5 w-3.5 text-primary" />
+                    Notes
+                  </p>
+                  <ul className="space-y-1 text-xs text-muted-foreground">
                     {autoResult.confluences.map((c: string, i: number) => (
-                      <li key={i} style={{ padding: "3px 0" }}>{c}</li>
+                      <li key={i}>{c}</li>
                     ))}
                   </ul>
                 </div>
               )}
 
-              <div style={{ marginTop: "12px", padding: "10px", background: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                <p style={{ fontSize: "12px", color: "#16a34a" }}>
-                  ✅ Signal saved. Telegram posting handled by /api/signals.
-                </p>
+              <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-700 dark:text-emerald-400">
+                <Check className="h-3.5 w-3.5" />
+                Signal saved. Telegram posting handled by /api/signals.
               </div>
             </div>
           )}
@@ -657,196 +799,243 @@ export default function AdminPage() {
       )}
 
       {activeTab === "signals" && (
-        <div>
-          <button onClick={() => setShowAddSignal(true)} style={{ marginBottom: "16px", padding: isMobile ? "8px 16px" : "10px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: isMobile ? "12px" : "14px" }}>
-            + Add Signal (24h expiry)
+        <div className="space-y-4">
+          <button onClick={() => setShowAddSignal(true)} className={BTN_PRIMARY}>
+            <Plus className="h-4 w-4" />
+            Add signal (24h expiry)
           </button>
 
-          {loadingSignals && <p style={{ color: "#6b7280" }}>Loading signals...</p>}
+          {loadingSignals && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading signals...
+            </p>
+          )}
 
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? "500px" : "auto" }}>
-                <thead>
-                  <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Pair</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Direction</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Entry</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Expiry</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Type</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signals.map((signal: any) => (
-                    <tr key={signal._id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <td style={{ padding: "12px", fontWeight: "600", fontSize: isMobile ? "12px" : "14px" }}>{signal.pair}</td>
-                      <td style={{ padding: "12px", color: signal.direction === "long" ? "#16a34a" : "#dc2626", fontSize: isMobile ? "12px" : "14px" }}>{signal.direction?.toUpperCase()}</td>
-                      <td style={{ padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>{signal.entry}</td>
-                      <td style={{ padding: "12px", fontSize: isMobile ? "11px" : "12px", color: signal.expiresAt && new Date(signal.expiresAt).getTime() < Date.now() ? "#dc2626" : "#6b7280" }}>
-                        {getTimeRemaining(signal.expiresAt)}
+          <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-card">
+            <table className={TABLE}>
+              <thead>
+                <tr className={THEAD_ROW}>
+                  <th className={TH}>Pair</th>
+                  <th className={TH}>Direction</th>
+                  <th className={TH}>Entry</th>
+                  <th className={TH}>Expiry</th>
+                  <th className={TH}>Type</th>
+                  <th className={TH}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signals.map((signal: any) => {
+                  const expired = signal.expiresAt && new Date(signal.expiresAt).getTime() < Date.now();
+                  return (
+                    <tr key={signal._id} className={TBODY_ROW}>
+                      <td className={`${TD} font-semibold`}>{signal.pair}</td>
+                      <td className={TD}>
+                        <span className={signal.direction === "long" ? BADGE_POSITIVE : BADGE_NEGATIVE}>
+                          {signal.direction?.toUpperCase()}
+                        </span>
                       </td>
-                      <td style={{ padding: "12px" }}>
+                      <td className={TD}>{signal.entry}</td>
+                      <td className={TD}>
+                        <span className={expired ? BADGE_NEGATIVE : BADGE_NEUTRAL}>
+                          {getTimeRemaining(signal.expiresAt)}
+                        </span>
+                      </td>
+                      <td className={TD}>
                         {signal.isAutoGenerated ? (
-                          <span style={{ padding: "4px 8px", background: "#f3e8ff", color: "#7c3aed", borderRadius: "4px", fontSize: "12px" }}>Auto</span>
+                          <span className={`${BADGE_BASE} bg-accent text-accent-foreground`}>Auto</span>
                         ) : (
-                          <span style={{ padding: "4px 8px", background: "#dbeafe", color: "#1c69e3", borderRadius: "4px", fontSize: "12px" }}>Manual</span>
+                          <span className={BADGE_NEUTRAL}>Manual</span>
                         )}
                       </td>
-                      <td style={{ padding: "12px" }}>
-                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                          <button onClick={() => toggleSignal(signal._id)} style={{ padding: "6px 10px", background: signal.isActive ? "#16a34a" : "#6b7280", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>
+                      <td className={TD}>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            onClick={() => toggleSignal(signal._id)}
+                            className={
+                              signal.isActive
+                                ? "inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-500/10 dark:text-emerald-400"
+                                : BTN_CHIP
+                            }
+                          >
+                            <CircleCheck className="h-3.5 w-3.5" />
                             {signal.isActive ? "Active" : "Inactive"}
                           </button>
-                          <button onClick={() => deleteSignal(signal._id)} style={{ padding: "6px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>
+                          <button onClick={() => deleteSignal(signal._id)} className={BTN_DANGER}>
+                            <Trash2 className="h-3.5 w-3.5" />
                             Delete
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
-                  {signals.length === 0 && !loadingSignals && (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "#6b7280" }}>No signals yet.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+                {signals.length === 0 && !loadingSignals && (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                      No signals yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
       {activeTab === "users" && (
-        <div>
-          <button onClick={() => setShowAddUser(true)} style={{ marginBottom: "16px", padding: isMobile ? "8px 16px" : "10px 20px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer", fontSize: isMobile ? "12px" : "14px" }}>
-            + Add User
+        <div className="space-y-4">
+          <button onClick={() => setShowAddUser(true)} className={BTN_PRIMARY}>
+            <Plus className="h-4 w-4" />
+            Add user
           </button>
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? "400px" : "auto" }}>
-                <thead>
-                  <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>User</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Tier</th>
-                    <th style={{ textAlign: "left", padding: "12px", fontSize: isMobile ? "12px" : "14px" }}>Actions</th>
+          <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-card">
+            <table className={TABLE}>
+              <thead>
+                <tr className={THEAD_ROW}>
+                  <th className={TH}>User</th>
+                  <th className={TH}>Tier</th>
+                  <th className={TH}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user: any) => (
+                  <tr key={user._id} className={TBODY_ROW}>
+                    <td className={TD}>
+                      <p className="font-semibold">{user.name || "Unknown"}</p>
+                      <p className="text-xs text-muted-foreground">{user.email}</p>
+                    </td>
+                    <td className={TD}>
+                      <span className={tierBadgeClass(user.tier)}>
+                        {(user.tier || "free").toUpperCase()}
+                      </span>
+                    </td>
+                    <td className={TD}>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button onClick={() => activateUser(user._id, "vip")} className={BTN_CHIP}>VIP</button>
+                        <button onClick={() => activateUser(user._id, "vvip")} className={BTN_CHIP}>
+                          <Gem className="h-3.5 w-3.5 text-primary" />
+                          VVIP
+                        </button>
+                        <button onClick={() => activateUser(user._id, "free")} className={BTN_CHIP}>Free</button>
+                        <button onClick={() => deleteUser(user._id)} className={BTN_DANGER}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {users.map((user: any) => (
-                    <tr key={user._id} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <td style={{ padding: "12px" }}>
-                        <p style={{ fontWeight: "600", fontSize: isMobile ? "12px" : "14px" }}>{user.name || "Unknown"}</p>
-                        <p style={{ fontSize: isMobile ? "11px" : "12px", color: "#6b7280" }}>{user.email}</p>
-                      </td>
-                      <td style={{ padding: "12px" }}>
-                        <span style={{ padding: "4px 8px", borderRadius: "4px", fontSize: "12px", fontWeight: "600", background: user.tier === "vvip" ? "#f3e8ff" : user.tier === "vip" ? "#dbeafe" : "#e5e7eb", color: user.tier === "vvip" ? "#7c3aed" : user.tier === "vip" ? "#1c69e3" : "#111827" }}>
-                          {(user.tier || "free").toUpperCase()}
-                        </span>
-                      </td>
-                      <td style={{ padding: "12px" }}>
-                        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                          <button onClick={() => activateUser(user._id, "vip")} style={{ padding: "6px 10px", background: "#1c69e3", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>VIP</button>
-                          <button onClick={() => activateUser(user._id, "vvip")} style={{ padding: "6px 10px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>VVIP</button>
-                          <button onClick={() => activateUser(user._id, "free")} style={{ padding: "6px 10px", background: "#6b7280", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Free</button>
-                          <button onClick={() => deleteUser(user._id)} style={{ padding: "6px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "11px" }}>Delete</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+                {users.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                      No users yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
       {activeTab === "analytics" && (
-        <div>
-          {loadingAnalytics && <p style={{ color: "#6b7280" }}>Loading analytics...</p>}
+        <div className="space-y-6">
+          {loadingAnalytics && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading analytics...
+            </p>
+          )}
 
           {analyticsData && (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px", marginBottom: "20px" }}>
-                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Users</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats?.totalUsers ?? 0}</p>
-                </div>
-                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Trades</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats?.totalTrades ?? 0}</p>
-                </div>
-                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Total Signals</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800" }}>{analyticsData.platformStats?.totalSignals ?? 0}</p>
-                </div>
-                <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", textAlign: "center" }}>
-                  <p style={{ fontSize: "12px", color: "#6b7280" }}>Platform P&L</p>
-                  <p style={{ fontSize: "24px", fontWeight: "800", color: (analyticsData.platformStats?.totalPnL ?? 0) >= 0 ? "#16a34a" : "#dc2626" }}>
-                    {(analyticsData.platformStats?.totalPnL ?? 0) >= 0 ? "+" : ""}${analyticsData.platformStats?.totalPnL ?? 0}
-                  </p>
-                </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <StatCard icon={Users} label="Total users" value={analyticsData.platformStats?.totalUsers ?? 0} />
+                <StatCard icon={Activity} label="Total trades" value={analyticsData.platformStats?.totalTrades ?? 0} />
+                <StatCard icon={Layers} label="Total signals" value={analyticsData.platformStats?.totalSignals ?? 0} />
+                <StatCard
+                  icon={Wallet}
+                  label="Platform P&L"
+                  tone={(analyticsData.platformStats?.totalPnL ?? 0) >= 0 ? "positive" : "negative"}
+                  value={`${(analyticsData.platformStats?.totalPnL ?? 0) >= 0 ? "+" : ""}$${analyticsData.platformStats?.totalPnL ?? 0}`}
+                />
               </div>
 
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden", marginBottom: "20px" }}>
-                <h3 style={{ padding: "16px", fontWeight: "700", fontSize: "16px", borderBottom: "1px solid #e5e7eb" }}>
-                  👥 User Performance
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+                <h3 className="flex items-center gap-2 border-b border-border px-5 py-4 text-base font-bold tracking-tight">
+                  <Users className="h-4 w-4 text-primary" />
+                  User performance
                 </h3>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? "600px" : "auto" }}>
+                <div className="overflow-x-auto">
+                  <table className={TABLE}>
                     <thead>
-                      <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>User</th>
-                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Tier</th>
-                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Trades</th>
-                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Win Rate</th>
-                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>P&L</th>
-                        <th style={{ textAlign: "left", padding: "10px", fontSize: "12px" }}>Profit Factor</th>
+                      <tr className={THEAD_ROW}>
+                        <th className={TH}>User</th>
+                        <th className={TH}>Tier</th>
+                        <th className={TH}>Trades</th>
+                        <th className={TH}>Win Rate</th>
+                        <th className={TH}>P&L</th>
+                        <th className={TH}>Profit Factor</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(analyticsData.userPerformance ?? []).map((user: any) => (
-                        <tr key={user.userId} style={{ borderBottom: "1px solid #e5e7eb" }}>
-                          <td style={{ padding: "10px", fontSize: "13px" }}>
-                            <p style={{ fontWeight: "600" }}>{user.name}</p>
-                            <p style={{ fontSize: "11px", color: "#6b7280" }}>{user.email}</p>
+                        <tr key={user.userId} className={TBODY_ROW}>
+                          <td className={TD}>
+                            <p className="font-semibold">{user.name}</p>
+                            <p className="text-xs text-muted-foreground">{user.email}</p>
                           </td>
-                          <td style={{ padding: "10px" }}>
-                            <span style={{ padding: "4px 8px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", background: user.tier === "vvip" ? "#f3e8ff" : user.tier === "vip" ? "#dbeafe" : "#e5e7eb", color: user.tier === "vvip" ? "#7c3aed" : user.tier === "vip" ? "#1c69e3" : "#111827" }}>
+                          <td className={TD}>
+                            <span className={tierBadgeClass(user.tier)}>
                               {user.tier?.toUpperCase() ?? "FREE"}
                             </span>
                           </td>
-                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>{user.totalTrades}</td>
-                          <td style={{ padding: "10px", fontSize: "13px", color: user.winRate >= 50 ? "#16a34a" : "#dc2626", fontWeight: "700" }}>{user.winRate}%</td>
-                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "700", color: user.totalPnL >= 0 ? "#16a34a" : "#dc2626" }}>
-                            {user.totalPnL >= 0 ? "+" : ""}${user.totalPnL}
+                          <td className={`${TD} font-semibold`}>{user.totalTrades}</td>
+                          <td className={TD}>
+                            <span className={user.winRate >= 50 ? BADGE_POSITIVE : BADGE_NEGATIVE}>{user.winRate}%</span>
                           </td>
-                          <td style={{ padding: "10px", fontSize: "13px", fontWeight: "600" }}>{user.profitFactor?.toFixed(2) ?? "0.00"}</td>
+                          <td className={TD}>
+                            <span className={user.totalPnL >= 0 ? BADGE_POSITIVE : BADGE_NEGATIVE}>
+                              {user.totalPnL >= 0 ? "+" : ""}${user.totalPnL}
+                            </span>
+                          </td>
+                          <td className={`${TD} font-semibold`}>{user.profitFactor?.toFixed(2) ?? "0.00"}</td>
                         </tr>
                       ))}
+                      {(analyticsData.userPerformance ?? []).length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                            No performance data yet.
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px" }}>
-                <h3 style={{ fontWeight: "700", fontSize: "16px", marginBottom: "16px" }}>📊 Signal Metrics</h3>
-                <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: "12px" }}>
-                  <div style={{ padding: "12px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Total</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800" }}>{analyticsData.signalMetrics?.totalSignals ?? 0}</p>
+              <div className={PANEL}>
+                <h3 className="mb-4 flex items-center gap-2 text-base font-bold tracking-tight">
+                  <BarChart3 className="h-4 w-4 text-primary" />
+                  Signal metrics
+                </h3>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-xl border border-border bg-background p-3 text-center">
+                    <p className="text-xs text-muted-foreground">Total</p>
+                    <p className="text-xl font-bold tracking-tight">{analyticsData.signalMetrics?.totalSignals ?? 0}</p>
                   </div>
-                  <div style={{ padding: "12px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Active</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#16a34a" }}>{analyticsData.signalMetrics?.activeSignals ?? 0}</p>
+                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
+                    <p className="text-xs text-muted-foreground">Active</p>
+                    <p className="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{analyticsData.signalMetrics?.activeSignals ?? 0}</p>
                   </div>
-                  <div style={{ padding: "12px", background: "#f3e8ff", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Auto</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#7c3aed" }}>{analyticsData.signalMetrics?.autoGenerated ?? 0}</p>
+                  <div className="rounded-xl border border-border bg-accent p-3 text-center">
+                    <p className="text-xs text-muted-foreground">Auto</p>
+                    <p className="text-xl font-bold tracking-tight text-primary">{analyticsData.signalMetrics?.autoGenerated ?? 0}</p>
                   </div>
-                  <div style={{ padding: "12px", background: "#dbeafe", borderRadius: "8px", textAlign: "center" }}>
-                    <p style={{ fontSize: "12px", color: "#6b7280" }}>Manual</p>
-                    <p style={{ fontSize: "22px", fontWeight: "800", color: "#1c69e3" }}>{analyticsData.signalMetrics?.manualSignals ?? 0}</p>
+                  <div className="rounded-xl border border-border bg-muted p-3 text-center">
+                    <p className="text-xs text-muted-foreground">Manual</p>
+                    <p className="text-xl font-bold tracking-tight">{analyticsData.signalMetrics?.manualSignals ?? 0}</p>
                   </div>
                 </div>
               </div>
@@ -856,44 +1045,66 @@ export default function AdminPage() {
       )}
 
       {showAddSignal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
-          <div style={{ background: "#fff", borderRadius: "12px", padding: isMobile ? "16px" : "24px", maxWidth: "400px", width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
-            <h3 style={{ fontWeight: "700", marginBottom: "16px", fontSize: isMobile ? "16px" : "18px" }}>Add New Signal</h3>
-            <select value={newSignal.pair} onChange={(e) => setNewSignal({ ...newSignal, pair: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }}>
-              {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"].map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <select value={newSignal.direction} onChange={(e) => setNewSignal({ ...newSignal, direction: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }}>
-              <option value="long">Long (Buy)</option>
-              <option value="short">Short (Sell)</option>
-            </select>
-            <input type="text" placeholder="Entry Price" value={newSignal.entry} onChange={(e) => setNewSignal({ ...newSignal, entry: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <input type="text" placeholder="Stop Loss" value={newSignal.stopLoss} onChange={(e) => setNewSignal({ ...newSignal, stopLoss: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <input type="text" placeholder="TP1" value={newSignal.takeProfit1} onChange={(e) => setNewSignal({ ...newSignal, takeProfit1: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <input type="text" placeholder="TP2" value={newSignal.takeProfit2} onChange={(e) => setNewSignal({ ...newSignal, takeProfit2: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <input type="text" placeholder="TP3" value={newSignal.takeProfit3} onChange={(e) => setNewSignal({ ...newSignal, takeProfit3: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }} />
-            <div style={{ display: "flex", gap: "12px" }}>
-              <button onClick={handleAddSignal} style={{ flex: 1, padding: "10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>Add Signal</button>
-              <button onClick={() => setShowAddSignal(false)} style={{ flex: 1, padding: "10px", background: "#e5e7eb", color: "#111827", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>Cancel</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <h3 className="text-base font-bold tracking-tight">Add new signal</h3>
+              <button
+                onClick={() => setShowAddSignal(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <select value={newSignal.pair} onChange={(e) => setNewSignal({ ...newSignal, pair: e.target.value })} className={INPUT}>
+                {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"].map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <select value={newSignal.direction} onChange={(e) => setNewSignal({ ...newSignal, direction: e.target.value })} className={INPUT}>
+                <option value="long">Long (Buy)</option>
+                <option value="short">Short (Sell)</option>
+              </select>
+              <input type="text" placeholder="Entry Price" value={newSignal.entry} onChange={(e) => setNewSignal({ ...newSignal, entry: e.target.value })} className={INPUT} />
+              <input type="text" placeholder="Stop Loss" value={newSignal.stopLoss} onChange={(e) => setNewSignal({ ...newSignal, stopLoss: e.target.value })} className={INPUT} />
+              <input type="text" placeholder="TP1" value={newSignal.takeProfit1} onChange={(e) => setNewSignal({ ...newSignal, takeProfit1: e.target.value })} className={INPUT} />
+              <input type="text" placeholder="TP2" value={newSignal.takeProfit2} onChange={(e) => setNewSignal({ ...newSignal, takeProfit2: e.target.value })} className={INPUT} />
+              <input type="text" placeholder="TP3" value={newSignal.takeProfit3} onChange={(e) => setNewSignal({ ...newSignal, takeProfit3: e.target.value })} className={INPUT} />
+            </div>
+            <div className="mt-4 flex gap-3">
+              <button onClick={handleAddSignal} className={`${BTN_PRIMARY} flex-1`}>Add signal</button>
+              <button onClick={() => setShowAddSignal(false)} className={`${BTN_SECONDARY} flex-1`}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
       {showAddUser && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
-          <div style={{ background: "#fff", borderRadius: "12px", padding: isMobile ? "16px" : "24px", maxWidth: "400px", width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
-            <h3 style={{ fontWeight: "700", marginBottom: "16px", fontSize: isMobile ? "16px" : "18px" }}>Add New User</h3>
-            <input type="text" placeholder="Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <input type="email" placeholder="Email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <input type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "12px", fontSize: "14px" }} />
-            <select value={newUser.tier} onChange={(e) => setNewUser({ ...newUser, tier: e.target.value })} style={{ width: "100%", padding: "10px", border: "1px solid #d1d5db", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }}>
-              <option value="free">Free (5 days)</option>
-              <option value="vip">VIP (30 days)</option>
-              <option value="vvip">VVIP (30 days)</option>
-            </select>
-            <div style={{ display: "flex", gap: "12px" }}>
-              <button onClick={handleAddUser} style={{ flex: 1, padding: "10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>Add User</button>
-              <button onClick={() => setShowAddUser(false)} style={{ flex: 1, padding: "10px", background: "#e5e7eb", color: "#111827", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>Cancel</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <h3 className="text-base font-bold tracking-tight">Add new user</h3>
+              <button
+                onClick={() => setShowAddUser(false)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <input type="text" placeholder="Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} className={INPUT} />
+              <input type="email" placeholder="Email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} className={INPUT} />
+              <input type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} className={INPUT} />
+              <select value={newUser.tier} onChange={(e) => setNewUser({ ...newUser, tier: e.target.value })} className={INPUT}>
+                <option value="free">Free (5 days)</option>
+                <option value="vip">VIP (30 days)</option>
+                <option value="vvip">VVIP (30 days)</option>
+              </select>
+            </div>
+            <div className="mt-4 flex gap-3">
+              <button onClick={handleAddUser} className={`${BTN_PRIMARY} flex-1`}>Add user</button>
+              <button onClick={() => setShowAddUser(false)} className={`${BTN_SECONDARY} flex-1`}>Cancel</button>
             </div>
           </div>
         </div>

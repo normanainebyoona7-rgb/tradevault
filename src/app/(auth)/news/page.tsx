@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { ArrowUpRight, Clock, Newspaper, RefreshCw } from "lucide-react";
 
 export default function NewsPage() {
   const [news, setNews] = useState<any[]>([]);
@@ -51,47 +52,75 @@ export default function NewsPage() {
   };
 
   return (
-    <div style={{ maxWidth: "1000px", margin: "0 auto", padding: "24px" }}>
-      <h1 style={{ fontSize: "28px", fontWeight: "700", marginBottom: "8px" }}>📰 Forex News</h1>
-      <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "24px" }}>
-        Latest market news — updated regularly
-      </p>
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Forex news</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Latest market news — updated regularly
+          </p>
+        </div>
+        <button
+          onClick={fetchNews}
+          disabled={loading}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3.5 py-2 text-sm font-semibold text-foreground transition hover:bg-accent disabled:opacity-60"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      </div>
 
       {loading ? (
-        <p style={{ textAlign: "center", padding: "40px", color: "#6b7280" }}>Loading news...</p>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "16px" }}>
-          {news.map((item, i) => (
-            <div
-              key={i}
-              style={{
-                background: "#fff",
-                border: "1px solid #e5e7eb",
-                borderRadius: "12px",
-                padding: "20px",
-                cursor: item.url ? "pointer" : "default",
-                transition: "all 0.3s ease",
-              }}
-              onClick={() => {
-                if (item.url) window.open(item.url, "_blank");
-              }}
-            >
-              <span style={{
-                display: "inline-block", padding: "4px 8px", borderRadius: "4px",
-                fontSize: "11px", fontWeight: "700", textTransform: "uppercase",
-                background: `${item.color}20`, color: item.color, marginBottom: "12px",
-              }}>
-                {item.category}
-              </span>
-              <h3 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "8px" }}>{item.title}</h3>
-              <p style={{ fontSize: "13px", color: "#6b7280", marginBottom: "12px" }}>{item.desc}</p>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#9ca3af" }}>
-                <span>{item.source}</span>
-                <span>{item.time}</span>
-              </div>
-            </div>
-          ))}
+        <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
+          Loading news...
         </div>
+      ) : (
+        <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="mb-4 flex items-center gap-2">
+            <Newspaper className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-bold tracking-tight">Market headlines</h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {news.map((item, i) => (
+              <div
+                key={i}
+                className={`rounded-xl border border-border bg-card p-4 ${
+                  item.url ? "hover-lift cursor-pointer hover:shadow-card-hover" : ""
+                }`}
+                onClick={() => {
+                  if (item.url) window.open(item.url, "_blank");
+                }}
+              >
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-accent-foreground">
+                    {item.category}
+                  </span>
+                  {item.url && (
+                    <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
+                <h3 className="text-sm font-semibold leading-snug">{item.title}</h3>
+                <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+                  {item.desc}
+                </p>
+                <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3 text-[11px] text-muted-foreground">
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-semibold">
+                    {item.source}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {item.time}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {news.length === 0 && (
+              <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">
+                No news available right now.
+              </div>
+            )}
+          </div>
+        </section>
       )}
     </div>
   );

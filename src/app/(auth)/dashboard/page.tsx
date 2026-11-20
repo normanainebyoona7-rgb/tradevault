@@ -5,6 +5,17 @@ import Trade from "@/lib/models/trade";
 import Signal from "@/lib/models/signal";
 import mongoose from "mongoose";
 import Link from "next/link";
+import {
+  Activity,
+  ArrowUpRight,
+  Calculator,
+  CandlestickChart,
+  Plus,
+  Radio,
+  Target,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -28,150 +39,234 @@ export default async function DashboardPage() {
   const totalLossesPnl = Math.abs(losses.reduce((sum: number, t: any) => sum + (t.pnl || 0), 0));
   const profitFactor = totalLossesPnl > 0 ? (totalWinsPnl / totalLossesPnl).toFixed(2) : "∞";
 
-  // Market analysis data (simulated for display)
-  const marketPairs = [
-    { pair: "EUR/USD", price: "1.0850", change: "+0.25%", trend: "UPTREND", bias: "Bullish", signal: "BUY" },
-    { pair: "GBP/USD", price: "1.2700", change: "-0.15%", trend: "DOWNTREND", bias: "Bearish", signal: "SELL" },
-    { pair: "USD/JPY", price: "148.50", change: "+0.40%", trend: "UPTREND", bias: "Bullish", signal: "BUY" },
-    { pair: "XAU/USD", price: "2400.00", change: "+0.80%", trend: "STRONG UPTREND", bias: "Strong Bullish", signal: "BUY" },
-    { pair: "BTC/USD", price: "67250.00", change: "-1.20%", trend: "DOWNTREND", bias: "Bearish", signal: "SELL" },
-    { pair: "ETH/USD", price: "3250.00", change: "+0.10%", trend: "NEUTRAL", bias: "Neutral", signal: "WAIT" },
+  const pnlTone =
+    totalPnl >= 0
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-rose-600 dark:text-rose-400";
+
+  const stats = [
+    {
+      label: "Total P&L",
+      value: `${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`,
+      icon: Wallet,
+      tone: pnlTone,
+    },
+    {
+      label: "Win Rate",
+      value: `${winRate}%`,
+      icon: Target,
+      tone: "text-foreground",
+    },
+    {
+      label: "Trades",
+      value: String(totalTrades),
+      icon: CandlestickChart,
+      tone: "text-foreground",
+    },
+    {
+      label: "Profit Factor",
+      value: profitFactor,
+      icon: Activity,
+      tone: "text-primary",
+    },
   ];
 
   return (
-    <div style={{ padding: "12px", width: "100%", maxWidth: "100%", overflowX: "hidden" }}>
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       {/* Header */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
-        <h1 style={{ fontSize: "22px", fontWeight: "800", color: "#111827" }}>Trading Dashboard</h1>
-        <p style={{ fontSize: "14px", color: "#6b7280" }}>Welcome back, {session.name}!</p>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <Link href="/calculator" style={{ padding: "8px 16px", background: "#e5e7eb", color: "#111827", borderRadius: "8px", fontWeight: "600", fontSize: "13px", textDecoration: "none" }}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Trading dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Welcome back, {session.name}! Here is how your book is doing.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/calculator"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-3.5 py-2 text-sm font-semibold text-foreground transition hover:bg-accent"
+          >
+            <Calculator className="h-4 w-4" />
             Calculator
           </Link>
-          <Link href="/journal/new" style={{ padding: "8px 16px", background: "#1c69e3", color: "#fff", borderRadius: "8px", fontWeight: "600", fontSize: "13px", textDecoration: "none" }}>
-            + New Trade
+          <Link
+            href="/journal/new"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95"
+          >
+            <Plus className="h-4 w-4" />
+            New Trade
           </Link>
         </div>
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "10px", marginBottom: "20px" }}>
-        {[
-          { label: "Total P&L", value: `${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`, color: totalPnl >= 0 ? "#16a34a" : "#dc2626" },
-          { label: "Win Rate", value: `${winRate}%`, color: "#1c69e3" },
-          { label: "Trades", value: String(totalTrades), color: "#111827" },
-          { label: "Profit Factor", value: profitFactor, color: "#7c3aed" },
-        ].map((stat, i) => (
-          <div key={i} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "14px", textAlign: "center" }}>
-            <p style={{ fontSize: "11px", color: "#6b7280", marginBottom: "6px" }}>{stat.label}</p>
-            <p style={{ fontSize: "20px", fontWeight: "800", color: stat.color }}>{stat.value}</p>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div
+              key={stat.label}
+              className="rounded-xl border border-border bg-card p-4 shadow-card"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {stat.label}
+                </span>
+                <Icon className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <p className={`mt-1 text-2xl font-bold tabular-nums ${stat.tone}`}>
+                {stat.value}
+              </p>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Forex Market Analysis */}
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "14px", marginBottom: "20px" }}>
-        <h2 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "12px" }}>
-          📊 Forex Market Analysis
-        </h2>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "500px" }}>
-            <thead>
-              <tr style={{ background: "#f9fafb", borderBottom: "2px solid #e5e7eb" }}>
-                <th style={{ textAlign: "left", padding: "8px", fontSize: "12px" }}>Pair</th>
-                <th style={{ textAlign: "left", padding: "8px", fontSize: "12px" }}>Price</th>
-                <th style={{ textAlign: "left", padding: "8px", fontSize: "12px" }}>Change</th>
-                <th style={{ textAlign: "left", padding: "8px", fontSize: "12px" }}>Trend</th>
-                <th style={{ textAlign: "left", padding: "8px", fontSize: "12px" }}>Bias</th>
-                <th style={{ textAlign: "left", padding: "8px", fontSize: "12px" }}>Signal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {marketPairs.map((market, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: "8px", fontWeight: "700", fontSize: "13px" }}>{market.pair}</td>
-                  <td style={{ padding: "8px", fontSize: "13px" }}>{market.price}</td>
-                  <td style={{ padding: "8px", fontSize: "13px", color: market.change.startsWith("+") ? "#16a34a" : "#dc2626" }}>{market.change}</td>
-                  <td style={{ padding: "8px" }}>
-                    <span style={{
-                      padding: "2px 8px", borderRadius: "4px", fontSize: "10px", fontWeight: "700",
-                      background: market.trend.includes("UP") ? "#dcfce7" : market.trend.includes("DOWN") ? "#fee2e2" : "#f3f4f6",
-                      color: market.trend.includes("UP") ? "#16a34a" : market.trend.includes("DOWN") ? "#dc2626" : "#6b7280",
-                    }}>
-                      {market.trend}
-                    </span>
-                  </td>
-                  <td style={{ padding: "8px", fontSize: "12px" }}>{market.bias}</td>
-                  <td style={{ padding: "8px" }}>
-                    <span style={{
-                      padding: "2px 8px", borderRadius: "4px", fontSize: "10px", fontWeight: "700",
-                      background: market.signal === "BUY" ? "#dcfce7" : market.signal === "SELL" ? "#fee2e2" : "#fef3c7",
-                      color: market.signal === "BUY" ? "#16a34a" : market.signal === "SELL" ? "#dc2626" : "#f59e0b",
-                    }}>
-                      {market.signal}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Live chart CTA */}
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-card">
+        <div className="pointer-events-none absolute inset-0 bg-hero-radial" />
+        <div className="relative flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-primary">
+              <CandlestickChart className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="text-base font-bold tracking-tight">Open live chart</h2>
+              <p className="mt-1 max-w-md text-sm text-muted-foreground">
+                Forex, metals and crypto prices with structure, order blocks and
+                supply &amp; demand overlays streamed tick by tick.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/charts"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95"
+          >
+            Open live chart
+            <ArrowUpRight className="h-4 w-4" />
+          </Link>
         </div>
-      </div>
+      </section>
 
       {/* Active Signals */}
       {signals.length > 0 && (
-        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "14px", marginBottom: "20px" }}>
-          <h2 style={{ fontSize: "16px", fontWeight: "700", marginBottom: "12px" }}>📊 Active Trading Signals</h2>
-          {signals.map((signal: any) => (
-            <div key={signal._id.toString()} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "12px", marginBottom: "10px" }}>
-              <p style={{ fontWeight: "700", fontSize: "14px" }}>
-                {signal.pair}{" "}
-                <span style={{ color: signal.direction === "long" ? "#16a34a" : "#dc2626", fontSize: "12px" }}>
-                  {signal.direction?.toUpperCase()}
-                </span>
-              </p>
-              <p style={{ fontSize: "12px", color: "#6b7280", marginTop: "4px" }}>
-                Entry: {signal.entry} | SL: {signal.stopLoss}
-              </p>
-              <p style={{ fontSize: "12px", color: "#6b7280" }}>
-                TP: {signal.takeProfit1}
-              </p>
+        <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Radio className="h-4 w-4 text-primary" />
+              <h2 className="text-base font-bold tracking-tight">
+                Active trading signals
+              </h2>
             </div>
-          ))}
-        </div>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+              {signals.length} live
+            </span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {signals.map((signal: any) => {
+              const isLong = signal.direction === "long";
+              return (
+                <div
+                  key={signal._id.toString()}
+                  className="rounded-xl border border-border bg-background p-4"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-bold">{signal.pair}</p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        isLong
+                          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                          : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+                      }`}
+                    >
+                      {signal.direction?.toUpperCase()}
+                    </span>
+                  </div>
+                  <dl className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <dt className="text-muted-foreground">Entry</dt>
+                      <dd className="mt-0.5 font-semibold tabular-nums">
+                        {signal.entry}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">SL</dt>
+                      <dd className="mt-0.5 font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+                        {signal.stopLoss}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">TP</dt>
+                      <dd className="mt-0.5 font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {signal.takeProfit1}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {/* Recent Trades */}
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "14px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-          <h2 style={{ fontSize: "16px", fontWeight: "700" }}>Recent Trades</h2>
-          <Link href="/journal" style={{ color: "#1c69e3", fontSize: "13px", textDecoration: "none" }}>View All →</Link>
+      <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-bold tracking-tight">Recent trades</h2>
+          <Link
+            href="/journal"
+            className="inline-flex items-center gap-1 text-xs font-semibold text-primary transition hover:opacity-80"
+          >
+            View all
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
         </div>
         {trades.length > 0 ? (
-          trades.slice(0, 5).map((trade: any) => (
-            <div key={trade._id.toString()} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px", borderBottom: "1px solid #f3f4f6", flexWrap: "wrap", gap: "8px" }}>
-              <div>
-                <p style={{ fontWeight: "600", fontSize: "13px" }}>
-                  {trade.pair}{" "}
-                  <span style={{ fontSize: "11px", color: trade.direction === "long" ? "#16a34a" : "#dc2626" }}>
-                    {trade.direction?.toUpperCase()}
-                  </span>
-                </p>
-                <p style={{ fontSize: "11px", color: "#6b7280" }}>
-                  {new Date(trade.exitDate || trade.entryDate).toLocaleDateString()}
-                </p>
-              </div>
-              <p style={{ fontWeight: "700", fontSize: "14px", color: (trade.pnl || 0) >= 0 ? "#16a34a" : "#dc2626" }}>
-                {(trade.pnl || 0) >= 0 ? "+" : ""}${trade.pnl?.toFixed(2)}
-              </p>
-            </div>
-          ))
+          <ul className="divide-y divide-border">
+            {trades.slice(0, 5).map((trade: any) => {
+              const value = trade.pnl || 0;
+              return (
+                <li
+                  key={trade._id.toString()}
+                  className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0 last:pb-0"
+                >
+                  <div>
+                    <p className="flex items-center gap-2 text-sm font-semibold">
+                      {trade.pair}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          trade.direction === "long"
+                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                            : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+                        }`}
+                      >
+                        {trade.direction?.toUpperCase()}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {new Date(trade.exitDate || trade.entryDate).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <p
+                    className={`text-sm font-bold tabular-nums ${
+                      value >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }`}
+                  >
+                    {value >= 0 ? "+" : ""}${trade.pnl?.toFixed(2)}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
         ) : (
-          <p style={{ textAlign: "center", color: "#6b7280", padding: "30px", fontSize: "14px" }}>
+          <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
+            <TrendingUp className="mx-auto mb-2 h-5 w-5" />
             No trades yet. Start journaling!
-          </p>
+          </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

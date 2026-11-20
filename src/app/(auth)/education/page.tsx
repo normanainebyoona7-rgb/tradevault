@@ -2,26 +2,49 @@
 
 import { useState } from "react";
 import { searchKnowledge, FOREX_KNOWLEDGE_BASE } from "@/lib/forex-knowledge";
+import {
+  BookOpen,
+  Bot,
+  Brain,
+  Briefcase,
+  CandlestickChart,
+  Clock,
+  GraduationCap,
+  Landmark,
+  LineChart,
+  Medal,
+  Ruler,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
-const TOPICS = [
-  { name: "Basics", icon: "📖", keywords: "what is forex" },
-  { name: "Pips", icon: "📏", keywords: "what is pip" },
-  { name: "Leverage", icon: "⚡", keywords: "what is leverage" },
-  { name: "Support/Resistance", icon: "📊", keywords: "support resistance" },
-  { name: "Technical", icon: "📈", keywords: "technical analysis" },
-  { name: "Fundamental", icon: "🏛️", keywords: "fundamental analysis" },
-  { name: "Risk", icon: "🛡️", keywords: "risk management" },
-  { name: "Psychology", icon: "🧠", keywords: "trading psychology" },
-  { name: "Sessions", icon: "🕐", keywords: "trading session" },
-  { name: "Strategies", icon: "🎯", keywords: "trading strategy" },
-  { name: "Gold", icon: "🥇", keywords: "gold trading" },
-  { name: "Prop Firms", icon: "💼", keywords: "prop firm" },
+type Topic = { name: string; icon: LucideIcon; keywords: string };
+
+const TOPICS: Topic[] = [
+  { name: "Basics", icon: BookOpen, keywords: "what is forex" },
+  { name: "Pips", icon: Ruler, keywords: "what is pip" },
+  { name: "Leverage", icon: Zap, keywords: "what is leverage" },
+  { name: "Support/Resistance", icon: LineChart, keywords: "support resistance" },
+  { name: "Technical", icon: CandlestickChart, keywords: "technical analysis" },
+  { name: "Fundamental", icon: Landmark, keywords: "fundamental analysis" },
+  { name: "Risk", icon: ShieldCheck, keywords: "risk management" },
+  { name: "Psychology", icon: Brain, keywords: "trading psychology" },
+  { name: "Sessions", icon: Clock, keywords: "trading session" },
+  { name: "Strategies", icon: Target, keywords: "trading strategy" },
+  { name: "Gold", icon: Medal, keywords: "gold trading" },
+  { name: "Prop Firms", icon: Briefcase, keywords: "prop firm" },
 ];
+
+const DIFFICULTIES = ["Foundational", "Intermediate", "Advanced"] as const;
 
 export default function EducationPage() {
   const [messages, setMessages] = useState<Message[]>([
@@ -55,74 +78,101 @@ export default function EducationPage() {
   };
 
   return (
-    <div style={{ maxWidth: "900px", margin: "0 auto", padding: "24px" }}>
-      <h1 style={{ fontSize: "28px", fontWeight: "700", marginBottom: "16px" }}>
-        🧠 Forex Education AI
-      </h1>
-      <p style={{ fontSize: "14px", color: "#6b7280", marginBottom: "24px" }}>
-        {FOREX_KNOWLEDGE_BASE.length} topics covered • 500,000+ words of trading knowledge
-      </p>
-
-      {/* Topics */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "12px", marginBottom: "24px" }}>
-        {TOPICS.map((topic) => (
-          <button
-            key={topic.name}
-            onClick={() => handleTopicClick(topic.name, topic.keywords)}
-            style={{
-              padding: "16px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "8px",
-              cursor: "pointer", textAlign: "center", transition: "all 0.3s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = "translateY(-4px)";
-              e.currentTarget.style.boxShadow = "0 10px 25px rgba(0,0,0,0.1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "none";
-            }}
-          >
-            <span style={{ fontSize: "24px", display: "block" }}>{topic.icon}</span>
-            <span style={{ fontSize: "12px", fontWeight: "600" }}>{topic.name}</span>
-          </button>
-        ))}
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Forex Education AI</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {FOREX_KNOWLEDGE_BASE.length} topics covered · 500,000+ words of trading knowledge
+          </p>
+        </div>
+        <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold">
+          <Sparkles className="h-3.5 w-3.5 text-primary" />
+          AI advisor
+        </div>
       </div>
 
+      {/* Topics */}
+      <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+        <div className="mb-4 flex items-center gap-2">
+          <GraduationCap className="h-4 w-4 text-primary" />
+          <h2 className="text-base font-bold tracking-tight">Lesson library</h2>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {TOPICS.map((topic) => {
+            const Icon = topic.icon;
+            return (
+              <button
+                key={topic.name}
+                onClick={() => handleTopicClick(topic.name, topic.keywords)}
+                className="hover-lift group flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition hover:border-primary/40 hover:shadow-card-hover"
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-primary">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div className="space-y-1">
+                  <span className="block text-sm font-semibold">{topic.name}</span>
+                  <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                    {DIFFICULTIES[TOPICS.indexOf(topic) % DIFFICULTIES.length]}
+                  </span>
+                </div>
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground group-hover:text-primary">
+                  Start lesson
+                  <Send className="h-3 w-3" />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       {/* Chat */}
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", overflow: "hidden" }}>
-        <div style={{ padding: "16px", borderBottom: "1px solid #e5e7eb", background: "#f9fafb" }}>
-          <h2 style={{ fontWeight: "700" }}>💬 Chat with AI Advisor</h2>
+      <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+        <div className="flex items-center gap-2 border-b border-border bg-surface px-5 py-4">
+          <Bot className="h-4 w-4 text-primary" />
+          <h2 className="text-base font-bold tracking-tight">Chat with AI advisor</h2>
         </div>
 
-        <div style={{ height: "400px", overflowY: "auto", padding: "16px" }}>
+        <div className="h-[400px] space-y-3 overflow-y-auto p-4">
           {messages.map((msg, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start", marginBottom: "12px" }}>
-              <div style={{
-                maxWidth: "80%", padding: "12px", borderRadius: "8px",
-                background: msg.role === "user" ? "#1c69e3" : "#f3f4f6",
-                color: msg.role === "user" ? "#fff" : "#111827",
-              }}>
-                <p style={{ fontSize: "14px", whiteSpace: "pre-wrap" }}>{msg.content}</p>
+            <div
+              key={i}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm ${
+                  msg.role === "user"
+                    ? "bg-brand-gradient text-white shadow-glow"
+                    : "bg-muted text-foreground"
+                }`}
+              >
+                <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
               </div>
             </div>
           ))}
-          {loading && <p style={{ color: "#6b7280", fontSize: "14px" }}>Thinking...</p>}
+          {loading && (
+            <p className="text-sm text-muted-foreground">Thinking...</p>
+          )}
         </div>
 
-        <div style={{ padding: "16px", borderTop: "1px solid #e5e7eb", display: "flex", gap: "8px" }}>
+        <div className="flex gap-2 border-t border-border p-4">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder="Ask about forex trading..."
-            style={{ flex: 1, padding: "12px", border: "1px solid #d1d5db", borderRadius: "8px", fontSize: "14px" }}
+            className="h-10 w-full flex-1 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
           />
-          <button onClick={handleSend} style={{ padding: "12px 24px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: "8px", fontWeight: "600", cursor: "pointer" }}>
+          <button
+            onClick={handleSend}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:opacity-60"
+          >
+            <Send className="h-4 w-4" />
             Send
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

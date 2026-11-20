@@ -1,7 +1,7 @@
 // src/app/api/analyze-chart/route.ts
-// Analyzes chart with cross-source price verification, ATR-based SL,
-// Fibonacci TPs. STOP orders removed — only BUY, SELL, BUY LIMIT,
-// SELL LIMIT, NEUTRAL are possible.
+// Analyzes a live chart with cross-source price verification, ATR-based SL,
+// Fibonacci TPs, and an SMC / ICT / supply-demand breakdown.
+// STOP orders are not emitted — only BUY, SELL, BUY LIMIT, SELL LIMIT, NEUTRAL.
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
@@ -9,6 +9,44 @@ import { getCandles } from "@/lib/data/candles";
 import { computeOverlays } from "@/lib/overlays";
 import { buildSignal } from "@/lib/signal";
 import { getVerifiedPrice } from "@/lib/analysis";
+import {
+  buildSMCSignal,
+  type SMCCandle,
+  type SMCSignal,
+} from "@/lib/smc-analysis";
+import { activeKillzone } from "@/lib/market-structure";
+import type { Overlays } from "@/lib/overlays";
+
+function buildSmcPayload(
+  pair: string,
+  candles: SMCCandle[],
+  overlays: Overlays
+) {
+  const smcSignal: SMCSignal | null =
+    candles.length >= 50 ? buildSMCSignal(pair, candles) : null;
+
+  return {
+    direction: smcSignal?.direction ?? "neutral",
+    score: smcSignal?.score ?? 0,
+    confidence: smcSignal?.confidence ?? "NEUTRAL",
+    confluences: (smcSignal?.confluences ?? []).map((line) =>
+      line.replace(/^[^\p{L}\p{N}]+/u, "")
+    ),
+    entry: smcSignal?.entry ?? null,
+    stopLoss: smcSignal?.stopLoss ?? null,
+    takeProfit1: smcSignal?.takeProfit1 ?? null,
+    takeProfit2: smcSignal?.takeProfit2 ?? null,
+    takeProfit3: smcSignal?.takeProfit3 ?? null,
+    liquidityZones: smcSignal?.liquidityZones ?? overlays.liquidityZones,
+    orderBlocks: smcSignal?.orderBlocks ?? overlays.orderBlocks,
+    fvgs: smcSignal?.fvgs ?? overlays.fvgs,
+    supplyDemandZones: smcSignal?.supplyDemandZones ?? overlays.smcSupplyDemand,
+    structure: overlays.structure,
+    premiumDiscount: overlays.premiumDiscount,
+    liquiditySweeps: overlays.liquiditySweeps,
+    killzone: activeKillzone(),
+  };
+}
 
 export async function POST(request: Request) {
   try {
@@ -21,10 +59,7 @@ export async function POST(request: Request) {
     const pair = body.pair || "EUR/USD";
     const timeframe = body.timeframe || "1H";
 
-    // Cross-source price verification (Dukascopy + Yahoo)
-    const verified = await getVerifiedPrice(pair);
-
-    // Fetch the main candles for the requested timeframe
+    // 1. Candles first — they drive both the chart price and the analysis.
     const candles = await getCandles(pair, timeframe, 300);
 
     if (candles.length === 0) {
@@ -37,10 +72,23 @@ export async function POST(request: Request) {
       );
     }
 
+    const currentPrice = candles[candles.length - 1].close;
+
+    // 2. Cross-source verification (Yahoo only; the chart price is already known).
+    const verified = await getVerifiedPrice(pair, currentPrice);
+
+    // 3. Overlays + signal + SMC breakdown.
     const overlays = computeOverlays(pair, candles);
     const signal = buildSignal(pair, timeframe, candles, overlays, verified);
 
-    const currentPrice = candles[candles.length - 1].close;
+    const smcCandles: SMCCandle[] = candles.map((c) => ({
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      is_green: c.is_green,
+    }));
+    const smc = buildSmcPayload(pair, smcCandles, overlays);
 
     // ===== NEUTRAL PATH =====
     if (signal.direction === "neutral") {
@@ -50,6 +98,7 @@ export async function POST(request: Request) {
           : "watching",
         message: signal.neutralReason || "No setup",
         analysis: signal.neutralReason || "No setup",
+        smc,
         signal: {
           direction: "neutral",
           orderType: "NONE",
@@ -72,7 +121,7 @@ export async function POST(request: Request) {
           confidenceScore: 0,
           signalScore: 0,
           timeframe,
-          dataSource: "dukascopy",
+          dataSource: "dukascopy+yahoo-verified",
           status: "watching",
           zone: signal.zone,
           entrySignal: signal.entryCandle,
@@ -179,24 +228,36 @@ export async function POST(request: Request) {
       uiOrderDesc = "No order";
     }
 
-    const dirEmoji = isLong ? "📈" : "📉";
+    const direction = isLong ? "LONG" : "SHORT";
+    const structureLine = overlays.structure.lastEvent
+      ? `${overlays.structure.lastEvent.type} ${overlays.structure.lastEvent.direction}`
+      : `structure ${overlays.structure.trend}`;
+    const pdLine = overlays.premiumDiscount
+      ? `${overlays.premiumDiscount.zone} (${(overlays.premiumDiscount.position * 100).toFixed(0)}% of range)`
+      : "range unknown";
 
-    const analysisText = `${dirEmoji} **${signal.signalLabel}** — ${pair} (${timeframe})
+    const analysisText = `${signal.signalLabel} — ${pair} (${timeframe})
 
-📍 Zone: ${signal.zone?.type.toUpperCase()} ${signal.zone?.bottom.toFixed(5)} - ${signal.zone?.top.toFixed(5)}
-🎯 Entry: ${signal.entry?.toFixed(5)}
-🛑 SL (2× ATR): ${signal.stopLoss?.toFixed(5)}
-✅ TP1 (1.272 Fib): ${signal.takeProfit1?.toFixed(5)}
-✅ TP2 (1.618 Fib): ${signal.takeProfit2?.toFixed(5)}
-✅ TP3 (2.0 Fib): ${signal.takeProfit3?.toFixed(5)}
+Zone: ${signal.zone?.type.toUpperCase()} ${signal.zone?.bottom.toFixed(5)} - ${signal.zone?.top.toFixed(5)}
+Entry: ${signal.entry?.toFixed(5)}
+Stop loss (2x ATR): ${signal.stopLoss?.toFixed(5)}
+TP1 (1.272 Fib): ${signal.takeProfit1?.toFixed(5)}
+TP2 (1.618 Fib): ${signal.takeProfit2?.toFixed(5)}
+TP3 (2.0 Fib): ${signal.takeProfit3?.toFixed(5)}
 
-⚡ ${signal.confidence} (${signal.score}/100)
-📊 Risk: ${signal.riskPips} pips
-📈 R:R = 1:${signal.riskReward[0]} / 1:${signal.riskReward[1]} / 1:${signal.riskReward[2]}`;
+Confidence: ${signal.confidence} (${signal.score}/100)
+Risk: ${signal.riskPips} pips
+R:R = 1:${signal.riskReward[0]} / 1:${signal.riskReward[1]} / 1:${signal.riskReward[2]}
+
+SMC/ICT: ${smc.direction.toUpperCase()} bias, ${smc.score}/100 (${smc.confidence})
+Structure: ${structureLine}
+Premium/discount: ${pdLine}
+Killzone: ${smc.killzone.name}`;
 
     return NextResponse.json({
       status: "signal",
       analysis: analysisText,
+      smc,
       signal: {
         direction: signal.direction,
         orderType: uiOrderType,
@@ -240,6 +301,8 @@ export async function POST(request: Request) {
         tradeManagement,
         priceVerification: signal.priceVerification,
       },
+      // Kept for clarity: distinguishes the two directions in logs/UI.
+      direction,
     });
   } catch (error: any) {
     console.error("Analyze-chart error:", error);

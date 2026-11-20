@@ -4,6 +4,7 @@ import { dbConnect } from "@/lib/db/mongodb";
 import Trade from "@/lib/models/trade";
 import mongoose from "mongoose";
 import Link from "next/link";
+import { BookOpen, ChevronRight, Plus } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -18,45 +19,79 @@ export default async function JournalPage() {
   const trades = await Trade.find({ userId }).sort({ entryDate: -1 }).lean();
 
   return (
-    <div style={{ maxWidth: "1200px", margin: "0 auto", padding: "24px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 style={{ fontSize: "28px", fontWeight: "700" }}>Trade Journal</h1>
-          <p style={{ color: "#6b7280" }}>{trades.length} trades logged</p>
+          <h1 className="text-2xl font-bold tracking-tight">Trade journal</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {trades.length} trades logged
+          </p>
         </div>
-        <Link href="/journal/new" style={{ textDecoration: "none", padding: "10px 20px", background: "#1c69e3", color: "#fff", borderRadius: "8px", fontWeight: "600" }}>
-          + New Trade
+        <Link
+          href="/journal/new"
+          className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95"
+        >
+          <Plus className="h-4 w-4" />
+          New Trade
         </Link>
       </div>
 
       {trades.length > 0 ? (
-        <div style={{ display: "grid", gap: "12px" }}>
-          {trades.map((trade: any) => (
-            <Link key={trade._id.toString()} href={`/journal/${trade._id.toString()}`}
-              style={{ textDecoration: "none", background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "16px", display: "flex", justifyContent: "space-between" }}>
-              <div>
-                <p style={{ fontWeight: "700", color: "#111827" }}>
-                  {trade.pair}{" "}
-                  <span style={{ fontSize: "12px", color: trade.direction === "long" ? "#16a34a" : "#dc2626" }}>
-                    {trade.direction?.toUpperCase()}
-                  </span>
-                </p>
-                <p style={{ fontSize: "14px", color: "#6b7280" }}>
-                  {new Date(trade.entryDate).toLocaleDateString()}
-                </p>
-              </div>
-              <p style={{ fontWeight: "700", color: (trade.pnl || 0) >= 0 ? "#16a34a" : "#dc2626" }}>
-                {(trade.pnl || 0) >= 0 ? "+" : ""}${trade.pnl?.toFixed(2)}
-              </p>
-            </Link>
-          ))}
+        <div className="space-y-3">
+          {trades.map((trade: any) => {
+            const value = trade.pnl || 0;
+            return (
+              <Link
+                key={trade._id.toString()}
+                href={`/journal/${trade._id.toString()}`}
+                className="hover-lift flex items-center justify-between gap-4 rounded-2xl border border-border bg-card p-4 shadow-card hover:border-primary/25 hover:shadow-card-hover"
+              >
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-bold">
+                    {trade.pair}
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        trade.direction === "long"
+                          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                          : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+                      }`}
+                    >
+                      {trade.direction?.toUpperCase()}
+                    </span>
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {new Date(trade.entryDate).toLocaleDateString()}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <p
+                    className={`text-sm font-bold tabular-nums ${
+                      value >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-600 dark:text-rose-400"
+                    }`}
+                  >
+                    {value >= 0 ? "+" : ""}${trade.pnl?.toFixed(2)}
+                  </p>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </div>
+              </Link>
+            );
+          })}
         </div>
       ) : (
-        <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: "12px", padding: "40px", textAlign: "center" }}>
-          <p style={{ color: "#6b7280", marginBottom: "16px" }}>No trades found.</p>
-          <Link href="/journal/new" style={{ textDecoration: "none", padding: "10px 20px", background: "#1c69e3", color: "#fff", borderRadius: "8px", fontWeight: "600" }}>
-            Log Your First Trade
-          </Link>
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-muted-foreground">
+            <BookOpen className="mx-auto mb-3 h-5 w-5" />
+            <p className="mb-4">No trades found.</p>
+            <Link
+              href="/journal/new"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95"
+            >
+              <Plus className="h-4 w-4" />
+              Log Your First Trade
+            </Link>
+          </div>
         </div>
       )}
     </div>

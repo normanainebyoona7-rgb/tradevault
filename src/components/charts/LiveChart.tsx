@@ -1,93 +1,101 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
   ColorType,
+  CrosshairMode,
   LineStyle,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type UTCTimestamp,
 } from "lightweight-charts";
+import {
+  Activity,
+  Camera,
+  Download,
+  Layers,
+  Loader2,
+  ScanSearch,
+  TrendingDown,
+  TrendingUp,
+  X,
+} from "lucide-react";
+import { PAIR_GROUPS, formatPrice } from "@/lib/pairs";
+import { computeOverlays, type Overlays } from "@/lib/overlays";
+import type { Candle } from "@/lib/data/candles";
 
-const PAIRS = [
-  "EUR/USD",
-  "GBP/USD",
-  "USD/JPY",
-  "USD/CHF",
-  "AUD/USD",
-  "USD/CAD",
-  "NZD/USD",
-  "EUR/JPY",
-  "GBP/JPY",
-  "XAU/USD",
-  "XAG/USD",
-  "BTC/USD",
-  "ETH/USD",
+const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D"];
+
+const TF_SECONDS: Record<string, number> = {
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "30m": 1800,
+  "1H": 3600,
+  "4H": 14400,
+  "1D": 86400,
+};
+
+const TICK_INTERVAL_MS = 4000;
+
+interface LayerFlags {
+  sd: boolean;
+  ob: boolean;
+  fvg: boolean;
+  liq: boolean;
+  ma: boolean;
+  levels: boolean;
+}
+
+const DEFAULT_LAYERS: LayerFlags = {
+  sd: true,
+  ob: true,
+  fvg: true,
+  liq: true,
+  ma: true,
+  levels: true,
+};
+
+const LAYER_LABELS: { key: keyof LayerFlags; label: string }[] = [
+  { key: "sd", label: "S&D" },
+  { key: "ob", label: "OB" },
+  { key: "fvg", label: "FVG" },
+  { key: "liq", label: "Liquidity" },
+  { key: "ma", label: "MAs" },
+  { key: "levels", label: "Levels" },
 ];
 
-const TIMEFRAMES = ["1m", "5m", "15m", "30m", "1H", "4H", "1D", "1W"];
-
-interface Candle {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  is_green: boolean;
+function isDark(): boolean {
+  return (
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark")
+  );
 }
 
-interface Overlays {
-  sdZones: any[];
-  orderBlocks: any[];
-  fvgs: any[];
-  liquidityZones: any[];
-  smcSupplyDemand: any[];
-  sma9: { time: number; value: number }[];
-  sma21: { time: number; value: number }[];
-  sma200: { time: number; value: number }[];
-  ema50: { time: number; value: number }[];
-  vwap: { time: number; value: number }[];
-  supertrend: { time: number; value: number; direction: "up" | "down" }[];
-  rsi: { time: number; value: number }[];
-  roundNumbers: { level: number; type: string }[];
-  pivots: {
-    pp: number;
-    r1: number;
-    r2: number;
-    r3: number;
-    s1: number;
-    s2: number;
-    s3: number;
-  } | null;
-  sessions: any[];
-  largeRangeCandles: {
-    time: number;
-    price: number;
-    direction: "bullish" | "bearish";
-    rangePct: number;
-  }[];
+function palette() {
+  const dark = isDark();
+  return {
+    dark,
+    bg: dark ? "#0b1512" : "#ffffff",
+    text: dark ? "#a7c2b6" : "#475569",
+    grid: dark ? "#143028" : "#eef2f1",
+    border: dark ? "#143028" : "#e5e7eb",
+    boxText: dark ? "#e2f5ec" : "#0f172a",
+  };
 }
 
-const EMPTY_OVERLAYS: Overlays = {
-  sdZones: [],
-  orderBlocks: [],
-  fvgs: [],
-  liquidityZones: [],
-  smcSupplyDemand: [],
-  sma9: [],
-  sma21: [],
-  sma200: [],
-  ema50: [],
-  vwap: [],
-  supertrend: [],
-  rsi: [],
-  roundNumbers: [],
-  pivots: null,
-  sessions: [],
-  largeRangeCandles: [],
-};
+interface AnalysisResult {
+  status?: string;
+  message?: string;
+  analysis?: string;
+  signal?: any;
+  smc?: any;
+  pair: string;
+  timeframe: string;
+  shot: string | null;
+}
 
 export function LiveChart({
   onPairChange,
@@ -100,56 +108,357 @@ export function LiveChart({
   onTimeframeChange?: (tf: string) => void;
   initialPair?: string;
   initialTimeframe?: string;
-  onDataLoaded?: (info: { pair: string; timeframe: string; candleCount: number }) => void;
+  onDataLoaded?: (info: {
+    pair: string;
+    timeframe: string;
+    candleCount: number;
+  }) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const chartRef = useRef<IChartApi | null>(null);
   const rsiChartRef = useRef<IChartApi | null>(null);
-  const seriesMapRef = useRef<Map<string, ISeriesApi<any>>>(new Map());
+  const candleSeriesRef = useRef<ISeriesApi<any> | null>(null);
   const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const indicatorSeriesRef = useRef<Map<string, ISeriesApi<any>>>(new Map());
+  const priceLinesRef = useRef<{ series: ISeriesApi<any>; line: IPriceLine }[]>([]);
+
+  const candlesRef = useRef<Candle[]>([]);
+  const overlaysRef = useRef<Overlays | null>(null);
+  const showOverlaysRef = useRef(true);
+  const layersRef = useRef<LayerFlags>(DEFAULT_LAYERS);
+
+  const onDataLoadedRef = useRef(onDataLoaded);
+  onDataLoadedRef.current = onDataLoaded;
+  const onPairChangeRef = useRef(onPairChange);
+  onPairChangeRef.current = onPairChange;
+  const onTimeframeChangeRef = useRef(onTimeframeChange);
+  onTimeframeChangeRef.current = onTimeframeChange;
 
   const [selectedPair, setSelectedPair] = useState(initialPair || "EUR/USD");
   const [timeframe, setTimeframe] = useState(initialTimeframe || "1H");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [candleCount, setCandleCount] = useState(0);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [showOverlays, setShowOverlays] = useState(true);
+  const [layers, setLayers] = useState<LayerFlags>(DEFAULT_LAYERS);
+  const [lastPrice, setLastPrice] = useState<number | null>(null);
+  const [prevClose, setPrevClose] = useState<number | null>(null);
+  const [tickSource, setTickSource] = useState<string>("connecting");
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
-  // Create charts on mount
+  showOverlaysRef.current = showOverlays;
+  layersRef.current = layers;
+
+  // ===== BOX LAYER =====
+
+  const drawBoxes = useCallback(() => {
+    const host = overlayRef.current;
+    if (!host) return;
+    host.innerHTML = "";
+
+    if (!showOverlaysRef.current) return;
+
+    const chart = chartRef.current;
+    const series = candleSeriesRef.current;
+    const candles = candlesRef.current;
+    const ov = overlaysRef.current;
+    if (!chart || !series || !ov || candles.length === 0) return;
+
+    const flags = layersRef.current;
+    const timeScale = chart.timeScale();
+    const right = timeScale.width();
+    const theme = palette();
+
+    const addBox = (
+      index: number,
+      top: number,
+      bottom: number,
+      opts: { fill: string; border: string; label: string; labelColor: string; dashed?: boolean }
+    ) => {
+      const candle = candles[Math.min(Math.max(index, 0), candles.length - 1)];
+      if (!candle) return;
+
+      const x = timeScale.timeToCoordinate(candle.time as UTCTimestamp);
+      if (x === null) return;
+
+      const yTop = series.priceToCoordinate(top);
+      const yBottom = series.priceToCoordinate(bottom);
+      if (yTop === null || yBottom === null) return;
+
+      const left = Math.max(0, x);
+      const width = right - left;
+      if (width <= 2) return;
+
+      const height = Math.max(2, Math.abs(yBottom - yTop));
+
+      const box = document.createElement("div");
+      box.style.position = "absolute";
+      box.style.left = `${left}px`;
+      box.style.width = `${width}px`;
+      box.style.top = `${Math.min(yTop, yBottom)}px`;
+      box.style.height = `${height}px`;
+      box.style.background = opts.fill;
+      box.style.border = `1px ${opts.dashed ? "dashed" : "solid"} ${opts.border}`;
+      box.style.borderRadius = "2px";
+      box.style.pointerEvents = "none";
+      box.style.overflow = "hidden";
+      host.appendChild(box);
+
+      if (height >= 14) {
+        const label = document.createElement("span");
+        label.textContent = opts.label;
+        label.style.position = "absolute";
+        label.style.left = "5px";
+        label.style.top = "1px";
+        label.style.fontSize = "9px";
+        label.style.fontWeight = "700";
+        label.style.letterSpacing = "0.06em";
+        label.style.color = opts.labelColor;
+        label.style.textShadow = theme.dark ? "0 1px 2px #000" : "0 1px 2px #fff";
+        label.style.whiteSpace = "nowrap";
+        box.appendChild(label);
+      }
+    };
+
+    const demand = { fill: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.75)", labelColor: "#059669" };
+    const supply = { fill: "rgba(244,63,94,0.10)", border: "rgba(244,63,94,0.75)", labelColor: "#e11d48" };
+
+    if (flags.sd) {
+      for (const zone of ov.sdZones) {
+        const style = zone.type === "demand" ? demand : supply;
+        addBox(zone.index, zone.top, zone.bottom, {
+          ...style,
+          label: zone.type === "demand" ? "DEMAND" : "SUPPLY",
+        });
+      }
+    }
+
+    if (flags.ob) {
+      for (const ob of ov.orderBlocks) {
+        const style =
+          ob.type === "bullish"
+            ? { fill: "rgba(59,130,246,0.08)", border: "rgba(59,130,246,0.6)", labelColor: "#2563eb" }
+            : { fill: "rgba(249,115,22,0.08)", border: "rgba(249,115,22,0.6)", labelColor: "#ea580c" };
+        addBox(ob.index, ob.top, ob.bottom, {
+          ...style,
+          label: ob.type === "bullish" ? "OB +" : "OB −",
+        });
+      }
+    }
+
+    if (flags.fvg) {
+      for (const fvg of ov.fvgs) {
+        const style =
+          fvg.type === "bullish"
+            ? { fill: "rgba(139,92,246,0.08)", border: "rgba(139,92,246,0.55)", labelColor: "#7c3aed" }
+            : { fill: "rgba(236,72,153,0.08)", border: "rgba(236,72,153,0.55)", labelColor: "#db2777" };
+        addBox(fvg.index, fvg.top, fvg.bottom, {
+          ...style,
+          label: fvg.type === "bullish" ? "FVG +" : "FVG −",
+          dashed: true,
+        });
+      }
+    }
+  }, []);
+
+  const clearPriceLines = useCallback(() => {
+    for (const entry of priceLinesRef.current) {
+      try {
+        entry.series.removePriceLine(entry.line);
+      } catch {}
+    }
+    priceLinesRef.current = [];
+  }, []);
+
+  // ===== INDICATORS / LEVELS / MARKERS =====
+
+  const renderOverlays = useCallback(
+    (candles: Candle[], ov: Overlays) => {
+      const chart = chartRef.current;
+      const candleSeries = candleSeriesRef.current;
+      if (!chart || !candleSeries) return;
+
+      for (const series of indicatorSeriesRef.current.values()) {
+        try {
+          chart.removeSeries(series);
+        } catch {}
+      }
+      indicatorSeriesRef.current.clear();
+      clearPriceLines();
+      candleSeries.setMarkers([]);
+
+      if (!showOverlaysRef.current) {
+        drawBoxes();
+        return;
+      }
+
+      const flags = layersRef.current;
+
+      const addLine = (
+        key: string,
+        data: { time: number; value: number }[],
+        color: string,
+        width: 1 | 2 | 3 = 1,
+        style: LineStyle = LineStyle.Solid
+      ) => {
+        if (data.length === 0) return;
+        const series = chart.addLineSeries({
+          color,
+          lineWidth: width,
+          lineStyle: style,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        series.setData(
+          data.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+        );
+        indicatorSeriesRef.current.set(key, series);
+      };
+
+      if (flags.ma) {
+        addLine("ema50", ov.ema50, "#10b981", 2);
+        addLine("sma200", ov.sma200, "#6366f1", 2);
+        addLine("vwap", ov.vwap, "#06b6d4", 1, LineStyle.Dashed);
+      }
+
+      const addPriceLine = (
+        price: number,
+        color: string,
+        title: string,
+        style: LineStyle = LineStyle.Dashed
+      ) => {
+        try {
+          const line = candleSeries.createPriceLine({
+            price,
+            color,
+            lineWidth: 1,
+            lineStyle: style,
+            axisLabelVisible: true,
+            title,
+          });
+          priceLinesRef.current.push({ series: candleSeries, line });
+        } catch {}
+      };
+
+      if (flags.liq) {
+        const price = candles[candles.length - 1]?.close ?? 0;
+        const above = ov.liquidityZones
+          .filter((z) => z.price > price)
+          .sort((a, b) => a.price - b.price)
+          .slice(0, 2);
+        const below = ov.liquidityZones
+          .filter((z) => z.price <= price)
+          .sort((a, b) => b.price - a.price)
+          .slice(0, 2);
+        for (const liq of [...above, ...below]) {
+          addPriceLine(
+            liq.price,
+            liq.type === "buy_side" ? "#f59e0b" : "#f43f5e",
+            liq.type === "buy_side" ? "BSL" : "SSL",
+            LineStyle.Dotted
+          );
+        }
+      }
+
+      if (flags.levels) {
+        if (ov.pivots) {
+          const p = ov.pivots;
+          addPriceLine(p.pp, "#94a3b8", "PP", LineStyle.Dotted);
+          addPriceLine(p.r1, "#f43f5e", "R1", LineStyle.Dotted);
+          addPriceLine(p.r2, "#f43f5e", "R2", LineStyle.Dotted);
+          addPriceLine(p.s1, "#10b981", "S1", LineStyle.Dotted);
+          addPriceLine(p.s2, "#10b981", "S2", LineStyle.Dotted);
+        }
+        if (ov.premiumDiscount) {
+          addPriceLine(ov.premiumDiscount.equilibrium, "#8b5cf6", "EQ", LineStyle.Dashed);
+        }
+      }
+
+      // ===== MARKERS =====
+      const markers: any[] = [];
+      for (const event of ov.structure.events.slice(-4)) {
+        markers.push({
+          time: candles[event.index]?.time ?? event.time,
+          position: event.direction === "bullish" ? "belowBar" : "aboveBar",
+          color: event.direction === "bullish" ? "#059669" : "#e11d48",
+          shape: event.direction === "bullish" ? "arrowUp" : "arrowDown",
+          text: event.type,
+        });
+      }
+      for (const sweep of ov.liquiditySweeps.slice(-3)) {
+        markers.push({
+          time: candles[sweep.index]?.time ?? sweep.time,
+          position: sweep.side === "sell_side" ? "belowBar" : "aboveBar",
+          color: "#f59e0b",
+          shape: "circle",
+          text: "Sweep",
+        });
+      }
+      for (const lrc of ov.largeRangeCandles.slice(-4)) {
+        markers.push({
+          time: lrc.time,
+          position: lrc.direction === "bullish" ? "belowBar" : "aboveBar",
+          color: lrc.direction === "bullish" ? "#10b981" : "#ef4444",
+          shape: lrc.direction === "bullish" ? "arrowUp" : "arrowDown",
+          text: `${lrc.rangePct.toFixed(2)}%`,
+        });
+      }
+      markers.sort((a, b) => Number(a.time) - Number(b.time));
+      try {
+        candleSeries.setMarkers(markers);
+      } catch {}
+
+      drawBoxes();
+    },
+    [clearPriceLines, drawBoxes]
+  );
+
+  // ===== CREATE CHARTS =====
+
   useEffect(() => {
     if (!containerRef.current || !rsiContainerRef.current) return;
 
+    const theme = palette();
+
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
-        textColor: "#374151",
+        background: { type: ColorType.Solid, color: theme.bg },
+        textColor: theme.text,
+        fontFamily:
+          "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
       },
       grid: {
-        vertLines: { color: "#f3f4f6" },
-        horzLines: { color: "#f3f4f6" },
+        vertLines: { color: theme.grid },
+        horzLines: { color: theme.grid },
       },
+      crosshair: { mode: CrosshairMode.Normal },
       width: containerRef.current.clientWidth,
-      height: 500,
+      height: 480,
       timeScale: {
         timeVisible: true,
         secondsVisible: false,
+        borderColor: theme.border,
       },
-      rightPriceScale: {
-        borderColor: "#e5e7eb",
-      },
+      rightPriceScale: { borderColor: theme.border },
     });
 
     const rsiChart = createChart(rsiContainerRef.current, {
       layout: {
-        background: { type: ColorType.Solid, color: "#ffffff" },
-        textColor: "#6b7280",
+        background: { type: ColorType.Solid, color: theme.bg },
+        textColor: theme.text,
+        fontFamily:
+          "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
       },
       grid: {
-        vertLines: { color: "#f9fafb" },
-        horzLines: { color: "#f3f4f6" },
+        vertLines: { color: theme.grid },
+        horzLines: { color: theme.grid },
       },
       width: rsiContainerRef.current.clientWidth,
       height: 120,
@@ -157,103 +466,158 @@ export function LiveChart({
         timeVisible: true,
         secondsVisible: false,
         visible: false,
+        borderColor: theme.border,
       },
-      rightPriceScale: {
-        borderColor: "#e5e7eb",
-      },
+      rightPriceScale: { borderColor: theme.border },
+    });
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#10b981",
+      downColor: "#f43f5e",
+      borderUpColor: "#10b981",
+      borderDownColor: "#f43f5e",
+      wickUpColor: "#10b981",
+      wickDownColor: "#f43f5e",
+      priceLineVisible: true,
+      priceLineColor: "#10b981",
+      priceLineStyle: LineStyle.Dotted,
+    });
+
+    const rsiSeries = rsiChart.addLineSeries({
+      color: "#8b5cf6",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+    });
+    rsiSeries.createPriceLine({
+      price: 70,
+      color: "#f43f5e",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "70",
+    });
+    rsiSeries.createPriceLine({
+      price: 30,
+      color: "#10b981",
+      lineWidth: 1,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "30",
     });
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
+      drawBoxes();
     });
 
     chartRef.current = chart;
     rsiChartRef.current = rsiChart;
+    candleSeriesRef.current = candleSeries;
+    rsiSeriesRef.current = rsiSeries;
 
-    const handleResize = () => {
-      if (containerRef.current && chartRef.current) {
-        chartRef.current.applyOptions({
+    const resizeObserver = new ResizeObserver(() => {
+      if (containerRef.current) {
+        chart.applyOptions({
           width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
         });
       }
-      if (rsiContainerRef.current && rsiChartRef.current) {
-        rsiChartRef.current.applyOptions({
+      if (rsiContainerRef.current) {
+        rsiChart.applyOptions({
           width: rsiContainerRef.current.clientWidth,
+          height: rsiContainerRef.current.clientHeight,
         });
       }
-    };
-    window.addEventListener("resize", handleResize);
+      drawBoxes();
+    });
+    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(rsiContainerRef.current);
+
+    const themeObserver = new MutationObserver(() => {
+      const next = palette();
+      const options = {
+        layout: {
+          background: { type: ColorType.Solid, color: next.bg },
+          textColor: next.text,
+        },
+        grid: {
+          vertLines: { color: next.grid },
+          horzLines: { color: next.grid },
+        },
+        rightPriceScale: { borderColor: next.border },
+        timeScale: { borderColor: next.border },
+      };
+      chart.applyOptions(options as any);
+      rsiChart.applyOptions(options as any);
+      drawBoxes();
+    });
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
+      themeObserver.disconnect();
       chart.remove();
       rsiChart.remove();
       chartRef.current = null;
       rsiChartRef.current = null;
-      seriesMapRef.current.clear();
+      candleSeriesRef.current = null;
       rsiSeriesRef.current = null;
+      indicatorSeriesRef.current.clear();
+      priceLinesRef.current = [];
     };
-  }, []);
+  }, [drawBoxes]);
 
-  // Load + render
+  // ===== LOAD CANDLES =====
+
   useEffect(() => {
-    if (!chartRef.current || !rsiChartRef.current) return;
-
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    const render = async (isRefresh: boolean = false) => {
+    const load = async (fit: boolean) => {
+      const series = candleSeriesRef.current;
+      const rsiSeries = rsiSeriesRef.current;
+      if (!series || !rsiSeries) return;
+
+      if (fit) {
+        setLoading(true);
+        setError(null);
+        setAnalysis(null);
+        setAnalyzeError(null);
+        candlesRef.current = [];
+        overlaysRef.current = null;
+        series.setData([]);
+        rsiSeries.setData([]);
+        drawBoxes();
+      }
+
       try {
         const res = await fetch(
           `/api/test-candles?pair=${encodeURIComponent(selectedPair)}&tf=${timeframe}&overlays=1`,
           { cache: "no-store" }
         );
-
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-
         if (cancelled) return;
 
         const candles: Candle[] = json.candles ?? [];
-        const overlays: Overlays = json.overlays ?? EMPTY_OVERLAYS;
-
         if (candles.length === 0) {
-          if (!isRefresh) {
+          if (fit) {
             setError("No candle data returned");
             setCandleCount(0);
           }
           return;
         }
 
-        const chart = chartRef.current!;
-        const rsiChart = rsiChartRef.current!;
+        const ov: Overlays = json.overlays ?? computeOverlays(selectedPair, candles);
 
-        // Clear old series
-        for (const s of seriesMapRef.current.values()) {
-          try {
-            chart.removeSeries(s);
-          } catch {}
-        }
-        seriesMapRef.current.clear();
+        candlesRef.current = candles;
+        overlaysRef.current = ov;
 
-        if (rsiSeriesRef.current) {
-          try {
-            rsiChart.removeSeries(rsiSeriesRef.current);
-          } catch {}
-          rsiSeriesRef.current = null;
-        }
-
-        // ===== CANDLES =====
-        const candleSeries = chart.addCandlestickSeries({
-          upColor: "#10b981",
-          downColor: "#ef4444",
-          borderUpColor: "#10b981",
-          borderDownColor: "#ef4444",
-          wickUpColor: "#10b981",
-          wickDownColor: "#ef4444",
-        });
-        candleSeries.setData(
+        series.setData(
           candles.map((c) => ({
             time: c.time as UTCTimestamp,
             open: c.open,
@@ -262,318 +626,266 @@ export function LiveChart({
             close: c.close,
           }))
         );
-        seriesMapRef.current.set("candles", candleSeries);
-
-        if (showOverlays) {
-          const addLine = (
-            key: string,
-            data: { time: number; value: number }[],
-            color: string,
-            width: 1 | 2 | 3 = 1,
-            style: LineStyle = LineStyle.Solid
-          ) => {
-            if (data.length === 0) return;
-            const s = chart.addLineSeries({
-              color,
-              lineWidth: width,
-              lineStyle: style,
-              priceLineVisible: false,
-              lastValueVisible: false,
-            });
-            s.setData(
-              data.map((p) => ({
-                time: p.time as UTCTimestamp,
-                value: p.value,
-              }))
-            );
-            seriesMapRef.current.set(key, s);
-          };
-
-          addLine("sma9", overlays.sma9, "#3b82f6", 1);
-          addLine("sma21", overlays.sma21, "#f59e0b", 1);
-          addLine("sma200", overlays.sma200, "#8b5cf6", 2);
-          addLine("ema50", overlays.ema50, "#ec4899", 1);
-          addLine("vwap", overlays.vwap, "#06b6d4", 1, LineStyle.Dashed);
-
-          // Supertrend
-          const upPoints = overlays.supertrend
-            .filter((p) => p.direction === "up")
-            .map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
-          const downPoints = overlays.supertrend
-            .filter((p) => p.direction === "down")
-            .map((p) => ({ time: p.time as UTCTimestamp, value: p.value }));
-
-          if (upPoints.length > 0) {
-            const s = chart.addLineSeries({
-              color: "#10b981",
-              lineWidth: 2,
-              priceLineVisible: false,
-              lastValueVisible: false,
-            });
-            s.setData(upPoints);
-            seriesMapRef.current.set("stUp", s);
-          }
-          if (downPoints.length > 0) {
-            const s = chart.addLineSeries({
-              color: "#ef4444",
-              lineWidth: 2,
-              priceLineVisible: false,
-              lastValueVisible: false,
-            });
-            s.setData(downPoints);
-            seriesMapRef.current.set("stDown", s);
-          }
-
-          // S/D zones
-          overlays.sdZones.forEach((zone) => {
-            try {
-              candleSeries.createPriceLine({
-                price: zone.top,
-                color: zone.type === "supply" ? "#ef4444" : "#10b981",
-                lineWidth: 1,
-                lineStyle: LineStyle.Solid,
-                axisLabelVisible: false,
-                title: "",
-              });
-              candleSeries.createPriceLine({
-                price: zone.bottom,
-                color: zone.type === "supply" ? "#ef4444" : "#10b981",
-                lineWidth: 1,
-                lineStyle: LineStyle.Solid,
-                axisLabelVisible: false,
-                title: "",
-              });
-            } catch {}
-          });
-
-          // Order blocks
-          overlays.orderBlocks.forEach((ob) => {
-            try {
-              candleSeries.createPriceLine({
-                price: ob.top,
-                color: ob.type === "bullish" ? "#22c55e" : "#dc2626",
-                lineWidth: 1,
-                lineStyle: LineStyle.Dotted,
-                axisLabelVisible: false,
-                title: "",
-              });
-              candleSeries.createPriceLine({
-                price: ob.bottom,
-                color: ob.type === "bullish" ? "#22c55e" : "#dc2626",
-                lineWidth: 1,
-                lineStyle: LineStyle.Dotted,
-                axisLabelVisible: false,
-                title: "",
-              });
-            } catch {}
-          });
-
-          // FVG
-          overlays.fvgs.forEach((fvg) => {
-            try {
-              candleSeries.createPriceLine({
-                price: fvg.top,
-                color: fvg.type === "bullish" ? "#3b82f6" : "#f97316",
-                lineWidth: 1,
-                lineStyle: LineStyle.Dotted,
-                axisLabelVisible: false,
-                title: "",
-              });
-              candleSeries.createPriceLine({
-                price: fvg.bottom,
-                color: fvg.type === "bullish" ? "#3b82f6" : "#f97316",
-                lineWidth: 1,
-                lineStyle: LineStyle.Dotted,
-                axisLabelVisible: false,
-                title: "",
-              });
-            } catch {}
-          });
-
-          // Round numbers
-          overlays.roundNumbers.forEach((rn) => {
-            try {
-              candleSeries.createPriceLine({
-                price: rn.level,
-                color: "#9ca3af",
-                lineWidth: 1,
-                lineStyle: LineStyle.Dashed,
-                axisLabelVisible: true,
-                title: "",
-              });
-            } catch {}
-          });
-
-          // Pivots
-          if (overlays.pivots) {
-            const p = overlays.pivots;
-            const list = [
-              { price: p.pp, label: "PP", color: "#6366f1" },
-              { price: p.r1, label: "R1", color: "#ef4444" },
-              { price: p.r2, label: "R2", color: "#ef4444" },
-              { price: p.r3, label: "R3", color: "#ef4444" },
-              { price: p.s1, label: "S1", color: "#10b981" },
-              { price: p.s2, label: "S2", color: "#10b981" },
-              { price: p.s3, label: "S3", color: "#10b981" },
-            ];
-            list.forEach(({ price, label, color }) => {
-              try {
-                candleSeries.createPriceLine({
-                  price,
-                  color,
-                  lineWidth: 1,
-                  lineStyle: LineStyle.Dotted,
-                  axisLabelVisible: true,
-                  title: label,
-                });
-              } catch {}
-            });
-          }
-
-          // Large range markers
-          if (overlays.largeRangeCandles.length > 0) {
-            candleSeries.setMarkers(
-              overlays.largeRangeCandles.map((m) => ({
-                time: m.time as UTCTimestamp,
-                position: m.direction === "bullish" ? "belowBar" : "aboveBar",
-                color: m.direction === "bullish" ? "#10b981" : "#ef4444",
-                shape: m.direction === "bullish" ? "arrowUp" : "arrowDown",
-                text: `${m.rangePct.toFixed(2)}%`,
-              }))
-            );
-          }
-        }
-
-        // ===== RSI =====
-        const rsiSeries = rsiChart.addLineSeries({
-          color: "#8b5cf6",
-          lineWidth: 2,
-          priceLineVisible: false,
-          lastValueVisible: true,
-        });
         rsiSeries.setData(
-          overlays.rsi.map((p) => ({
-            time: p.time as UTCTimestamp,
-            value: p.value,
-          }))
+          ov.rsi.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
         );
-        rsiSeries.createPriceLine({
-          price: 70,
-          color: "#ef4444",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "70",
-        });
-        rsiSeries.createPriceLine({
-          price: 30,
-          color: "#10b981",
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: "30",
-        });
-        rsiSeriesRef.current = rsiSeries;
 
-        const mainRange = chart.timeScale().getVisibleLogicalRange();
-        if (mainRange) rsiChart.timeScale().setVisibleLogicalRange(mainRange);
+        renderOverlays(candles, ov);
 
-        if (!isRefresh) {
-          chart.timeScale().fitContent();
+        if (fit) {
+          chartRef.current?.timeScale().fitContent();
         }
 
+        setLastPrice(candles[candles.length - 1].close);
+        setPrevClose(
+          candles.length > 1 ? candles[candles.length - 2].close : null
+        );
         setCandleCount(candles.length);
         setLastUpdate(new Date());
-        onDataLoaded?.({
+        setLoading(false);
+
+        onDataLoadedRef.current?.({
           pair: selectedPair,
           timeframe,
           candleCount: candles.length,
         });
       } catch (e: any) {
-        if (!cancelled && !isRefresh) {
+        if (!cancelled && fit) {
           setError(e?.message || "Failed to load candles");
           setCandleCount(0);
+          setLoading(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     };
 
-    render(false);
-
-    const interval = setInterval(() => render(true), 30000);
+    load(true);
+    const reload = setInterval(() => load(false), 120000);
 
     return () => {
       cancelled = true;
+      clearInterval(reload);
+    };
+  }, [selectedPair, timeframe, renderOverlays, drawBoxes]);
+
+  // ===== REAL TICKS =====
+
+  const applyTick = useCallback(
+    (price: number, source: string) => {
+      const series = candleSeriesRef.current;
+      const candles = candlesRef.current;
+      if (!series || candles.length === 0) return;
+
+      const last = candles[candles.length - 1];
+      if (last.close > 0 && Math.abs(price - last.close) / last.close > 0.02) {
+        return;
+      }
+
+      const bucket = TF_SECONDS[timeframe] ?? 3600;
+      const now = Math.floor(Date.now() / 1000);
+      const barTime = Math.floor(now / bucket) * bucket;
+
+      let bar: Candle;
+      if (barTime > last.time && now - last.time < bucket * 3) {
+        bar = {
+          time: barTime,
+          open: last.close,
+          high: Math.max(price, last.close),
+          low: Math.min(price, last.close),
+          close: price,
+          volume: 0,
+          is_green: price >= last.close,
+        };
+        candles.push(bar);
+        if (candles.length > 400) candles.shift();
+      } else {
+        last.close = price;
+        last.high = Math.max(last.high, price);
+        last.low = Math.min(last.low, price);
+        last.is_green = last.close >= last.open;
+        bar = last;
+      }
+
+      try {
+        series.update({
+          time: bar.time as UTCTimestamp,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+        });
+      } catch {}
+
+      const ov = computeOverlays(selectedPair, candles);
+      overlaysRef.current = ov;
+      rsiSeriesRef.current?.setData(
+        ov.rsi.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+      );
+      renderOverlays(candles, ov);
+
+      setLastPrice(price);
+      setPrevClose(
+        candles.length > 1 ? candles[candles.length - 2].close : last.open
+      );
+      setTickSource(source);
+      setLastUpdate(new Date());
+      setCandleCount(candles.length);
+    },
+    [selectedPair, timeframe, renderOverlays]
+  );
+
+  useEffect(() => {
+    let stopped = false;
+
+    const poll = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch(
+          `/api/tick?pair=${encodeURIComponent(selectedPair)}`,
+          { cache: "no-store" }
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        if (stopped || !json?.price) return;
+        applyTick(Number(json.price), json.source ?? "—");
+      } catch {}
+    };
+
+    poll();
+    const interval = setInterval(poll, TICK_INTERVAL_MS);
+
+    return () => {
+      stopped = true;
       clearInterval(interval);
     };
-  }, [selectedPair, timeframe, showOverlays, onDataLoaded]);
+  }, [selectedPair, applyTick]);
 
-  const handleTimeframeChange = (tf: string) => {
-    setTimeframe(tf);
-    onTimeframeChange?.(tf);
+  // ===== LAYER TOGGLES =====
+
+  useEffect(() => {
+    const ov = overlaysRef.current;
+    if (!ov) return;
+    renderOverlays(candlesRef.current, ov);
+  }, [layers, showOverlays, renderOverlays]);
+
+  // ===== SCREENSHOT + ANALYSIS =====
+
+  const captureCanvas = useCallback((): HTMLCanvasElement | null => {
+    const chart = chartRef.current;
+    const rsiChart = rsiChartRef.current;
+    if (!chart) return null;
+
+    const main = chart.takeScreenshot();
+    const rsi = rsiChart?.takeScreenshot();
+
+    const canvas = document.createElement("canvas");
+    canvas.width = main.width;
+    canvas.height = main.height + (rsi?.height ?? 0);
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    ctx.fillStyle = palette().bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(main, 0, 0);
+    if (rsi) ctx.drawImage(rsi, 0, main.height);
+
+    return canvas;
+  }, []);
+
+  const handleAnalyze = async () => {
+    setAnalyzing(true);
+    setAnalyzeError(null);
+
+    const shot = captureCanvas()?.toDataURL("image/png") ?? null;
+
+    try {
+      const res = await fetch("/api/analyze-chart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pair: selectedPair, timeframe }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setAnalyzeError(data.message || data.error || "Analysis failed");
+        return;
+      }
+
+      setAnalysis({
+        status: data.status,
+        message: data.message,
+        analysis: data.analysis,
+        signal: data.signal,
+        smc: data.smc,
+        pair: selectedPair,
+        timeframe,
+        shot,
+      });
+    } catch {
+      setAnalyzeError("Could not reach the analysis service.");
+    } finally {
+      setAnalyzing(false);
+    }
   };
 
-  const handlePairChange = (pair: string) => {
-    setSelectedPair(pair);
-    onPairChange?.(pair);
+  const handleScreenshot = () => {
+    const canvas = captureCanvas();
+    if (!canvas) return;
+    const link = document.createElement("a");
+    link.download = `${selectedPair.replace("/", "")}-${timeframe}-${Date.now()}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
   };
+
+  const change =
+    lastPrice != null && prevClose != null ? lastPrice - prevClose : null;
+  const changePct =
+    change != null && prevClose ? (change / prevClose) * 100 : null;
+
+  const toggleLayer = (key: keyof LayerFlags) => {
+    setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const s = analysis?.signal;
+  const isLong = s?.direction === "long";
+  const isShort = s?.direction === "short";
 
   return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "12px",
-        overflow: "hidden",
-        width: "100%",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "8px",
-          padding: "12px",
-          borderBottom: "1px solid #e5e7eb",
-          background: "#f9fafb",
-          alignItems: "center",
-        }}
-      >
+    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      {/* TOOLBAR */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface/60 px-3 py-3">
         <select
           value={selectedPair}
-          onChange={(e) => handlePairChange(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            border: "1px solid #d1d5db",
-            borderRadius: "8px",
-            fontSize: "14px",
-            fontWeight: 600,
-            background: "#fff",
+          onChange={(e) => {
+            setSelectedPair(e.target.value);
+            onPairChangeRef.current?.(e.target.value);
           }}
+          className="h-9 rounded-lg border border-border bg-background px-3 text-sm font-semibold text-foreground outline-none focus:ring-2 focus:ring-primary/40"
         >
-          {PAIRS.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
+          {PAIR_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.pairs.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
 
-        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+        <div className="flex flex-wrap gap-1">
           {TIMEFRAMES.map((tf) => (
             <button
               key={tf}
-              onClick={() => handleTimeframeChange(tf)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "6px",
-                border: "none",
-                background: timeframe === tf ? "#1c69e3" : "#e5e7eb",
-                color: timeframe === tf ? "#fff" : "#6b7280",
-                fontSize: "12px",
-                fontWeight: timeframe === tf ? 700 : 500,
-                cursor: "pointer",
+              onClick={() => {
+                setTimeframe(tf);
+                onTimeframeChangeRef.current?.(tf);
               }}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                timeframe === tf
+                  ? "bg-primary text-primary-foreground shadow-glow"
+                  : "bg-muted text-muted-foreground hover:text-foreground"
+              }`}
             >
               {tf}
             </button>
@@ -582,70 +894,272 @@ export function LiveChart({
 
         <button
           onClick={() => setShowOverlays((v) => !v)}
-          style={{
-            padding: "6px 12px",
-            borderRadius: "6px",
-            border: "1px solid #d1d5db",
-            background: showOverlays ? "#1c69e3" : "#fff",
-            color: showOverlays ? "#fff" : "#374151",
-            fontSize: "12px",
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+            showOverlays
+              ? "border-primary/30 bg-accent text-primary"
+              : "border-border text-muted-foreground hover:text-foreground"
+          }`}
         >
-          {showOverlays ? "Hide Overlays" : "Show Overlays"}
+          <Layers className="h-3.5 w-3.5" />
+          Overlays
         </button>
 
-        <div
-          style={{
-            marginLeft: "auto",
-            fontSize: "12px",
-            color: "#6b7280",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}
-        >
-          <span
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: error ? "#ef4444" : "#10b981",
-              display: "inline-block",
-            }}
-          />
-          {loading && "Loading…"}
-          {!loading && error && (
-            <span style={{ color: "#ef4444" }}>Error: {error}</span>
-          )}
-          {!loading && !error && (
-            <>
-              {candleCount} candles
-              {lastUpdate && (
-                <span style={{ color: "#9ca3af" }}>
-                  · {lastUpdate.toLocaleTimeString()}
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`h-2 w-2 rounded-full ${
+                error ? "bg-destructive" : "animate-pulse bg-emerald-500"
+              }`}
+            />
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {error ? "Offline" : `Live · ${tickSource}`}
+            </span>
+          </div>
+          <div className="text-right">
+            <div
+              className={`text-sm font-bold tabular-nums ${
+                change == null
+                  ? "text-foreground"
+                  : change >= 0
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-rose-600 dark:text-rose-400"
+              }`}
+            >
+              {lastPrice != null ? formatPrice(selectedPair, lastPrice) : "—"}
+            </div>
+            <div className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
+              {change != null &&
+                (change >= 0 ? (
+                  <TrendingUp className="h-3 w-3" />
+                ) : (
+                  <TrendingDown className="h-3 w-3" />
+                ))}
+              {changePct != null && (
+                <span className="tabular-nums">
+                  {changePct >= 0 ? "+" : ""}
+                  {changePct.toFixed(3)}%
                 </span>
               )}
-            </>
-          )}
+            </div>
+          </div>
         </div>
       </div>
 
-      <div
-        ref={containerRef}
-        style={{ width: "100%", height: "500px", position: "relative" }}
-      />
+      {/* LAYER CHIPS */}
+      {showOverlays && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+          {LAYER_LABELS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => toggleLayer(key)}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
+                layers[key]
+                  ? "border-primary/30 bg-accent text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="ml-auto text-[11px] text-muted-foreground">
+            {loading
+              ? "Loading candles…"
+              : `${candleCount} candles · ${
+                  lastUpdate ? lastUpdate.toLocaleTimeString() : "—"
+                }`}
+          </span>
+        </div>
+      )}
 
-      <div
-        ref={rsiContainerRef}
-        style={{
-          width: "100%",
-          height: "120px",
-          borderTop: "1px solid #e5e7eb",
-          position: "relative",
-        }}
-      />
+      {/* CHART */}
+      <div className="relative">
+        <div ref={containerRef} className="relative h-[380px] w-full md:h-[480px]" />
+        <div
+          ref={overlayRef}
+          className="pointer-events-none absolute inset-0 z-10 overflow-hidden"
+        />
+        {loading && !error && (
+          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-card/60 text-sm font-medium text-muted-foreground backdrop-blur-[1px]">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            Loading candles…
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-card/80 text-sm font-medium text-destructive">
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div className="relative h-[110px] border-t border-border md:h-[120px]">
+        <div ref={rsiContainerRef} className="relative h-full w-full" />
+        <span className="pointer-events-none absolute left-2 top-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          RSI 14
+        </span>
+      </div>
+
+      {/* ACTIONS */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface/60 px-3 py-3">
+        <button
+          onClick={handleAnalyze}
+          disabled={analyzing}
+          className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:opacity-60"
+        >
+          {analyzing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <ScanSearch className="h-4 w-4" />
+          )}
+          {analyzing ? "Analyzing chart…" : "Analyze chart (SMC · ICT · S&D)"}
+        </button>
+        <button
+          onClick={handleScreenshot}
+          className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-foreground transition hover:bg-accent"
+        >
+          <Camera className="h-4 w-4" />
+          Screenshot
+        </button>
+        {lastUpdate && (
+          <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Activity className="h-3.5 w-3.5" />
+            Updated {lastUpdate.toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+
+      {/* ANALYSIS RESULT */}
+      {analyzeError && (
+        <div className="border-t border-destructive/30 bg-destructive/5 px-4 py-3 text-sm font-medium text-destructive">
+          {analyzeError}
+        </div>
+      )}
+
+      {analysis && (
+        <div className="border-t border-border bg-background px-4 py-4">
+          <div className="mb-3 flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">
+                {analysis.pair} · {analysis.timeframe}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {s?.orderTypeDescription || analysis.message || "No setup"}
+              </p>
+            </div>
+            <div
+              className={`rounded-full px-3 py-1 text-xs font-bold ${
+                isLong
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                  : isShort
+                    ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                    : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {s?.signalLabel || "NEUTRAL"}
+            </div>
+            <button
+              onClick={() => setAnalysis(null)}
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted"
+              aria-label="Close analysis"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {s && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {[
+                { label: "Entry", value: s.entryPrice, tone: "text-foreground" },
+                { label: "Stop loss", value: s.stopLossPrice, tone: "text-rose-600 dark:text-rose-400" },
+                { label: "TP1", value: s.takeProfit1Price, tone: "text-emerald-600 dark:text-emerald-400" },
+                { label: "TP2", value: s.takeProfit2Price, tone: "text-emerald-600 dark:text-emerald-400" },
+                { label: "TP3", value: s.takeProfit3Price, tone: "text-emerald-600 dark:text-emerald-400" },
+                { label: "Risk", value: s.riskPips, tone: "text-foreground", suffix: " pips" },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-border bg-card px-3 py-2"
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {item.label}
+                  </div>
+                  <div className={`text-sm font-bold tabular-nums ${item.tone}`}>
+                    {item.suffix
+                      ? `${item.value ?? 0}${item.suffix}`
+                      : formatPrice(analysis.pair, item.value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {analysis.smc && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {analysis.smc.structure && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold text-foreground">
+                  {analysis.smc.structure.lastEvent
+                    ? `${analysis.smc.structure.lastEvent.type} ${analysis.smc.structure.lastEvent.direction}`
+                    : `Structure ${analysis.smc.structure.trend}`}
+                </span>
+              )}
+              {analysis.smc.premiumDiscount && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold text-foreground">
+                  {analysis.smc.premiumDiscount.zone} ·{" "}
+                  {(analysis.smc.premiumDiscount.position * 100).toFixed(0)}%
+                </span>
+              )}
+              {analysis.smc.killzone && (
+                <span className="rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold text-foreground">
+                  {analysis.smc.killzone.name} killzone
+                </span>
+              )}
+              {analysis.smc.confidence && (
+                <span className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-bold text-primary">
+                  SMC {analysis.smc.score}/100 · {analysis.smc.confidence}
+                </span>
+              )}
+            </div>
+          )}
+
+          {analysis.smc?.confluences?.length > 0 && (
+            <ul className="mt-3 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+              {analysis.smc.confluences.slice(0, 8).map((line: string, i: number) => (
+                <li key={i} className="truncate" title={line}>
+                  {line}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {analysis.analysis && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-primary">
+                Full breakdown
+              </summary>
+              <pre className="mt-2 whitespace-pre-wrap rounded-lg border border-border bg-card p-3 text-xs leading-relaxed text-foreground">
+                {analysis.analysis}
+              </pre>
+            </details>
+          )}
+
+          {analysis.shot && (
+            <div className="mt-3 flex items-start gap-3">
+              <img
+                src={analysis.shot}
+                alt="Chart snapshot used for analysis"
+                className="max-h-32 rounded-lg border border-border"
+              />
+              <a
+                href={analysis.shot}
+                download={`${analysis.pair.replace("/", "")}-${analysis.timeframe}-analysis.png`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-foreground hover:bg-accent"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download snapshot
+              </a>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

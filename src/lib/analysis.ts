@@ -81,13 +81,20 @@ async function fetchYahooPrice(pair: string): Promise<number | null> {
 
 // ===== MAIN =====
 
-export async function getVerifiedPrice(pair: string): Promise<VerifiedPrice> {
+export async function getVerifiedPrice(
+  pair: string,
+  chartPriceOverride?: number
+): Promise<VerifiedPrice> {
   const tolerance = priceTolerancePct();
 
-  // Chart price = last 1m candle close from Dukascopy
-  const chartCandles = await getCandles(pair, "1m", 1);
-  const chartPrice =
-    chartCandles.length > 0 ? chartCandles[chartCandles.length - 1].close : 0;
+  // Chart price = last candle close from the requested timeframe when supplied,
+  // otherwise a fresh 1m close from Dukascopy.
+  let chartPrice = chartPriceOverride ?? 0;
+  if (chartPrice === 0) {
+    const chartCandles = await getCandles(pair, "1m", 1);
+    chartPrice =
+      chartCandles.length > 0 ? chartCandles[chartCandles.length - 1].close : 0;
+  }
 
   // Yahoo price = independent second source
   const yahooPrice = await fetchYahooPrice(pair);

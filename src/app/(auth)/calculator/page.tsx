@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useMemo } from "react";
-
-const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD"];
+import { Calculator, Scale, ShieldAlert, Target, TrendingUp } from "lucide-react";
+import { PAIR_GROUPS, PAIRS } from "@/lib/pairs";
 
 export default function CalculatorPage() {
   const [accountBalance, setAccountBalance] = useState(10000);
@@ -24,137 +24,177 @@ export default function CalculatorPage() {
     return { riskAmount, pipValue, positionSizeLots, potentialReward, riskRewardRatio };
   }, [accountBalance, riskPercent, pair, stopLossPips, takeProfitPips, lotType]);
 
-  const inputStyle = {
-    width: "100%",
-    padding: "10px 12px",
-    border: "1px solid #d1d5db",
-    borderRadius: "8px",
-    fontSize: "14px",
-  };
+  const inputClass =
+    "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition focus:ring-2 focus:ring-primary/40";
+  const labelClass =
+    "mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted-foreground";
 
-  const labelStyle = {
-    display: "block",
-    fontSize: "14px",
-    fontWeight: "600" as const,
-    marginBottom: "6px",
-  };
+  const breakdown = [
+    {
+      label: "Risk Amount",
+      value: `$${results.riskAmount.toFixed(2)}`,
+      icon: ShieldAlert,
+      tone: "text-rose-600 dark:text-rose-400",
+    },
+    {
+      label: "Pip Value",
+      value: `$${results.pipValue.toFixed(4)}`,
+      icon: Scale,
+      tone: "text-foreground",
+    },
+    {
+      label: "Potential Reward",
+      value: `$${results.potentialReward.toFixed(2)}`,
+      icon: TrendingUp,
+      tone: "text-emerald-600 dark:text-emerald-400",
+    },
+    {
+      label: "Risk : Reward",
+      value: `1 : ${results.riskRewardRatio}`,
+      icon: Target,
+      tone: "text-foreground",
+    },
+  ];
 
   return (
-    <div style={{ maxWidth: "800px", margin: "0 auto", padding: "20px" }}>
-      <div style={{ textAlign: "center", marginBottom: "24px" }}>
-        <h1 style={{ fontSize: "28px", fontWeight: "800", marginBottom: "8px" }}>
-          🧮 Position Size Calculator
-        </h1>
-        <p style={{ color: "#6b7280" }}>Calculate your optimal position size</p>
-      </div>
-
-      <div style={{
-        background: "#fff",
-        border: "1px solid #e5e7eb",
-        borderRadius: "12px",
-        padding: "24px",
-      }}>
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: "16px",
-          marginBottom: "24px",
-        }}>
-          <div>
-            <label style={labelStyle}>Account Balance</label>
-            <input
-              type="number"
-              value={accountBalance}
-              onChange={(e) => setAccountBalance(Number(e.target.value))}
-              style={inputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Risk %</label>
-            <input
-              type="number"
-              value={riskPercent}
-              onChange={(e) => setRiskPercent(Number(e.target.value))}
-              style={inputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Currency Pair</label>
-            <select value={pair} onChange={(e) => setPair(e.target.value)} style={inputStyle}>
-              {PAIRS.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Stop Loss (pips)</label>
-            <input
-              type="number"
-              value={stopLossPips}
-              onChange={(e) => setStopLossPips(Number(e.target.value))}
-              style={inputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Take Profit (pips)</label>
-            <input
-              type="number"
-              value={takeProfitPips}
-              onChange={(e) => setTakeProfitPips(Number(e.target.value))}
-              style={inputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Lot Type</label>
-            <select value={lotType} onChange={(e) => setLotType(e.target.value)} style={inputStyle}>
-              <option value="standard">Standard (100,000)</option>
-              <option value="mini">Mini (10,000)</option>
-              <option value="micro">Micro (1,000)</option>
-            </select>
-          </div>
-        </div>
-
-        <div style={{
-          background: "linear-gradient(135deg, #1c69e3, #783ff5)",
-          borderRadius: "12px",
-          padding: "24px",
-          textAlign: "center",
-          marginBottom: "16px",
-        }}>
-          <p style={{ color: "rgba(255,255,255,0.8)", fontSize: "14px" }}>Position Size</p>
-          <p style={{ fontSize: "36px", fontWeight: "800", color: "#fff" }}>
-            {results.positionSizeLots.toFixed(2)} lots
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Position size calculator
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Size your trades across {PAIRS.length} instruments with precise risk
+            control.
           </p>
         </div>
+        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold">
+          <Calculator className="h-3.5 w-3.5 text-primary" />
+          {pair}
+        </span>
+      </div>
 
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-          gap: "12px",
-        }}>
-          <div style={{ padding: "14px", background: "#fef2f2", borderRadius: "8px", textAlign: "center" }}>
-            <p style={{ fontSize: "12px", color: "#6b7280" }}>Risk Amount</p>
-            <p style={{ fontSize: "20px", fontWeight: "700", color: "#dc2626" }}>
-              ${results.riskAmount.toFixed(2)}
-            </p>
+      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        {/* Inputs */}
+        <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <h2 className="mb-4 text-base font-bold tracking-tight">
+            Trade parameters
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelClass}>Account Balance</label>
+              <input
+                type="number"
+                className={inputClass}
+                value={accountBalance}
+                onChange={(e) => setAccountBalance(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Risk %</label>
+              <input
+                type="number"
+                className={inputClass}
+                value={riskPercent}
+                onChange={(e) => setRiskPercent(Number(e.target.value))}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className={labelClass}>Currency Pair</label>
+              <select
+                className={inputClass}
+                value={pair}
+                onChange={(e) => setPair(e.target.value)}
+              >
+                {PAIR_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.pairs.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>Stop Loss (pips)</label>
+              <input
+                type="number"
+                className={inputClass}
+                value={stopLossPips}
+                onChange={(e) => setStopLossPips(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Take Profit (pips)</label>
+              <input
+                type="number"
+                className={inputClass}
+                value={takeProfitPips}
+                onChange={(e) => setTakeProfitPips(Number(e.target.value))}
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <label className={labelClass}>Lot Type</label>
+              <select
+                className={inputClass}
+                value={lotType}
+                onChange={(e) => setLotType(e.target.value)}
+              >
+                <option value="standard">Standard (100,000)</option>
+                <option value="mini">Mini (10,000)</option>
+                <option value="micro">Micro (1,000)</option>
+              </select>
+            </div>
           </div>
-          <div style={{ padding: "14px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
-            <p style={{ fontSize: "12px", color: "#6b7280" }}>Pip Value</p>
-            <p style={{ fontSize: "20px", fontWeight: "700", color: "#111827" }}>
-              ${results.pipValue.toFixed(4)}
-            </p>
+        </section>
+
+        {/* Results */}
+        <section className="space-y-4">
+          <div className="relative overflow-hidden rounded-2xl bg-brand-gradient-deep p-6 text-center shadow-card">
+            <div className="pointer-events-none absolute inset-0 bg-grid-emerald opacity-60" />
+            <div className="relative">
+              <p className="inline-flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-emerald-100/80">
+                <Calculator className="h-3.5 w-3.5" />
+                Position Size
+              </p>
+              <p className="mt-2 text-4xl font-bold tabular-nums text-white">
+                {results.positionSizeLots.toFixed(2)}{" "}
+                <span className="text-lg font-semibold text-emerald-100/80">
+                  lots
+                </span>
+              </p>
+              <p className="mt-2 text-xs text-emerald-100/70">
+                {pair} · {lotType} lot · risking {riskPercent}%
+              </p>
+            </div>
           </div>
-          <div style={{ padding: "14px", background: "#f0fdf4", borderRadius: "8px", textAlign: "center" }}>
-            <p style={{ fontSize: "12px", color: "#6b7280" }}>Potential Reward</p>
-            <p style={{ fontSize: "20px", fontWeight: "700", color: "#16a34a" }}>
-              ${results.potentialReward.toFixed(2)}
-            </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            {breakdown.map((item) => {
+              const Icon = item.icon;
+              return (
+                <div
+                  key={item.label}
+                  className="rounded-xl border border-border bg-card p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {item.label}
+                    </span>
+                    <Icon className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  <p
+                    className={`mt-1 text-2xl font-bold tabular-nums ${item.tone}`}
+                  >
+                    {item.value}
+                  </p>
+                </div>
+              );
+            })}
           </div>
-          <div style={{ padding: "14px", background: "#f9fafb", borderRadius: "8px", textAlign: "center" }}>
-            <p style={{ fontSize: "12px", color: "#6b7280" }}>Risk : Reward</p>
-            <p style={{ fontSize: "20px", fontWeight: "700", color: "#111827" }}>
-              1 : {results.riskRewardRatio}
-            </p>
-          </div>
-        </div>
+        </section>
       </div>
     </div>
   );

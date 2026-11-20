@@ -4,7 +4,7 @@ import { formatDate, formatCurrency, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowUp, ArrowDown, Trash2 } from "lucide-react";
+import { ArrowUp, ArrowDown, Pencil, Trash2 } from "lucide-react";
 import type { Trade } from "@/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -112,7 +112,7 @@ export function TradeCard({ trade, onDelete }: TradeCardProps) {
                 className="h-8 w-8"
                 onClick={() => router.push(`/journal/${trade._id}`)}
               >
-                ✏️
+                <Pencil className="h-4 w-4" />
               </Button>
               <Button
                 variant="ghost"

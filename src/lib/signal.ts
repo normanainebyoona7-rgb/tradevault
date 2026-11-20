@@ -117,6 +117,31 @@ function calcATR(candles: Candle[], period: number = 14): number {
   return slice.reduce((s, v) => s + v, 0) / period;
 }
 
+// How close price must be to a zone before a setup is valid, scaled by timeframe.
+// Tight charts need a tight gate; higher timeframes breathe more.
+function zoneTolerancePct(timeframe: string): number {
+  switch (timeframe) {
+    case "1m":
+      return 0.12;
+    case "5m":
+      return 0.2;
+    case "15m":
+      return 0.3;
+    case "30m":
+      return 0.4;
+    case "1H":
+      return 0.5;
+    case "4H":
+      return 0.8;
+    case "1D":
+      return 1.2;
+    case "1W":
+      return 2.0;
+    default:
+      return 0.5;
+  }
+}
+
 function getSession(): { name: string; favorable: boolean } {
   const hour = new Date().getUTCHours();
   if (hour >= 7 && hour <= 11) return { name: "LONDON", favorable: true };
@@ -270,7 +295,9 @@ export function buildSignal(
     session: sessionInfo.name, sessionFavorable: sessionInfo.favorable,
   };
 
-  if (verifiedPrice && !verifiedPrice.ok) {
+  // Only refuse when BOTH sources exist and disagree. A missing Yahoo quote
+  // downgrades confidence but must not suppress every setup.
+  if (verifiedPrice && verifiedPrice.yahooPrice !== null && !verifiedPrice.ok) {
     return {
       pair, timeframe, timestamp,
       direction: "neutral", orderType: "none", signalLabel: "NEUTRAL",
@@ -306,7 +333,8 @@ export function buildSignal(
   const atr = calcATR(candles, 14);
   const slDistance = atr * 2.0; // SL = entry ± 2.0 × ATR
 
-  // ===== ZONE SELECTION — price must be INSIDE or within 0.5% of the zone =====
+  // ===== ZONE SELECTION — price must be INSIDE or near the zone =====
+  const tolerance = zoneTolerancePct(timeframe);
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
 
   const activeZone = sortedZones.find((z) => {
@@ -315,12 +343,12 @@ export function buildSignal(
 
     // Demand zone — price above it, approaching downward
     if (z.type === "demand" && currentPrice > z.top) {
-      return ((currentPrice - z.top) / z.top) * 100 <= 0.5;
+      return ((currentPrice - z.top) / z.top) * 100 <= tolerance;
     }
 
     // Supply zone — price below it, approaching upward
     if (z.type === "supply" && currentPrice < z.bottom) {
-      return ((z.bottom - currentPrice) / z.bottom) * 100 <= 0.5;
+      return ((z.bottom - currentPrice) / z.bottom) * 100 <= tolerance;
     }
 
     // Otherwise: price is far from the zone → NOT active (no STOP orders)
@@ -337,7 +365,7 @@ export function buildSignal(
       zone: { type: nearest.type, top: nearest.top, bottom: nearest.bottom, strength: 0, distanceToPrice: nearest.distanceToPrice },
       entryCandle: null,
       confluences: baseConfluences, confidence: "NEUTRAL", score: 0,
-      neutralReason: `Price is ${(nearest.distanceToPrice).toFixed(5)} away from nearest ${nearest.type} zone — waiting for price to reach it`,
+      neutralReason: `Price is ${((nearest.distanceToPrice / currentPrice) * 100).toFixed(2)}% away from the nearest ${nearest.type} zone ${nearest.bottom.toFixed(5)}–${nearest.top.toFixed(5)} — waiting for price to reach it`,
       notes, priceVerification,
     };
   }
@@ -416,6 +444,9 @@ export function buildSignal(
   notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips`);
   notes.push(`TPs: Fibonacci 1.272 / 1.618 / 2.0 of swing`);
   notes.push(`Session: ${sessionInfo.name}`);
+  if (verifiedPrice && verifiedPrice.yahooPrice === null) {
+    notes.push("Second price source unavailable — signal not cross-verified");
+  }
 
   return {
     pair, timeframe, timestamp,

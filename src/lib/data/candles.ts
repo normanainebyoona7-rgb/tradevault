@@ -32,7 +32,7 @@ function toDukascopySymbol(pair: string): string {
   return pair.replace("/", "").toLowerCase();
 }
 
-function toYahooSymbol(pair: string): string {
+export function toYahooSymbol(pair: string): string {
   const upper = pair.toUpperCase();
 
   if (upper.includes("XAU")) return "GC=F";

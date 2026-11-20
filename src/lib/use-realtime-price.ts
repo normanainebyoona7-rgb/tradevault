@@ -1,57 +1,48 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-const FALLBACK_PRICES: Record<string, number> = {
-  "EUR/USD": 1.085,
-  "GBP/USD": 1.27,
-  "USD/JPY": 148.5,
-  "USD/CHF": 0.88,
-  "AUD/USD": 0.66,
-  "USD/CAD": 1.36,
-  "NZD/USD": 0.61,
-  "EUR/GBP": 0.855,
-  "EUR/JPY": 161.0,
-  "GBP/JPY": 188.5,
-  "XAU/USD": 2350.0,
-  "BTC/USD": 67000.0,
-  "ETH/USD": 3200.0,
-};
-
+// Real ticks only — polls /api/tick (Swissquote FX/metals, Yahoo crypto).
+// Returns null until the first quote arrives; never invents a price.
 export function useRealtimePrice(pair: string) {
-  const [price, setPrice] = useState<number>(FALLBACK_PRICES[pair] || 1.0);
-  const [previousPrice, setPreviousPrice] = useState<number>(
-    FALLBACK_PRICES[pair] || 1.0,
-  );
-  const priceRef = useRef<number>(FALLBACK_PRICES[pair] || 1.0);
+  const [price, setPrice] = useState<number | null>(null);
+  const [previousPrice, setPreviousPrice] = useState<number | null>(null);
+  const priceRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const fallback = FALLBACK_PRICES[pair] || 1.0;
-    setPrice(fallback);
-    setPreviousPrice(fallback);
-    priceRef.current = fallback;
+    let stopped = false;
 
-    const interval = setInterval(() => {
-      const basePrice = FALLBACK_PRICES[pair] || 1.0;
-      const volatility = basePrice * 0.0005;
-      const change = (Math.random() - 0.5) * volatility;
-      const newPrice = priceRef.current + change;
+    priceRef.current = null;
+    setPrice(null);
+    setPreviousPrice(null);
 
-      const minPrice = basePrice * 0.98;
-      const maxPrice = basePrice * 1.02;
-      const clampedPrice = Math.min(Math.max(newPrice, minPrice), maxPrice);
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/tick?pair=${encodeURIComponent(pair)}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        const next = Number(json?.price);
+        if (!Number.isFinite(next) || next <= 0 || stopped) return;
 
-      setPreviousPrice(priceRef.current);
-      setPrice(clampedPrice);
-      priceRef.current = clampedPrice;
-    }, 2000);
+        setPreviousPrice(priceRef.current);
+        priceRef.current = next;
+        setPrice(next);
+      } catch {}
+    };
+
+    poll();
+    const interval = setInterval(poll, 4000);
 
     return () => {
+      stopped = true;
       clearInterval(interval);
     };
   }, [pair]);
 
-  const isPriceUp = price >= previousPrice;
+  const isPriceUp =
+    price != null && previousPrice != null ? price >= previousPrice : true;
 
   return { price, previousPrice, isPriceUp };
 }

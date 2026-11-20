@@ -13,13 +13,20 @@ import {
   detectOrderBlocks,
   detectFVGs,
   detectSupplyDemand,
-  sma,
   type SMCCandle,
   type SMCLiquidity,
   type SMCOrderBlock,
   type SMCFVG,
   type SMCSupplyDemand,
 } from "@/lib/smc-analysis";
+import {
+  detectMarketStructure,
+  detectLiquiditySweeps,
+  premiumDiscount,
+  type LiquiditySweep,
+  type MarketStructure,
+  type PremiumDiscount,
+} from "@/lib/market-structure";
 import type { Candle } from "@/lib/data/candles";
 
 // ===== TYPES =====
@@ -86,7 +93,19 @@ export interface Overlays {
 
   sessions: SessionBox[];
   largeRangeCandles: LargeRangeMarker[];
+
+  structure: MarketStructure;
+  premiumDiscount: PremiumDiscount | null;
+  liquiditySweeps: LiquiditySweep[];
 }
+
+const EMPTY_STRUCTURE: MarketStructure = {
+  trend: "neutral",
+  lastEvent: null,
+  events: [],
+  lastSwingHigh: null,
+  lastSwingLow: null,
+};
 
 // ===== INDICATOR MATH =====
 
@@ -400,6 +419,9 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
       pivots: null,
       sessions: [],
       largeRangeCandles: [],
+      structure: EMPTY_STRUCTURE,
+      premiumDiscount: null,
+      liquiditySweeps: [],
     };
   }
 
@@ -423,21 +445,26 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
   const liquidityZones = detectLiquidity(smcCandles);
   const smcSupplyDemand = detectSupplyDemand(smcCandles);
 
-  // ===== SMA LINES =====
+  // ===== SMA LINES (rolling sums — linear time) =====
   const sma9Arr: IndicatorLine[] = [];
   const sma21Arr: IndicatorLine[] = [];
   const sma200Arr: IndicatorLine[] = [];
 
-  for (let i = 0; i < candles.length; i++) {
-    const slice = smcCandles.slice(0, i + 1);
-    if (slice.length >= 9) {
-      sma9Arr.push({ time: candles[i].time, value: sma(slice, 9) });
+  let sum = 0;
+  for (let i = 0; i < closes.length; i++) {
+    sum += closes[i];
+    if (i >= 9) sum -= closes[i - 9];
+    if (i >= 8) sma9Arr.push({ time: candles[i].time, value: sum / 9 });
+
+    if (i >= 21) {
+      let s21 = 0;
+      for (let j = i - 20; j <= i; j++) s21 += closes[j];
+      sma21Arr.push({ time: candles[i].time, value: s21 / 21 });
     }
-    if (slice.length >= 21) {
-      sma21Arr.push({ time: candles[i].time, value: sma(slice, 21) });
-    }
-    if (slice.length >= 200) {
-      sma200Arr.push({ time: candles[i].time, value: sma(slice, 200) });
+    if (i >= 199) {
+      let s200 = 0;
+      for (let j = i - 199; j <= i; j++) s200 += closes[j];
+      sma200Arr.push({ time: candles[i].time, value: s200 / 200 });
     }
   }
 
@@ -471,6 +498,11 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
   // ===== LARGE RANGE MARKERS =====
   const largeRangeCandles = calcLargeRangeCandles(candles);
 
+  // ===== ICT STRUCTURE =====
+  const structure = detectMarketStructure(candles);
+  const pd = premiumDiscount(candles);
+  const liquiditySweeps = detectLiquiditySweeps(candles);
+
   return {
     sdZones,
     orderBlocks,
@@ -488,5 +520,8 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
     pivots,
     sessions,
     largeRangeCandles,
+    structure,
+    premiumDiscount: pd,
+    liquiditySweeps,
   };
 }
