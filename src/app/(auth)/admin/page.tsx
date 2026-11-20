@@ -20,6 +20,7 @@ import {
   Lock,
   LocateFixed,
   Percent,
+  Plug,
   Plus,
   Radar,
   Settings,
@@ -132,7 +133,7 @@ export default function AdminPage() {
 
   const [signals, setSignals] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "signals" | "auto" | "analytics">("auto");
+  const [activeTab, setActiveTab] = useState<"users" | "signals" | "auto" | "analytics" | "broker">("auto");
   const [showAddSignal, setShowAddSignal] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [autoPair, setAutoPair] = useState("EUR/USD");
@@ -144,6 +145,25 @@ export default function AdminPage() {
   const [loadingSignals, setLoadingSignals] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+
+  const [broker, setBroker] = useState<any>(null);
+  const [brokerExecutions, setBrokerExecutions] = useState<any[]>([]);
+  const [executorConfigured, setExecutorConfigured] = useState(false);
+  const [brokerSaving, setBrokerSaving] = useState(false);
+  const [brokerError, setBrokerError] = useState("");
+  const [brokerNotice, setBrokerNotice] = useState("");
+  const [brokerForm, setBrokerForm] = useState({
+    login: "",
+    password: "",
+    server: "",
+    mode: "paper" as "paper" | "live",
+    enabled: false,
+    riskPercent: "1",
+    maxLot: "0.1",
+    maxDailyLossUsd: "50",
+    tpLevel: "1",
+    symbolSuffix: "",
+  });
 
   const [newSignal, setNewSignal] = useState({
     pair: "EUR/USD",
@@ -189,6 +209,7 @@ export default function AdminPage() {
       loadSignals();
       loadUsers();
       loadAnalytics();
+      loadBroker();
     }
   }, [isAdmin, isLocked]);
 
@@ -227,6 +248,112 @@ export default function AdminPage() {
       setLoadingAnalytics(false);
     }
   };
+
+  const loadBroker = async () => {
+    try {
+      const response = await fetch("/api/admin/broker");
+      const data = await response.json();
+      if (!response.ok) return;
+      setExecutorConfigured(!!data.executorConfigured);
+      setBrokerExecutions(data.executions ?? []);
+      const conn = data.connection;
+      setBroker(conn);
+      if (conn) {
+        setBrokerForm({
+          login: conn.login ?? "",
+          password: "",
+          server: conn.server ?? "",
+          mode: conn.mode ?? "paper",
+          enabled: !!conn.enabled,
+          riskPercent: String(conn.riskPercent ?? 1),
+          maxLot: String(conn.maxLot ?? 0.1),
+          maxDailyLossUsd: String(conn.maxDailyLossUsd ?? 50),
+          tpLevel: String(conn.tpLevel ?? 1),
+          symbolSuffix: conn.symbolSuffix ?? "",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to load broker connection:", error);
+    }
+  };
+
+  const saveBroker = async () => {
+    setBrokerSaving(true);
+    setBrokerError("");
+    setBrokerNotice("");
+    try {
+      const response = await fetch("/api/admin/broker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          login: brokerForm.login,
+          password: brokerForm.password,
+          server: brokerForm.server,
+          mode: brokerForm.mode,
+          enabled: brokerForm.enabled,
+          riskPercent: Number(brokerForm.riskPercent),
+          maxLot: Number(brokerForm.maxLot),
+          maxDailyLossUsd: Number(brokerForm.maxDailyLossUsd),
+          tpLevel: Number(brokerForm.tpLevel),
+          symbolSuffix: brokerForm.symbolSuffix,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setBrokerError(data.error || "Failed to save broker connection");
+        return;
+      }
+      setBroker(data.connection);
+      setBrokerForm((prev) => ({ ...prev, password: "" }));
+      setBrokerNotice("Connection saved.");
+    } catch (error: any) {
+      setBrokerError(error?.message || "Failed to save broker connection");
+    } finally {
+      setBrokerSaving(false);
+    }
+  };
+
+  const disconnectBroker = async () => {
+    if (!window.confirm("Remove the broker connection? The executor will stop trading.")) {
+      return;
+    }
+    setBrokerError("");
+    setBrokerNotice("");
+    try {
+      const response = await fetch("/api/admin/broker", { method: "DELETE" });
+      if (!response.ok) {
+        setBrokerError("Failed to disconnect broker");
+        return;
+      }
+      setBroker(null);
+      setBrokerForm({
+        login: "",
+        password: "",
+        server: "",
+        mode: "paper",
+        enabled: false,
+        riskPercent: "1",
+        maxLot: "0.1",
+        maxDailyLossUsd: "50",
+        tpLevel: "1",
+        symbolSuffix: "",
+      });
+      setBrokerNotice("Broker disconnected.");
+    } catch {
+      setBrokerError("Failed to disconnect broker");
+    }
+  };
+
+  const heartbeatAgo = broker?.lastHeartbeatAt
+    ? (() => {
+        const mins = Math.floor(
+          (Date.now() - new Date(broker.lastHeartbeatAt).getTime()) / 60000
+        );
+        if (mins < 1) return "just now";
+        if (mins < 60) return `${mins}m ago`;
+        return `${Math.floor(mins / 60)}h ago`;
+      })()
+    : "never";
 
   const handleUnlock = () => {
     if (adminPassword === ADMIN_PASSWORD) {
@@ -464,11 +591,12 @@ export default function AdminPage() {
     );
   }
 
-  const TABS: { id: "auto" | "signals" | "users" | "analytics"; label: string; icon: LucideIcon }[] = [
+  const TABS: { id: "auto" | "signals" | "users" | "analytics" | "broker"; label: string; icon: LucideIcon }[] = [
     { id: "auto", label: "Zone strategy", icon: Crosshair },
     { id: "signals", label: `Signals (${signals.length})`, icon: Activity },
     { id: "users", label: `Users (${users.length})`, icon: Users },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
+    { id: "broker", label: "Broker", icon: Plug },
   ];
 
   const tabClass = (active: boolean) =>
@@ -1041,6 +1169,341 @@ export default function AdminPage() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {activeTab === "broker" && (
+        <div className="space-y-4">
+          <div className={PANEL}>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Plug className="h-4 w-4 text-primary" />
+                <h2 className="text-base font-bold tracking-tight">
+                  Exness · MT5 connection
+                </h2>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={broker ? BADGE_POSITIVE : BADGE_NEUTRAL}>
+                  {broker ? "CONNECTED" : "NOT CONNECTED"}
+                </span>
+                {broker && (
+                  <span className={broker.enabled ? BADGE_POSITIVE : BADGE_NEUTRAL}>
+                    {broker.enabled ? "ENABLED" : "DISABLED"}
+                  </span>
+                )}
+                {broker && (
+                  <span className={broker.mode === "live" ? BADGE_NEGATIVE : BADGE_NEUTRAL}>
+                    {broker.mode === "live" ? "LIVE" : "PAPER"}
+                  </span>
+                )}
+              </div>
+            </div>
+            <p className="mb-4 text-xs text-muted-foreground">
+              The executor runs on a Windows VPS with the MT5 terminal, polls
+              approved signals, and places trades with risk-based lot sizing.
+              Paper mode logs every trade without sending an order.
+            </p>
+
+            {!executorConfigured && (
+              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                EXECUTOR_SECRET is not set on the server. Add it in your
+                Vercel/Render environment variables so the executor can
+                authenticate.
+              </div>
+            )}
+            {broker?.lastError && (
+              <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-700 dark:text-rose-400">
+                Executor error: {broker.lastError}
+              </div>
+            )}
+            {brokerError && (
+              <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-700 dark:text-rose-400">
+                {brokerError}
+              </div>
+            )}
+            {brokerNotice && (
+              <div className="mb-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                {brokerNotice}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className={LABEL}>MT5 login</label>
+                <input
+                  className={INPUT}
+                  value={brokerForm.login}
+                  onChange={(e) =>
+                    setBrokerForm({ ...brokerForm, login: e.target.value })
+                  }
+                  placeholder="e.g. 12345678"
+                />
+              </div>
+              <div>
+                <label className={LABEL}>MT5 password</label>
+                <input
+                  className={INPUT}
+                  type="password"
+                  value={brokerForm.password}
+                  onChange={(e) =>
+                    setBrokerForm({ ...brokerForm, password: e.target.value })
+                  }
+                  placeholder={
+                    broker?.hasPassword
+                      ? "Stored — leave empty to keep"
+                      : "Trading password (not investor)"
+                  }
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Server</label>
+                <input
+                  className={INPUT}
+                  value={brokerForm.server}
+                  onChange={(e) =>
+                    setBrokerForm({ ...brokerForm, server: e.target.value })
+                  }
+                  placeholder="Exness-MT5Real12"
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Symbol suffix</label>
+                <input
+                  className={INPUT}
+                  value={brokerForm.symbolSuffix}
+                  onChange={(e) =>
+                    setBrokerForm({
+                      ...brokerForm,
+                      symbolSuffix: e.target.value,
+                    })
+                  }
+                  placeholder="e.g. m for XAUUSDm — empty if none"
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Mode</label>
+                <select
+                  className={INPUT}
+                  value={brokerForm.mode}
+                  onChange={(e) =>
+                    setBrokerForm({
+                      ...brokerForm,
+                      mode: e.target.value as "paper" | "live",
+                    })
+                  }
+                >
+                  <option value="paper">Paper — log only, no orders</option>
+                  <option value="live">Live — place real orders</option>
+                </select>
+              </div>
+              <div>
+                <label className={LABEL}>Take profit level</label>
+                <select
+                  className={INPUT}
+                  value={brokerForm.tpLevel}
+                  onChange={(e) =>
+                    setBrokerForm({ ...brokerForm, tpLevel: e.target.value })
+                  }
+                >
+                  <option value="1">TP1 (closest)</option>
+                  <option value="2">TP2</option>
+                  <option value="3">TP3 (furthest)</option>
+                </select>
+              </div>
+              <div>
+                <label className={LABEL}>Risk per trade (%)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={0.1}
+                  max={10}
+                  step={0.1}
+                  value={brokerForm.riskPercent}
+                  onChange={(e) =>
+                    setBrokerForm({
+                      ...brokerForm,
+                      riskPercent: e.target.value,
+                    })
+                  }
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Max lot per trade</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={0.01}
+                  max={50}
+                  step={0.01}
+                  value={brokerForm.maxLot}
+                  onChange={(e) =>
+                    setBrokerForm({ ...brokerForm, maxLot: e.target.value })
+                  }
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Max daily loss (USD)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={brokerForm.maxDailyLossUsd}
+                  onChange={(e) =>
+                    setBrokerForm({
+                      ...brokerForm,
+                      maxDailyLossUsd: e.target.value,
+                    })
+                  }
+                />
+              </div>
+              <div className="flex items-end">
+                <label className="flex h-10 w-full cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={brokerForm.enabled}
+                    onChange={(e) =>
+                      setBrokerForm({
+                        ...brokerForm,
+                        enabled: e.target.checked,
+                      })
+                    }
+                    className="h-4 w-4 accent-emerald-600"
+                  />
+                  Executor enabled
+                </label>
+              </div>
+            </div>
+
+            {brokerForm.enabled && brokerForm.mode === "live" && (
+              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 dark:text-rose-400">
+                Live mode will place real orders on this Exness account using
+                the signals in the Signals tab. Start in paper mode first.
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                onClick={saveBroker}
+                disabled={brokerSaving}
+                className={BTN_PRIMARY}
+              >
+                {brokerSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                {broker ? "Save changes" : "Connect account"}
+              </button>
+              {broker && (
+                <button onClick={disconnectBroker} className={BTN_DANGER}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Disconnect
+                </button>
+              )}
+              {broker && (
+                <span className="text-xs text-muted-foreground">
+                  Executor heartbeat: {heartbeatAgo}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className={PANEL}>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-2 text-base font-bold tracking-tight">
+                <Activity className="h-4 w-4 text-primary" />
+                Recent executions
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {brokerExecutions.length} shown
+              </span>
+            </div>
+            {brokerExecutions.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
+                No executions yet. Every paper and live trade the executor
+                handles will be listed here.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead>
+                    <tr className={THEAD_ROW}>
+                      <th className={TH}>When</th>
+                      <th className={TH}>Pair</th>
+                      <th className={TH}>Side</th>
+                      <th className={TH}>Lots</th>
+                      <th className={TH}>Status</th>
+                      <th className={TH}>Mode</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {brokerExecutions.map((execution) => (
+                      <tr
+                        key={execution.id}
+                        className={TBODY_ROW}
+                        title={execution.message || ""}
+                      >
+                        <td className={`${TD} whitespace-nowrap text-xs text-muted-foreground`}>
+                          {new Date(execution.createdAt).toLocaleString()}
+                        </td>
+                        <td className={`${TD} font-semibold`}>{execution.pair}</td>
+                        <td className={TD}>
+                          {String(execution.direction || "").toUpperCase()}
+                        </td>
+                        <td className={`${TD} tabular-nums`}>
+                          {Number(execution.lots || 0).toFixed(2)}
+                        </td>
+                        <td className={TD}>
+                          <span
+                            className={
+                              execution.status === "placed"
+                                ? BADGE_POSITIVE
+                                : execution.status === "error"
+                                  ? BADGE_NEGATIVE
+                                  : BADGE_NEUTRAL
+                            }
+                          >
+                            {execution.status}
+                          </span>
+                        </td>
+                        <td className={`${TD} text-xs uppercase text-muted-foreground`}>
+                          {execution.mode}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className={PANEL}>
+            <h3 className="mb-2 flex items-center gap-2 text-base font-bold tracking-tight">
+              <Shield className="h-4 w-4 text-primary" />
+              How it executes
+            </h3>
+            <ol className="list-inside list-decimal space-y-1 text-xs text-muted-foreground">
+              <li>
+                Generate a signal in the Zone strategy tab — it is saved to the
+                Signals tab automatically.
+              </li>
+              <li>
+                The executor (ai-backend/executor.py) polls
+                /api/executor/pending every 20 seconds with your
+                EXECUTOR_SECRET.
+              </li>
+              <li>
+                Lot size = balance × risk % ÷ stop distance, clamped to max lot;
+                one position per signal, TP per your TP level.
+              </li>
+              <li>
+                New trades stop automatically for the day once the max daily
+                loss is hit. Disable the executor at any time to halt new
+                entries.
+              </li>
+            </ol>
+          </div>
         </div>
       )}
 

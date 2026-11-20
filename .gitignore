@@ -43,3 +43,6 @@ next-env.d.ts
 # Backup files
 backup/
 *.backup
+
+# TradeVault MT5 executor state
+ai-backend/executor_state.json
