@@ -388,10 +388,29 @@ export function buildSignal(
     entryLevel = currentPrice;
   } else {
     // Either inside zone without confirmation, OR approaching zone
-    // → pending limit order at zone edge
+    // → pending limit order at the zone edge on the CORRECT side of market
     orderType = "limit";
     signalLabel = direction === "long" ? "BUY LIMIT" : "SELL LIMIT";
-    entryLevel = direction === "long" ? activeZone.top : activeZone.bottom;
+
+    if (direction === "long") {
+      // BUY LIMIT must be BELOW current price
+      entryLevel = activeZone.top < currentPrice
+        ? activeZone.top      // price above zone → enter at top of demand
+        : activeZone.bottom;  // price inside zone → enter at bottom of demand
+    } else {
+      // SELL LIMIT must be ABOVE current price
+      entryLevel = activeZone.bottom > currentPrice
+        ? activeZone.bottom   // price below zone → enter at bottom of supply
+        : activeZone.top;     // price inside zone → enter at top of supply
+    }
+
+    // Hard guard: never emit an inverted limit order
+    if (direction === "long" && entryLevel >= currentPrice) {
+      entryLevel = currentPrice - slDistance;
+    }
+    if (direction === "short" && entryLevel <= currentPrice) {
+      entryLevel = currentPrice + slDistance;
+    }
   }
 
   // ===== SL — ATR-based =====
