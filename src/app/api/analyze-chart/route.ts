@@ -1,7 +1,7 @@
 // src/app/api/analyze-chart/route.ts
 // Analyzes a live chart with cross-source price verification, ATR-based SL,
 // Fibonacci TPs, and an SMC / ICT / supply-demand breakdown.
-// STOP orders are not emitted — only BUY, SELL, BUY LIMIT, SELL LIMIT, NEUTRAL.
+// Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT — no NEUTRAL, no STOP orders.
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
@@ -90,49 +90,8 @@ export async function POST(request: Request) {
     }));
     const smc = buildSmcPayload(pair, smcCandles, overlays);
 
-    // ===== NEUTRAL PATH =====
-    if (signal.direction === "neutral") {
-      return NextResponse.json({
-        status: signal.neutralReason?.includes("Price feed")
-          ? "no_setup"
-          : "watching",
-        message: signal.neutralReason || "No setup",
-        analysis: signal.neutralReason || "No setup",
-        smc,
-        signal: {
-          direction: "neutral",
-          orderType: "NONE",
-          orderTypeDescription: signal.neutralReason || "No setup",
-          signalLabel: "NEUTRAL",
-          currentPrice,
-          entryPrice: 0,
-          stopLossPrice: 0,
-          takeProfit1Price: 0,
-          takeProfit2Price: 0,
-          takeProfit3Price: 0,
-          riskPips: 0,
-          rewardPips1: 0,
-          rewardPips2: 0,
-          rewardPips3: 0,
-          riskReward1: "0",
-          riskReward2: "0",
-          riskReward3: "0",
-          confidence: "NEUTRAL",
-          confidenceScore: 0,
-          signalScore: 0,
-          timeframe,
-          dataSource: "dukascopy+yahoo-verified",
-          status: "watching",
-          zone: signal.zone,
-          entrySignal: signal.entryCandle,
-          confluences: signal.notes,
-          candleCount: candles.length,
-          priceVerification: signal.priceVerification,
-        },
-      });
-    }
-
     // ===== SIGNAL PATH =====
+    // buildSignal now always returns an actionable order (no NEUTRAL).
     const isLong = signal.direction === "long";
     const quote = pair.split("/")[1] ?? "";
     const pipValuePerLot = pair.includes("XAU")
@@ -199,12 +158,12 @@ export async function POST(request: Request) {
     const tradeManagement: string[] = [];
     if (isLong) {
       tradeManagement.push(
-        `Move SL to BE once price closes above ${signal.entry?.toFixed(5)}`
+        `Move SL to BE once price closes above ${signal.entry.toFixed(5)}`
       );
       tradeManagement.push("Trail SL under new bullish large range candles");
     } else {
       tradeManagement.push(
-        `Move SL to BE once price closes below ${signal.entry?.toFixed(5)}`
+        `Move SL to BE once price closes below ${signal.entry.toFixed(5)}`
       );
       tradeManagement.push("Trail SL above new bearish large range candles");
     }
@@ -218,14 +177,11 @@ export async function POST(request: Request) {
       uiOrderDesc = isLong
         ? "Market Buy — enter now"
         : "Market Sell — enter now";
-    } else if (signal.orderType === "limit") {
+    } else {
       uiOrderType = isLong ? "BUY_LIMIT" : "SELL_LIMIT";
       uiOrderDesc = isLong
         ? "Buy Limit — place pending below price"
         : "Sell Limit — place pending above price";
-    } else {
-      uiOrderType = "NONE";
-      uiOrderDesc = "No order";
     }
 
     const direction = isLong ? "LONG" : "SHORT";
@@ -238,12 +194,12 @@ export async function POST(request: Request) {
 
     const analysisText = `${signal.signalLabel} — ${pair} (${timeframe})
 
-Zone: ${signal.zone?.type.toUpperCase()} ${signal.zone?.bottom.toFixed(5)} - ${signal.zone?.top.toFixed(5)}
-Entry: ${signal.entry?.toFixed(5)}
-Stop loss (2x ATR): ${signal.stopLoss?.toFixed(5)}
-TP1 (1.272 Fib): ${signal.takeProfit1?.toFixed(5)}
-TP2 (1.618 Fib): ${signal.takeProfit2?.toFixed(5)}
-TP3 (2.0 Fib): ${signal.takeProfit3?.toFixed(5)}
+Zone: ${signal.zone.type.toUpperCase()} ${signal.zone.bottom.toFixed(5)} - ${signal.zone.top.toFixed(5)}
+Entry: ${signal.entry.toFixed(5)}
+Stop loss (2x ATR): ${signal.stopLoss.toFixed(5)}
+TP1 (1.272 Fib): ${signal.takeProfit1.toFixed(5)}
+TP2 (1.618 Fib): ${signal.takeProfit2.toFixed(5)}
+TP3 (2.0 Fib): ${signal.takeProfit3.toFixed(5)}
 
 Confidence: ${signal.confidence} (${signal.score}/100)
 Risk: ${signal.riskPips} pips
