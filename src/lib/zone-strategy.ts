@@ -175,7 +175,14 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
       }
 
       const atZone = currentPrice >= zoneBottom * 0.999 && currentPrice <= zoneTop * 1.001;
-      const distanceToPrice = currentPrice > zoneTop ? currentPrice - zoneTop : 0;
+
+      // Distance to nearest edge of the zone, always >= 0 (two-sided)
+      const distanceToPrice =
+        currentPrice > zoneTop
+          ? currentPrice - zoneTop
+          : currentPrice < zoneBottom
+          ? zoneBottom - currentPrice
+          : 0;
 
       zones.push({
         type: "demand",
@@ -198,7 +205,14 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
       }
 
       const atZone = currentPrice >= zoneBottom * 0.999 && currentPrice <= zoneTop * 1.001;
-      const distanceToPrice = currentPrice < zoneBottom ? zoneBottom - currentPrice : 0;
+
+      // Distance to nearest edge of the zone, always >= 0 (two-sided)
+      const distanceToPrice =
+        currentPrice < zoneBottom
+          ? zoneBottom - currentPrice
+          : currentPrice > zoneTop
+          ? currentPrice - zoneTop
+          : 0;
 
       zones.push({
         type: "supply",
