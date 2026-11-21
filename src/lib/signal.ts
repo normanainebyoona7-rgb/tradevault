@@ -1,8 +1,9 @@
 // src/lib/signal.ts
-// Signal orchestrator — ATR-based SL, Fibonacci TPs, limit/market orders only.
+// Signal orchestrator — ATR-based SL, risk-multiple TPs, limit/market orders only.
 //
 // SL: entry ± 2.0 × ATR(14)
-// TPs: Fibonacci extensions of the zone's swing (1.272 / 1.618 / 2.0)
+// TPs: TP1 = 1.0 × risk, TP2 = 1.5 × risk, TP3 = 3.0 × risk
+//      (risk = |entry - stopLoss|)
 // Orders: BUY, SELL, BUY LIMIT, SELL LIMIT — NO NEUTRAL, NO STOP ORDERS.
 //
 // Behavior:
@@ -193,36 +194,22 @@ function checkFVGNear(overlays: Overlays, currentPrice: number, direction: "long
   return false;
 }
 
-// ===== FIBONACCI TPs =====
-
-function computeFibonacciTPs(
+// ===== TPs — risk multiples =====
+// TP1 = 1.0 × risk, TP2 = 1.5 × risk, TP3 = 3.0 × risk
+// risk = |entry - stopLoss|
+function computeTakeProfits(
   direction: "long" | "short",
   entry: number,
-  stopLoss: number,
-  zone: SupplyDemandZone
+  stopLoss: number
 ): { tp1: number; tp2: number; tp3: number } {
-  const swingStart = direction === "long" ? zone.bottom : zone.top;
-  const swingEnd = direction === "long" ? zone.top : zone.bottom;
-  const swingRange = Math.abs(swingEnd - swingStart);
-  const dirSign = direction === "long" ? 1 : -1;
-
-  let tp1 = swingEnd + dirSign * swingRange * 0.272;
-  let tp2 = swingEnd + dirSign * swingRange * 0.618;
-  let tp3 = swingEnd + dirSign * swingRange * 1.0;
-
   const risk = Math.abs(entry - stopLoss);
+  const sign = direction === "long" ? 1 : -1;
 
-  if (direction === "long") {
-    if (tp1 <= entry) tp1 = entry + risk * 2.0;
-    if (tp2 <= tp1) tp2 = entry + risk * 3.5;
-    if (tp3 <= tp2) tp3 = entry + risk * 6.0;
-  } else {
-    if (tp1 >= entry) tp1 = entry - risk * 2.0;
-    if (tp2 >= tp1) tp2 = entry - risk * 3.5;
-    if (tp3 >= tp2) tp3 = entry - risk * 6.0;
-  }
-
-  return { tp1, tp2, tp3 };
+  return {
+    tp1: entry + sign * risk * 1.0,
+    tp2: entry + sign * risk * 1.5,
+    tp3: entry + sign * risk * 3.0,
+  };
 }
 
 // ===== MAIN =====
@@ -280,25 +267,12 @@ export function buildSignal(
     const entryLevel = currentPrice;
     const rawSL = direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
 
-    // Synthetic zone around current price for TP computation
-    const syntheticZone: SupplyDemandZone = {
-      type: direction === "long" ? "demand" : "supply",
-      top: entryLevel + atr,
-      bottom: entryLevel - atr,
-      index: candles.length - 1,
-      formedAt: entryLevel,
-      swingHigh: entryLevel + atr * 3,
-      swingLow: entryLevel - atr * 3,
-      distanceToPrice: 0,
-      atZone: true,
-    };
-
-    const fib = computeFibonacciTPs(direction, entryLevel, rawSL, syntheticZone);
+    const tp = computeTakeProfits(direction, entryLevel, rawSL);
     const riskPips = Math.round(Math.abs(entryLevel - rawSL) / pipSize);
     const rewardPips: [number, number, number] = [
-      Math.round(Math.abs(fib.tp1 - entryLevel) / pipSize),
-      Math.round(Math.abs(fib.tp2 - entryLevel) / pipSize),
-      Math.round(Math.abs(fib.tp3 - entryLevel) / pipSize),
+      Math.round(Math.abs(tp.tp1 - entryLevel) / pipSize),
+      Math.round(Math.abs(tp.tp2 - entryLevel) / pipSize),
+      Math.round(Math.abs(tp.tp3 - entryLevel) / pipSize),
     ];
     const riskReward: [string, string, string] = [
       riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
@@ -333,6 +307,7 @@ export function buildSignal(
     notes.push("No supply/demand zones detected — fallback to momentum market entry.");
     notes.push(`Current price: ${currentPrice.toFixed(5)}`);
     notes.push(`ATR(14): ${atr.toFixed(5)} | SL distance: ${slDistance.toFixed(5)}`);
+    notes.push(`TPs: 1.0× / 1.5× / 3.0× risk`);
 
     return {
       pair, timeframe, timestamp,
@@ -341,14 +316,14 @@ export function buildSignal(
       signalLabel: direction === "long" ? "BUY" : "SELL",
       entry: entryLevel,
       stopLoss: rawSL,
-      takeProfit1: fib.tp1,
-      takeProfit2: fib.tp2,
-      takeProfit3: fib.tp3,
+      takeProfit1: tp.tp1,
+      takeProfit2: tp.tp2,
+      takeProfit3: tp.tp3,
       riskPips, rewardPips, riskReward,
       zone: {
-        type: syntheticZone.type,
-        top: syntheticZone.top,
-        bottom: syntheticZone.bottom,
+        type: direction === "long" ? "demand" : "supply",
+        top: entryLevel + atr,
+        bottom: entryLevel - atr,
         strength: 0,
         distanceToPrice: 0,
       },
@@ -371,7 +346,7 @@ export function buildSignal(
   // 2) Otherwise pick the nearest CORRECT-SIDE zone:
   //      demand must be BELOW price (buy limit below market)
   //      supply must be ABOVE price (sell limit above market)
-  // 3) If no correct-side zone exists, fall back to the nearest zone of the other type
+  // 3) If no correct-side zone exists, fall back to the nearest zone regardless of side
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
 
   const insideZone = sortedZones.find(
@@ -384,10 +359,9 @@ export function buildSignal(
     return false;
   });
 
-  // Fallback: nearest zone regardless of side (we'll force the limit to the correct side later)
   const fallbackZone = sortedZones[0];
 
-  const activeZone = insideZone ?? correctSideZone ?? fallbackZone;
+  const activeZone: SupplyDemandZone = insideZone ?? correctSideZone ?? fallbackZone;
 
   const direction: "long" | "short" = activeZone.type === "demand" ? "long" : "short";
   const signalDirection = direction === "long" ? "bullish" : "bearish";
@@ -417,7 +391,6 @@ export function buildSignal(
       } else if (activeZone.bottom < currentPrice) {
         entryLevel = activeZone.bottom;
       } else {
-        // zone entirely above price → force below market
         entryLevel = currentPrice - Math.max(slDistance, (activeZone.bottom - currentPrice) + slDistance);
       }
     } else {
@@ -427,7 +400,6 @@ export function buildSignal(
       } else if (activeZone.top > currentPrice) {
         entryLevel = activeZone.top;
       } else {
-        // zone entirely below price → force above market
         entryLevel = currentPrice + Math.max(slDistance, (currentPrice - activeZone.top) + slDistance);
       }
     }
@@ -444,14 +416,14 @@ export function buildSignal(
   // ===== SL =====
   const rawSL = direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
 
-  // ===== TPs =====
-  const fib = computeFibonacciTPs(direction, entryLevel, rawSL, activeZone);
+  // ===== TPs — risk multiples =====
+  const tp = computeTakeProfits(direction, entryLevel, rawSL);
 
   const riskPips = Math.round(Math.abs(entryLevel - rawSL) / pipSize);
   const rewardPips: [number, number, number] = [
-    Math.round(Math.abs(fib.tp1 - entryLevel) / pipSize),
-    Math.round(Math.abs(fib.tp2 - entryLevel) / pipSize),
-    Math.round(Math.abs(fib.tp3 - entryLevel) / pipSize),
+    Math.round(Math.abs(tp.tp1 - entryLevel) / pipSize),
+    Math.round(Math.abs(tp.tp2 - entryLevel) / pipSize),
+    Math.round(Math.abs(tp.tp3 - entryLevel) / pipSize),
   ];
   const riskReward: [string, string, string] = [
     riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
@@ -489,7 +461,7 @@ export function buildSignal(
   notes.push(`ATR(14): ${atr.toFixed(5)} | SL distance: ${slDistance.toFixed(5)} (2.0 × ATR)`);
   notes.push(`Entry (${signalLabel}): ${entryLevel.toFixed(5)}`);
   notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips`);
-  notes.push(`TPs: Fibonacci 1.272 / 1.618 / 2.0 of swing`);
+  notes.push(`TPs: 1.0× / 1.5× / 3.0× risk (R:R 1:1 / 1:1.5 / 1:3)`);
   notes.push(`Session: ${sessionInfo.name}`);
   if (orderType === "limit") {
     notes.push(
@@ -504,9 +476,9 @@ export function buildSignal(
     direction, orderType, signalLabel,
     entry: entryLevel,
     stopLoss: rawSL,
-    takeProfit1: fib.tp1,
-    takeProfit2: fib.tp2,
-    takeProfit3: fib.tp3,
+    takeProfit1: tp.tp1,
+    takeProfit2: tp.tp2,
+    takeProfit3: tp.tp3,
     riskPips, rewardPips, riskReward,
     zone: {
       type: activeZone.type,
