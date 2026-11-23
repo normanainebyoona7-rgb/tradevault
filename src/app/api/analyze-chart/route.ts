@@ -2,6 +2,13 @@
 // Analyzes a live chart with cross-source price verification, ATR-based SL,
 // Fibonacci TPs, and an SMC / ICT / supply-demand breakdown.
 // Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT — no NEUTRAL, no STOP orders.
+//
+// Tier gating: free = TP1 only, vip = TP1+TP2, vvip = TP1..TP4 + descriptions.
+// Enforcement happens server-side via gateSignal() — locked TPs never leave.
+//
+// Admin kill switch + ban: if Config.aiEnabled === false -> 423;
+// if the user is banned -> 403. Neither changes AI logic.
+// Activity logging: writes an AnalysisEvent doc (best-effort; never throws).
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
@@ -16,6 +23,11 @@ import {
 } from "@/lib/smc-analysis";
 import { activeKillzone } from "@/lib/market-structure";
 import type { Overlays } from "@/lib/overlays";
+import { gateSignal, normalizeTier } from "@/lib/subscription";
+import { dbConnect } from "@/lib/db/mongodb";
+import { getGlobalConfig } from "@/lib/models/config";
+import AnalysisEvent from "@/lib/models/analysis-event";
+import User from "@/lib/models/user";
 
 function buildSmcPayload(
   pair: string,
@@ -48,6 +60,27 @@ function buildSmcPayload(
   };
 }
 
+async function logAnalysisEvent(args: {
+  session: any;
+  pair: string;
+  timeframe: string;
+  direction: string;
+}) {
+  try {
+    await dbConnect();
+    await AnalysisEvent.create({
+      userEmail: String(args.session?.email ?? "unknown"),
+      userName: String(args.session?.name ?? ""),
+      pair: args.pair,
+      timeframe: args.timeframe,
+      direction: args.direction,
+      tierAtTime: normalizeTier(args.session?.tier),
+    });
+  } catch (e) {
+    console.error("AnalysisEvent log failed (non-fatal):", e);
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const session = await getSession();
@@ -55,11 +88,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // ---- Admin kill switch + ban enforcement ----
+    try {
+      await dbConnect();
+      const cfg = await getGlobalConfig();
+      if (!cfg.aiEnabled) {
+        return NextResponse.json(
+          {
+            error: "AI disabled",
+            message:
+              cfg.aiDisabledMessage ||
+              "AI analysis is temporarily disabled by the administrator.",
+          },
+          { status: 423 }
+        );
+      }
+
+      const user: any = await User.findOne({
+        email: String((session as any)?.email ?? "").toLowerCase(),
+      })
+        .select("banned bannedReason")
+        .lean();
+
+      if (user?.banned) {
+        return NextResponse.json(
+          {
+            error: "Account banned",
+            message:
+              user.bannedReason ||
+              "Your account has been banned by the administrator.",
+          },
+          { status: 403 }
+        );
+      }
+    } catch (e) {
+      console.error("Config check failed (non-fatal):", e);
+    }
+
+    const userTier = normalizeTier((session as any)?.tier);
+
     const body = await request.json();
     const pair = body.pair || "EUR/USD";
     const timeframe = body.timeframe || "1H";
 
-    // 1. Candles first — they drive both the chart price and the analysis.
     const candles = await getCandles(pair, timeframe, 300);
 
     if (candles.length === 0) {
@@ -73,11 +144,8 @@ export async function POST(request: Request) {
     }
 
     const currentPrice = candles[candles.length - 1].close;
-
-    // 2. Cross-source verification (Yahoo only; the chart price is already known).
     const verified = await getVerifiedPrice(pair, currentPrice);
 
-    // 3. Overlays + signal + SMC breakdown.
     const overlays = computeOverlays(pair, candles);
     const signal = buildSignal(pair, timeframe, candles, overlays, verified);
 
@@ -90,8 +158,6 @@ export async function POST(request: Request) {
     }));
     const smc = buildSmcPayload(pair, smcCandles, overlays);
 
-    // ===== SIGNAL PATH =====
-    // buildSignal now always returns an actionable order (no NEUTRAL).
     const isLong = signal.direction === "long";
     const quote = pair.split("/")[1] ?? "";
     const pipValuePerLot = pair.includes("XAU")
@@ -123,7 +189,6 @@ export async function POST(request: Request) {
       lots,
     };
 
-    // Fibonacci levels for display
     const swingStart =
       signal.zone?.type === "demand"
         ? signal.zone.bottom
@@ -168,7 +233,6 @@ export async function POST(request: Request) {
       tradeManagement.push("Trail SL above new bearish large range candles");
     }
 
-    // Map internal order type to UI-compatible strings
     let uiOrderType: string;
     let uiOrderDesc: string;
 
@@ -210,7 +274,7 @@ Structure: ${structureLine}
 Premium/discount: ${pdLine}
 Killzone: ${smc.killzone.name}`;
 
-    return NextResponse.json({
+    const payload = {
       status: "signal",
       analysis: analysisText,
       smc,
@@ -257,9 +321,13 @@ Killzone: ${smc.killzone.name}`;
         tradeManagement,
         priceVerification: signal.priceVerification,
       },
-      // Kept for clarity: distinguishes the two directions in logs/UI.
       direction,
-    });
+    };
+
+    // Best-effort event log — never blocks the response
+    logAnalysisEvent({ session, pair, timeframe, direction });
+
+    return NextResponse.json(gateSignal(payload, userTier));
   } catch (error: any) {
     console.error("Analyze-chart error:", error);
     return NextResponse.json(

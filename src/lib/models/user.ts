@@ -19,6 +19,15 @@ export interface IUser extends Document {
   tradesUsed: number;
   tradesLimit: number;
   emailVerified?: Date;
+  // ---- Admin controls ----
+  banned: boolean;
+  bannedReason: string;
+  bannedAt: Date | null;
+  // ---- Activity tracking ----
+  lastSeenAt: Date | null;
+  analysisCountTotal: number;
+  analysisCountToday: number;
+  analysisCountTodayDate: string; // YYYY-MM-DD
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,63 +49,34 @@ const UserSchema = new Schema<IUser>(
       type: String,
       minlength: [8, "Password must be at least 8 characters"],
     },
-    image: {
-      type: String,
-      default: null,
-    },
-    bio: {
-      type: String,
-      default: "",
-    },
-    description: {
-      type: String,
-      default: "",
-    },
-    baseCurrency: {
-      type: String,
-      default: "USD",
-    },
-    defaultRiskPercent: {
-      type: Number,
-      default: 2,
-    },
-    defaultAccountBalance: {
-      type: Number,
-      default: 10000,
-    },
-    defaultContractSize: {
-      type: Number,
-      default: 100000,
-    },
-    plan: {
-      type: String,
-      default: "Free Trial",
-    },
+    image: { type: String, default: null },
+    bio: { type: String, default: "" },
+    description: { type: String, default: "" },
+    baseCurrency: { type: String, default: "USD" },
+    defaultRiskPercent: { type: Number, default: 2 },
+    defaultAccountBalance: { type: Number, default: 10000 },
+    defaultContractSize: { type: Number, default: 100000 },
+    plan: { type: String, default: "Free Trial" },
     tier: {
       type: String,
       enum: ["free", "vip", "vvip"],
       default: "free",
     },
-    planExpiry: {
-      type: Date,
-      default: null,
-    },
-    tradesUsed: {
-      type: Number,
-      default: 0,
-    },
-    tradesLimit: {
-      type: Number,
-      default: 50,
-    },
-    emailVerified: {
-      type: Date,
-      default: null,
-    },
+    planExpiry: { type: Date, default: null },
+    tradesUsed: { type: Number, default: 0 },
+    tradesLimit: { type: Number, default: 50 },
+    emailVerified: { type: Date, default: null },
+    // ---- Admin controls ----
+    banned: { type: Boolean, default: false },
+    bannedReason: { type: String, default: "" },
+    bannedAt: { type: Date, default: null },
+    // ---- Activity tracking ----
+    lastSeenAt: { type: Date, default: null },
+    analysisCountTotal: { type: Number, default: 0 },
+    analysisCountToday: { type: Number, default: 0 },
+    analysisCountTodayDate: { type: String, default: "" },
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true },
 );
 
 const User = models.User || mongoose.model<IUser>("User", UserSchema);

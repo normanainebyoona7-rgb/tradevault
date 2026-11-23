@@ -46,3 +46,10 @@ backup/
 
 # TradeVault MT5 executor state
 ai-backend/executor_state.json
+
+# Additional safety — never commit secrets
+*.key
+*.crt
+*.p12
+.env.local
+.env.production

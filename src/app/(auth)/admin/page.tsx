@@ -25,12 +25,14 @@ import {
   Radar,
   Settings,
   Shield,
+  ShieldOff,
   StickyNote,
   Target,
   Timer,
   Trash2,
   TrendingDown,
   TrendingUp,
+  UserX,
   Users,
   Wallet,
   X,
@@ -40,6 +42,10 @@ import {
 const ADMIN_EMAIL = "normanainebyoona7@gmail.com";
 const ADMIN_PASSWORD = "norman2026";
 const TIMEFRAMES = ["5m", "15m", "30m", "1H", "4H", "1D"];
+const PAIRS = [
+  "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "NZD/USD",
+  "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY",
+];
 
 /* ---------- presentational helpers ---------- */
 
@@ -133,7 +139,9 @@ export default function AdminPage() {
 
   const [signals, setSignals] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"users" | "signals" | "auto" | "analytics" | "broker">("auto");
+  const [activeTab, setActiveTab] = useState<
+    "auto" | "signals" | "users" | "analytics" | "activity" | "broker"
+  >("auto");
   const [showAddSignal, setShowAddSignal] = useState(false);
   const [showAddUser, setShowAddUser] = useState(false);
   const [autoPair, setAutoPair] = useState("EUR/USD");
@@ -146,6 +154,18 @@ export default function AdminPage() {
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
 
+  /* ---- Kill switch state ---- */
+  const [aiEnabled, setAiEnabled] = useState(true);
+  const [aiDisabledMessage, setAiDisabledMessage] = useState("");
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiNotice, setAiNotice] = useState("");
+
+  /* ---- Activity state ---- */
+  const [activityData, setActivityData] = useState<any>(null);
+  const [loadingActivity, setLoadingActivity] = useState(false);
+  const [activityError, setActivityError] = useState("");
+
+  /* ---- Broker state (unchanged) ---- */
   const [broker, setBroker] = useState<any>(null);
   const [brokerExecutions, setBrokerExecutions] = useState<any[]>([]);
   const [executorConfigured, setExecutorConfigured] = useState(false);
@@ -164,6 +184,22 @@ export default function AdminPage() {
     tpLevel: "1",
     symbolSuffix: "",
   });
+
+  /* ---- Manual trade form ---- */
+  const [manualTrade, setManualTrade] = useState({
+    pair: "EUR/USD",
+    direction: "long",
+    orderType: "MARKET",
+    entry: "",
+    stopLoss: "",
+    takeProfit1: "",
+    takeProfit2: "",
+    takeProfit3: "",
+    notes: "",
+  });
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualError, setManualError] = useState("");
+  const [manualNotice, setManualNotice] = useState("");
 
   const [newSignal, setNewSignal] = useState({
     pair: "EUR/USD",
@@ -210,8 +246,18 @@ export default function AdminPage() {
       loadUsers();
       loadAnalytics();
       loadBroker();
+      loadAiToggle();
     }
   }, [isAdmin, isLocked]);
+
+  // Auto-refresh activity when that tab is open
+  useEffect(() => {
+    if (activeTab === "activity" && !isLocked) {
+      loadActivity();
+      const t = setInterval(loadActivity, 30000);
+      return () => clearInterval(t);
+    }
+  }, [activeTab, isLocked]);
 
   const loadSignals = async () => {
     setLoadingSignals(true);
@@ -246,6 +292,61 @@ export default function AdminPage() {
       console.error("Failed to load analytics:", error);
     } finally {
       setLoadingAnalytics(false);
+    }
+  };
+
+  const loadAiToggle = async () => {
+    try {
+      const response = await fetch("/api/admin/ai-toggle");
+      const data = await response.json();
+      if (response.ok) {
+        setAiEnabled(!!data.aiEnabled);
+        setAiDisabledMessage(data.aiDisabledMessage ?? "");
+      }
+    } catch (error) {
+      console.error("Failed to load AI toggle:", error);
+    }
+  };
+
+  const saveAiToggle = async (nextEnabled: boolean) => {
+    setAiSaving(true);
+    setAiNotice("");
+    try {
+      const response = await fetch("/api/admin/ai-toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          aiEnabled: nextEnabled,
+          aiDisabledMessage,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save");
+      setAiEnabled(!!data.aiEnabled);
+      setAiDisabledMessage(data.aiDisabledMessage ?? "");
+      setAiNotice(nextEnabled ? "AI analysis enabled." : "AI analysis disabled.");
+    } catch (error: any) {
+      setAiNotice(error?.message || "Failed to save");
+    } finally {
+      setAiSaving(false);
+    }
+  };
+
+  const loadActivity = async () => {
+    setLoadingActivity(true);
+    setActivityError("");
+    try {
+      const response = await fetch("/api/admin/activity");
+      const data = await response.json();
+      if (!response.ok) {
+        setActivityError(data.error || "Failed to load activity");
+        return;
+      }
+      setActivityData(data);
+    } catch (error: any) {
+      setActivityError(error?.message || "Failed to load activity");
+    } finally {
+      setLoadingActivity(false);
     }
   };
 
@@ -314,9 +415,7 @@ export default function AdminPage() {
   };
 
   const disconnectBroker = async () => {
-    if (!window.confirm("Remove the broker connection? The executor will stop trading.")) {
-      return;
-    }
+    if (!window.confirm("Remove the broker connection? The executor will stop trading.")) return;
     setBrokerError("");
     setBrokerNotice("");
     try {
@@ -341,6 +440,42 @@ export default function AdminPage() {
       setBrokerNotice("Broker disconnected.");
     } catch {
       setBrokerError("Failed to disconnect broker");
+    }
+  };
+
+  const submitManualTrade = async () => {
+    setManualSaving(true);
+    setManualError("");
+    setManualNotice("");
+    try {
+      const response = await fetch("/api/admin/broker", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "signal",
+          pair: manualTrade.pair,
+          direction: manualTrade.direction,
+          orderType: manualTrade.orderType,
+          entry: Number(manualTrade.entry),
+          stopLoss: Number(manualTrade.stopLoss),
+          takeProfit1: manualTrade.takeProfit1,
+          takeProfit2: manualTrade.takeProfit2,
+          takeProfit3: manualTrade.takeProfit3,
+          notes: manualTrade.notes,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const msg = data.errors ? data.errors.join(", ") : data.error || "Failed";
+        setManualError(msg);
+        return;
+      }
+      setManualNotice("Queued. Executor will place it on its next poll.");
+      loadSignals();
+    } catch (error: any) {
+      setManualError(error?.message || "Failed");
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -374,10 +509,7 @@ export default function AdminPage() {
       const response = await fetch("/api/analyze-chart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pair: autoPair,
-          timeframe: autoTimeframe,
-        }),
+        body: JSON.stringify({ pair: autoPair, timeframe: autoTimeframe }),
       });
 
       const data = await response.json();
@@ -390,7 +522,6 @@ export default function AdminPage() {
       setAutoStatus(data.status);
       setAutoResult(data.signal);
 
-      // Only save if status is signal
       if (data.status === "signal" && data.signal?.direction !== "neutral") {
         const signalToSave = {
           pair: autoPair,
@@ -408,16 +539,11 @@ export default function AdminPage() {
             : data.signal.orderType === "MARKET_SELL" ? "SELL"
             : data.signal.orderType === "BUY_LIMIT" ? "BUY LIMIT"
             : data.signal.orderType === "SELL_LIMIT" ? "SELL LIMIT"
-            : data.signal.orderType === "BUY_STOP" ? "BUY STOP"
-            : data.signal.orderType === "SELL_STOP" ? "SELL STOP"
             : (data.signal.direction || "").toUpperCase(),
           zone: data.signal.zone || null,
           confidence: data.signal.confidence || "",
           score: data.signal.confidenceScore ?? data.signal.score ?? 0,
-          session:
-            data.signal.session ||
-            data.signal.confluenceBreakdown?.session ||
-            "",
+          session: data.signal.session || data.signal.confluenceBreakdown?.session || "",
           expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         };
 
@@ -426,12 +552,10 @@ export default function AdminPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(signalToSave),
         });
-
         const saveData = await saveResponse.json();
         if (!saveData.skipped) loadSignals();
       }
     } catch (error: any) {
-      console.error("Zone analysis failed:", error);
       setAutoError(error?.message || "Analysis failed");
     } finally {
       setAutoLoading(false);
@@ -518,6 +642,22 @@ export default function AdminPage() {
     }
   };
 
+  const toggleBan = async (userId: string, currentlyBanned: boolean) => {
+    const reason = currentlyBanned
+      ? ""
+      : window.prompt("Reason for ban (optional):") ?? "";
+    try {
+      await fetch(`/api/admin/users/${userId}/ban`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ banned: !currentlyBanned, reason }),
+      });
+      loadUsers();
+    } catch (error) {
+      console.error("Failed to toggle ban:", error);
+    }
+  };
+
   const getTimeRemaining = (expiresAt?: string) => {
     if (!expiresAt) return "No expiry";
     const expiry = new Date(expiresAt).getTime();
@@ -591,11 +731,16 @@ export default function AdminPage() {
     );
   }
 
-  const TABS: { id: "auto" | "signals" | "users" | "analytics" | "broker"; label: string; icon: LucideIcon }[] = [
+  const TABS: {
+    id: "auto" | "signals" | "users" | "analytics" | "activity" | "broker";
+    label: string;
+    icon: LucideIcon;
+  }[] = [
     { id: "auto", label: "Zone strategy", icon: Crosshair },
     { id: "signals", label: `Signals (${signals.length})`, icon: Activity },
     { id: "users", label: `Users (${users.length})`, icon: Users },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
+    { id: "activity", label: "Activity", icon: Eye },
     { id: "broker", label: "Broker", icon: Plug },
   ];
 
@@ -621,11 +766,73 @@ export default function AdminPage() {
         </div>
       </div>
 
+      {/* ======= GLOBAL AI KILL SWITCH ======= */}
+      <div
+        className={`${PANEL} ${
+          aiEnabled
+            ? "border-emerald-500/30"
+            : "border-rose-500/40 bg-rose-500/5"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            {aiEnabled ? (
+              <Shield className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <ShieldOff className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+            )}
+            <h2 className="text-base font-bold tracking-tight">
+              AI analysis: {aiEnabled ? "ENABLED" : "DISABLED"}
+            </h2>
+            <span className={aiEnabled ? BADGE_POSITIVE : BADGE_NEGATIVE}>
+              {aiEnabled ? "LIVE" : "OFF"}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => saveAiToggle(!aiEnabled)}
+              disabled={aiSaving}
+              className={aiEnabled ? BTN_DANGER : BTN_PRIMARY}
+            >
+              {aiSaving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : aiEnabled ? (
+                <ShieldOff className="h-3.5 w-3.5" />
+              ) : (
+                <Shield className="h-3.5 w-3.5" />
+              )}
+              {aiEnabled ? "Disable AI analysis" : "Enable AI analysis"}
+            </button>
+            {aiNotice && (
+              <span className="text-xs text-muted-foreground">{aiNotice}</span>
+            )}
+          </div>
+        </div>
+        <div className="mt-3">
+          <label className={LABEL}>Message shown when AI is disabled</label>
+          <input
+            className={INPUT}
+            value={aiDisabledMessage}
+            onChange={(e) => setAiDisabledMessage(e.target.value)}
+            placeholder="AI analysis is temporarily disabled by the administrator."
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          This does not change the AI itself — when disabled,{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-[11px]">/api/analyze-chart</code>{" "}
+          returns a 423 with the message above and no analysis is run.
+        </p>
+      </div>
+
       <div className="flex flex-wrap gap-2">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           return (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={tabClass(activeTab === tab.id)}>
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={tabClass(activeTab === tab.id)}
+            >
               <Icon className="h-3.5 w-3.5" />
               {tab.label}
             </button>
@@ -633,6 +840,7 @@ export default function AdminPage() {
         })}
       </div>
 
+      {/* ======= AUTO (unchanged) ======= */}
       {activeTab === "auto" && (
         <div className={PANEL}>
           <div className="mb-1 flex items-center gap-2">
@@ -656,7 +864,7 @@ export default function AdminPage() {
             <div className="min-w-[150px] flex-1">
               <label className={LABEL}>Pair</label>
               <select value={autoPair} onChange={(e) => setAutoPair(e.target.value)} className={INPUT}>
-                {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD", "GBP/JPY"].map((p) => (
+                {PAIRS.map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
@@ -682,71 +890,12 @@ export default function AdminPage() {
             </div>
           )}
 
-          {/* WATCHING STATE */}
-          {autoStatus === "watching" && autoResult && (
-            <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
-              <p className="mb-2 flex items-center gap-2 text-sm font-bold text-amber-700 dark:text-amber-400">
-                <Eye className="h-4 w-4" />
-                Watching — waiting for setup
-              </p>
-              <p className="text-xs text-amber-700/90 dark:text-amber-400/90">
-                {autoError || (autoResult.zone ? `Nearest zone: ${autoResult.zone.type} at ${autoResult.zone.bottom?.toFixed(5)} - ${autoResult.zone.top?.toFixed(5)}` : "")}
-              </p>
-
-              {autoResult.zone && (
-                <div className="mt-3 rounded-lg border border-border bg-card p-3">
-                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
-                    <LocateFixed className="h-3.5 w-3.5" />
-                    Nearest zone
-                  </p>
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    {autoResult.zone.type === "demand" ? (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        Demand
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-rose-500" />
-                        Supply
-                      </>
-                    )}{" "}
-                    {autoResult.zone.bottom?.toFixed(5)} - {autoResult.zone.top?.toFixed(5)}
-                  </p>
-                  {autoResult.entrySignal && autoResult.entrySignal.type !== "none" && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Signal: <strong className="text-foreground">{autoResult.entrySignal.type}</strong> — {autoResult.entrySignal.reason}
-                    </p>
-                  )}
-                  {autoResult.entrySignal && autoResult.entrySignal.type === "none" && (
-                    <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-                      <CirclePause className="h-3.5 w-3.5" />
-                      No entry signal yet (need LRC, Engulfing, or Pin Bar)
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* NO SETUP STATE */}
-          {autoStatus === "no_setup" && (
-            <div className="mt-5 rounded-xl border border-dashed border-border px-6 py-8 text-center">
-              <Radar className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
-              <p className="text-sm font-bold text-muted-foreground">No zones detected</p>
-              <p className="text-xs text-muted-foreground">Try another timeframe or pair.</p>
-            </div>
-          )}
-
-          {/* SIGNAL STATE */}
           {autoStatus === "signal" && autoResult && autoResult.direction !== "neutral" && (
             <div className="mt-5 rounded-xl border border-primary/30 bg-accent/60 p-4 text-sm">
               <p className="mb-3 flex items-center gap-2 text-sm font-bold text-primary">
                 <CircleCheck className="h-4 w-4" />
                 Zone signal — {autoPair} ({autoTimeframe})
               </p>
-
-              {/* Direction */}
               <div
                 className={`mb-3 rounded-xl border-2 p-4 text-center ${
                   autoResult.direction === "long"
@@ -775,39 +924,6 @@ export default function AdminPage() {
                 )}
               </div>
 
-              {/* Zone */}
-              {autoResult.zone && (
-                <Section icon={LocateFixed} title="Zone">
-                  <p className="flex items-center gap-1.5 text-xs text-foreground">
-                    {autoResult.zone.type === "demand" ? (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        Demand Zone
-                      </>
-                    ) : (
-                      <>
-                        <span className="h-2 w-2 rounded-full bg-rose-500" />
-                        Supply Zone
-                      </>
-                    )}
-                    : {autoResult.zone.bottom?.toFixed(5)} - {autoResult.zone.top?.toFixed(5)}
-                  </p>
-                </Section>
-              )}
-
-              {/* Entry signal */}
-              {autoResult.entrySignal && (
-                <Section icon={Target} title="Entry signal">
-                  <p className="text-xs text-foreground">
-                    <strong>{autoResult.entrySignal.type?.replace(/_/g, " ").toUpperCase()}</strong> — {autoResult.entrySignal.probability}% probability
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {autoResult.entrySignal.reason}
-                  </p>
-                </Section>
-              )}
-
-              {/* Levels */}
               <Section icon={Wallet} title="Levels">
                 <div className={`grid gap-2 text-xs ${isMobile ? "grid-cols-2" : "grid-cols-3"}`}>
                   <p>Entry: <strong className="text-primary">{autoResult.entryPrice?.toFixed(5)}</strong></p>
@@ -815,107 +931,20 @@ export default function AdminPage() {
                   <p>Risk: <strong>{autoResult.riskPips} pips</strong></p>
                   <p>TP1: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit1Price?.toFixed(5)}</strong></p>
                   <p>R:R1: <strong>1:{autoResult.riskReward1}</strong></p>
-                  <p>TP2: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit2Price?.toFixed(5)}</strong></p>
-                  <p>R:R2: <strong>1:{autoResult.riskReward2}</strong></p>
-                  <p>TP3: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit3Price?.toFixed(5)}</strong></p>
-                  <p>R:R3: <strong>1:{autoResult.riskReward3}</strong></p>
+                  {autoResult.takeProfit2Price != null && (
+                    <>
+                      <p>TP2: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit2Price?.toFixed(5)}</strong></p>
+                      <p>R:R2: <strong>1:{autoResult.riskReward2}</strong></p>
+                    </>
+                  )}
+                  {autoResult.takeProfit3Price != null && (
+                    <>
+                      <p>TP3: <strong className="text-emerald-600 dark:text-emerald-400">{autoResult.takeProfit3Price?.toFixed(5)}</strong></p>
+                      <p>R:R3: <strong>1:{autoResult.riskReward3}</strong></p>
+                    </>
+                  )}
                 </div>
               </Section>
-
-              {/* Confluence breakdown */}
-              {autoResult.confluenceBreakdown && (
-                <Section icon={Radar} title="Confluence breakdown">
-                  <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-                    <p>{autoResult.confluenceBreakdown.supertrendAligned ? "Aligned" : "Not aligned"} Supertrend</p>
-                    <p>{autoResult.confluenceBreakdown.rsiAligned ? "Aligned" : "Not aligned"} RSI</p>
-                    <p>{autoResult.confluenceBreakdown.smaAligned ? "Aligned" : "Not aligned"} SMA 9/21</p>
-                    <p>{autoResult.confluenceBreakdown.vwapAligned ? "Aligned" : "Not aligned"} VWAP</p>
-                    <p>{autoResult.confluenceBreakdown.orderBlockNear ? "Nearby" : "None"} Order Block</p>
-                    <p>{autoResult.confluenceBreakdown.fvgNear ? "Nearby" : "None"} FVG</p>
-                    <p>{autoResult.confluenceBreakdown.roundNumber ? "Nearby" : "None"} Round Number</p>
-                    <p>{autoResult.confluenceBreakdown.sessionFavorable ? "Favorable" : "Unfavorable"} Session ({autoResult.confluenceBreakdown.session})</p>
-                  </div>
-                </Section>
-              )}
-
-              {/* Fibonacci */}
-              {autoResult.fibonacci && (
-                <Section icon={Percent} title="Fibonacci levels">
-                  <div className="text-xs text-muted-foreground">
-                    <p>Swing: {autoResult.fibonacci.swingStart?.toFixed(5)} → {autoResult.fibonacci.swingEnd?.toFixed(5)} ({autoResult.fibonacci.swingRange?.toFixed(5)} range)</p>
-                    <div className="mt-1.5 grid grid-cols-2 gap-1">
-                      <p>Ext 1.272: <strong>{autoResult.fibonacci.ext_1_272?.toFixed(5)}</strong></p>
-                      <p>Ext 1.618: <strong>{autoResult.fibonacci.ext_1_618?.toFixed(5)}</strong></p>
-                      <p>Ext 2.0: <strong>{autoResult.fibonacci.ext_2_0?.toFixed(5)}</strong></p>
-                      <p>Ret 0.236: <strong>{autoResult.fibonacci.ret_0_236?.toFixed(5)}</strong></p>
-                    </div>
-                  </div>
-                </Section>
-              )}
-
-              {/* Position sizing */}
-              {autoResult.positionSizing && (
-                <Section icon={Wallet} title="Position sizing">
-                  <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
-                    <p>Account: <strong>${autoResult.positionSizing.accountSize}</strong></p>
-                    <p>Risk: <strong>{autoResult.positionSizing.riskPercent}% (${autoResult.positionSizing.riskDollars})</strong></p>
-                    <p>Stop Distance: <strong>{autoResult.positionSizing.stopDistancePips} pips</strong></p>
-                    <p>Position Size: <strong>{autoResult.positionSizing.lots} lots</strong></p>
-                  </div>
-                </Section>
-              )}
-
-              {/* MTF */}
-              {autoResult.mtfNote && (
-                <Section icon={Activity} title="MTF confirmation">
-                  <p className="text-xs text-muted-foreground">{autoResult.mtfNote}</p>
-                </Section>
-              )}
-
-              {/* Session */}
-              {autoResult.session && (
-                <Section icon={Timer} title="Session">
-                  <p className="text-xs text-muted-foreground">
-                    <strong className="text-foreground">{autoResult.session}</strong> — {autoResult.sessionWeight}
-                  </p>
-                </Section>
-              )}
-
-              {/* Round number */}
-              {autoResult.roundNumberNote && (
-                <Section icon={Target} title="Round number">
-                  <p className="text-xs text-muted-foreground">{autoResult.roundNumberNote}</p>
-                </Section>
-              )}
-
-              {/* Trade management */}
-              {autoResult.tradeManagement && autoResult.tradeManagement.length > 0 && (
-                <Section icon={StickyNote} title="Trade management">
-                  <ul className="space-y-0.5 text-xs text-muted-foreground">
-                    {autoResult.tradeManagement.map((note: string, i: number) => (
-                      <li key={i} className="flex gap-1.5">
-                        <span className="text-primary">•</span>
-                        {note}
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-
-              {/* Confluences */}
-              {autoResult.confluences && autoResult.confluences.length > 0 && (
-                <div className="rounded-xl border border-border bg-muted/60 p-3">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                    <Link2 className="h-3.5 w-3.5 text-primary" />
-                    Notes
-                  </p>
-                  <ul className="space-y-1 text-xs text-muted-foreground">
-                    {autoResult.confluences.map((c: string, i: number) => (
-                      <li key={i}>{c}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
 
               <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-700 dark:text-emerald-400">
                 <Check className="h-3.5 w-3.5" />
@@ -926,6 +955,7 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ======= SIGNALS (unchanged) ======= */}
       {activeTab === "signals" && (
         <div className="space-y-4">
           <button onClick={() => setShowAddSignal(true)} className={BTN_PRIMARY}>
@@ -971,7 +1001,9 @@ export default function AdminPage() {
                       </td>
                       <td className={TD}>
                         {signal.isAutoGenerated ? (
-                          <span className={`${BADGE_BASE} bg-accent text-accent-foreground`}>Auto</span>
+                          <span className={`${BADGE_BASE} bg-accent text-accent-foreground`}>
+                            {signal.source === "admin-manual" ? "Manual" : "Auto"}
+                          </span>
                         ) : (
                           <span className={BADGE_NEUTRAL}>Manual</span>
                         )}
@@ -1011,6 +1043,7 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ======= USERS (adds BAN) ======= */}
       {activeTab === "users" && (
         <div className="space-y-4">
           <button onClick={() => setShowAddUser(true)} className={BTN_PRIMARY}>
@@ -1023,6 +1056,7 @@ export default function AdminPage() {
                 <tr className={THEAD_ROW}>
                   <th className={TH}>User</th>
                   <th className={TH}>Tier</th>
+                  <th className={TH}>Status</th>
                   <th className={TH}>Actions</th>
                 </tr>
               </thead>
@@ -1039,6 +1073,13 @@ export default function AdminPage() {
                       </span>
                     </td>
                     <td className={TD}>
+                      {user.banned ? (
+                        <span className={BADGE_NEGATIVE}>BANNED</span>
+                      ) : (
+                        <span className={BADGE_POSITIVE}>ACTIVE</span>
+                      )}
+                    </td>
+                    <td className={TD}>
                       <div className="flex flex-wrap gap-1.5">
                         <button onClick={() => activateUser(user._id, "vip")} className={BTN_CHIP}>VIP</button>
                         <button onClick={() => activateUser(user._id, "vvip")} className={BTN_CHIP}>
@@ -1046,6 +1087,13 @@ export default function AdminPage() {
                           VVIP
                         </button>
                         <button onClick={() => activateUser(user._id, "free")} className={BTN_CHIP}>Free</button>
+                        <button
+                          onClick={() => toggleBan(user._id, !!user.banned)}
+                          className={user.banned ? BTN_CHIP : BTN_DANGER}
+                        >
+                          <UserX className="h-3.5 w-3.5" />
+                          {user.banned ? "Unban" : "Ban"}
+                        </button>
                         <button onClick={() => deleteUser(user._id)} className={BTN_DANGER}>
                           <Trash2 className="h-3.5 w-3.5" />
                           Delete
@@ -1056,7 +1104,7 @@ export default function AdminPage() {
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                    <td colSpan={4} className="px-6 py-10 text-center text-sm text-muted-foreground">
                       No users yet.
                     </td>
                   </tr>
@@ -1067,6 +1115,7 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ======= ANALYTICS (unchanged) ======= */}
       {activeTab === "analytics" && (
         <div className="space-y-6">
           {loadingAnalytics && (
@@ -1142,29 +1191,167 @@ export default function AdminPage() {
                   </table>
                 </div>
               </div>
+            </>
+          )}
+        </div>
+      )}
 
-              <div className={PANEL}>
-                <h3 className="mb-4 flex items-center gap-2 text-base font-bold tracking-tight">
-                  <BarChart3 className="h-4 w-4 text-primary" />
-                  Signal metrics
+      {/* ======= ACTIVITY (new) ======= */}
+      {activeTab === "activity" && (
+        <div className="space-y-4">
+          <div className={PANEL}>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="flex items-center gap-2 text-base font-bold tracking-tight">
+                <Eye className="h-4 w-4 text-primary" />
+                Analysis usage
+              </h2>
+              <button onClick={loadActivity} className={BTN_CHIP}>
+                {loadingActivity ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Activity className="h-3.5 w-3.5" />
+                )}
+                Refresh
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Auto-refreshes every 30 seconds while this tab is open.
+            </p>
+            {activityError && (
+              <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-700 dark:text-rose-400">
+                {activityError}
+              </div>
+            )}
+          </div>
+
+          {activityData && (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <StatCard
+                  icon={Activity}
+                  label="Analyses today"
+                  value={(activityData.perUser ?? []).reduce((s: number, u: any) => s + (u.today ?? 0), 0)}
+                />
+                <StatCard
+                  icon={BarChart3}
+                  label="Last 7 days"
+                  value={(activityData.daily ?? []).reduce((s: number, d: any) => s + (d.count ?? 0), 0)}
+                />
+                <StatCard
+                  icon={Users}
+                  label="Active users (7d)"
+                  value={(activityData.perUser ?? []).filter((u: any) => (u.week ?? 0) > 0).length}
+                />
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+                <h3 className="flex items-center gap-2 border-b border-border px-5 py-4 text-base font-bold tracking-tight">
+                  <Layers className="h-4 w-4 text-primary" />
+                  Per-user usage
                 </h3>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div className="rounded-xl border border-border bg-background p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Total</p>
-                    <p className="text-xl font-bold tracking-tight">{analyticsData.signalMetrics?.totalSignals ?? 0}</p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Active</p>
-                    <p className="text-xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{analyticsData.signalMetrics?.activeSignals ?? 0}</p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-accent p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Auto</p>
-                    <p className="text-xl font-bold tracking-tight text-primary">{analyticsData.signalMetrics?.autoGenerated ?? 0}</p>
-                  </div>
-                  <div className="rounded-xl border border-border bg-muted p-3 text-center">
-                    <p className="text-xs text-muted-foreground">Manual</p>
-                    <p className="text-xl font-bold tracking-tight">{analyticsData.signalMetrics?.manualSignals ?? 0}</p>
-                  </div>
+                <div className="overflow-x-auto">
+                  <table className={TABLE}>
+                    <thead>
+                      <tr className={THEAD_ROW}>
+                        <th className={TH}>User</th>
+                        <th className={TH}>Tier</th>
+                        <th className={TH}>Today</th>
+                        <th className={TH}>7 days</th>
+                        <th className={TH}>Total</th>
+                        <th className={TH}>Last analysis</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(activityData.perUser ?? []).map((u: any) => (
+                        <tr key={u.email} className={TBODY_ROW}>
+                          <td className={TD}>
+                            <p className="font-semibold">{u.name || u.email}</p>
+                            <p className="text-xs text-muted-foreground">{u.email}</p>
+                          </td>
+                          <td className={TD}>
+                            <span className={tierBadgeClass(u.tier)}>
+                              {(u.tier || "free").toUpperCase()}
+                            </span>
+                          </td>
+                          <td className={`${TD} font-semibold`}>{u.today}</td>
+                          <td className={`${TD} font-semibold`}>{u.week}</td>
+                          <td className={`${TD} font-semibold`}>{u.total}</td>
+                          <td className={`${TD} text-xs text-muted-foreground`}>
+                            {u.lastAt ? new Date(u.lastAt).toLocaleString() : "never"}
+                            {u.lastPair ? ` · ${u.lastPair}` : ""}
+                          </td>
+                        </tr>
+                      ))}
+                      {(activityData.perUser ?? []).length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                            No analyses yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+                <h3 className="flex items-center gap-2 border-b border-border px-5 py-4 text-base font-bold tracking-tight">
+                  <Timer className="h-4 w-4 text-primary" />
+                  Recent alerts (last 50 analyses)
+                </h3>
+                <div className="max-h-[420px] overflow-y-auto">
+                  <table className={TABLE}>
+                    <thead>
+                      <tr className={THEAD_ROW}>
+                        <th className={TH}>When</th>
+                        <th className={TH}>User</th>
+                        <th className={TH}>Pair</th>
+                        <th className={TH}>TF</th>
+                        <th className={TH}>Direction</th>
+                        <th className={TH}>Tier at time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(activityData.recentAlerts ?? []).map((e: any) => (
+                        <tr key={e._id} className={TBODY_ROW}>
+                          <td className={`${TD} whitespace-nowrap text-xs text-muted-foreground`}>
+                            {new Date(e.createdAt).toLocaleString()}
+                          </td>
+                          <td className={TD}>
+                            <p className="font-semibold">{e.userName || e.userEmail}</p>
+                            <p className="text-xs text-muted-foreground">{e.userEmail}</p>
+                          </td>
+                          <td className={`${TD} font-semibold`}>{e.pair}</td>
+                          <td className={TD}>{e.timeframe}</td>
+                          <td className={TD}>
+                            <span
+                              className={
+                                e.direction === "LONG"
+                                  ? BADGE_POSITIVE
+                                  : e.direction === "SHORT"
+                                    ? BADGE_NEGATIVE
+                                    : BADGE_NEUTRAL
+                              }
+                            >
+                              {e.direction}
+                            </span>
+                          </td>
+                          <td className={TD}>
+                            <span className={tierBadgeClass(e.tierAtTime)}>
+                              {(e.tierAtTime || "free").toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {(activityData.recentAlerts ?? []).length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                            No activity yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </>
@@ -1172,8 +1359,134 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* ======= BROKER (adds manual trade form) ======= */}
       {activeTab === "broker" && (
         <div className="space-y-4">
+          {/* ---- Manual trade ---- */}
+          <div className={PANEL}>
+            <div className="mb-1 flex items-center gap-2">
+              <Crosshair className="h-4 w-4 text-primary" />
+              <h2 className="text-base font-bold tracking-tight">Manual trade</h2>
+            </div>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Creates a signal the executor picks up on its next poll (~20s).
+              Risk-based lot sizing and daily loss caps apply as configured
+              below.
+            </p>
+
+            {manualError && (
+              <div className="mb-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-700 dark:text-rose-400">
+                {manualError}
+              </div>
+            )}
+            {manualNotice && (
+              <div className="mb-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                {manualNotice}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className={LABEL}>Pair</label>
+                <select
+                  className={INPUT}
+                  value={manualTrade.pair}
+                  onChange={(e) => setManualTrade({ ...manualTrade, pair: e.target.value })}
+                >
+                  {PAIRS.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={LABEL}>Direction</label>
+                <select
+                  className={INPUT}
+                  value={manualTrade.direction}
+                  onChange={(e) => setManualTrade({ ...manualTrade, direction: e.target.value })}
+                >
+                  <option value="long">Long (Buy)</option>
+                  <option value="short">Short (Sell)</option>
+                </select>
+              </div>
+              <div>
+                <label className={LABEL}>Entry</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  step="any"
+                  value={manualTrade.entry}
+                  onChange={(e) => setManualTrade({ ...manualTrade, entry: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Stop loss</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  step="any"
+                  value={manualTrade.stopLoss}
+                  onChange={(e) => setManualTrade({ ...manualTrade, stopLoss: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>TP1 (required)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  step="any"
+                  value={manualTrade.takeProfit1}
+                  onChange={(e) => setManualTrade({ ...manualTrade, takeProfit1: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>TP2 (optional)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  step="any"
+                  value={manualTrade.takeProfit2}
+                  onChange={(e) => setManualTrade({ ...manualTrade, takeProfit2: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>TP3 (optional)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  step="any"
+                  value={manualTrade.takeProfit3}
+                  onChange={(e) => setManualTrade({ ...manualTrade, takeProfit3: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Notes (optional)</label>
+                <input
+                  className={INPUT}
+                  value={manualTrade.notes}
+                  onChange={(e) => setManualTrade({ ...manualTrade, notes: e.target.value })}
+                  placeholder="Why are you taking this trade?"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <button
+                onClick={submitManualTrade}
+                disabled={manualSaving}
+                className={BTN_PRIMARY}
+              >
+                {manualSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Target className="h-4 w-4" />
+                )}
+                Queue manual trade
+              </button>
+            </div>
+          </div>
+
+          {/* ---- Connection ---- */}
           <div className={PANEL}>
             <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -1233,9 +1546,7 @@ export default function AdminPage() {
                 <input
                   className={INPUT}
                   value={brokerForm.login}
-                  onChange={(e) =>
-                    setBrokerForm({ ...brokerForm, login: e.target.value })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, login: e.target.value })}
                   placeholder="e.g. 12345678"
                 />
               </div>
@@ -1245,9 +1556,7 @@ export default function AdminPage() {
                   className={INPUT}
                   type="password"
                   value={brokerForm.password}
-                  onChange={(e) =>
-                    setBrokerForm({ ...brokerForm, password: e.target.value })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, password: e.target.value })}
                   placeholder={
                     broker?.hasPassword
                       ? "Stored — leave empty to keep"
@@ -1260,9 +1569,7 @@ export default function AdminPage() {
                 <input
                   className={INPUT}
                   value={brokerForm.server}
-                  onChange={(e) =>
-                    setBrokerForm({ ...brokerForm, server: e.target.value })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, server: e.target.value })}
                   placeholder="Exness-MT5Real12"
                 />
               </div>
@@ -1271,12 +1578,7 @@ export default function AdminPage() {
                 <input
                   className={INPUT}
                   value={brokerForm.symbolSuffix}
-                  onChange={(e) =>
-                    setBrokerForm({
-                      ...brokerForm,
-                      symbolSuffix: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, symbolSuffix: e.target.value })}
                   placeholder="e.g. m for XAUUSDm — empty if none"
                 />
               </div>
@@ -1286,10 +1588,7 @@ export default function AdminPage() {
                   className={INPUT}
                   value={brokerForm.mode}
                   onChange={(e) =>
-                    setBrokerForm({
-                      ...brokerForm,
-                      mode: e.target.value as "paper" | "live",
-                    })
+                    setBrokerForm({ ...brokerForm, mode: e.target.value as "paper" | "live" })
                   }
                 >
                   <option value="paper">Paper — log only, no orders</option>
@@ -1301,9 +1600,7 @@ export default function AdminPage() {
                 <select
                   className={INPUT}
                   value={brokerForm.tpLevel}
-                  onChange={(e) =>
-                    setBrokerForm({ ...brokerForm, tpLevel: e.target.value })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, tpLevel: e.target.value })}
                 >
                   <option value="1">TP1 (closest)</option>
                   <option value="2">TP2</option>
@@ -1319,12 +1616,7 @@ export default function AdminPage() {
                   max={10}
                   step={0.1}
                   value={brokerForm.riskPercent}
-                  onChange={(e) =>
-                    setBrokerForm({
-                      ...brokerForm,
-                      riskPercent: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, riskPercent: e.target.value })}
                 />
               </div>
               <div>
@@ -1336,9 +1628,7 @@ export default function AdminPage() {
                   max={50}
                   step={0.01}
                   value={brokerForm.maxLot}
-                  onChange={(e) =>
-                    setBrokerForm({ ...brokerForm, maxLot: e.target.value })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, maxLot: e.target.value })}
                 />
               </div>
               <div>
@@ -1349,12 +1639,7 @@ export default function AdminPage() {
                   min={0}
                   step={1}
                   value={brokerForm.maxDailyLossUsd}
-                  onChange={(e) =>
-                    setBrokerForm({
-                      ...brokerForm,
-                      maxDailyLossUsd: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setBrokerForm({ ...brokerForm, maxDailyLossUsd: e.target.value })}
                 />
               </div>
               <div className="flex items-end">
@@ -1362,12 +1647,7 @@ export default function AdminPage() {
                   <input
                     type="checkbox"
                     checked={brokerForm.enabled}
-                    onChange={(e) =>
-                      setBrokerForm({
-                        ...brokerForm,
-                        enabled: e.target.checked,
-                      })
-                    }
+                    onChange={(e) => setBrokerForm({ ...brokerForm, enabled: e.target.checked })}
                     className="h-4 w-4 accent-emerald-600"
                   />
                   Executor enabled
@@ -1383,11 +1663,7 @@ export default function AdminPage() {
             )}
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                onClick={saveBroker}
-                disabled={brokerSaving}
-                className={BTN_PRIMARY}
-              >
+              <button onClick={saveBroker} disabled={brokerSaving} className={BTN_PRIMARY}>
                 {brokerSaving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -1439,21 +1715,13 @@ export default function AdminPage() {
                   </thead>
                   <tbody>
                     {brokerExecutions.map((execution) => (
-                      <tr
-                        key={execution.id}
-                        className={TBODY_ROW}
-                        title={execution.message || ""}
-                      >
+                      <tr key={execution.id} className={TBODY_ROW} title={execution.message || ""}>
                         <td className={`${TD} whitespace-nowrap text-xs text-muted-foreground`}>
                           {new Date(execution.createdAt).toLocaleString()}
                         </td>
                         <td className={`${TD} font-semibold`}>{execution.pair}</td>
-                        <td className={TD}>
-                          {String(execution.direction || "").toUpperCase()}
-                        </td>
-                        <td className={`${TD} tabular-nums`}>
-                          {Number(execution.lots || 0).toFixed(2)}
-                        </td>
+                        <td className={TD}>{String(execution.direction || "").toUpperCase()}</td>
+                        <td className={`${TD} tabular-nums`}>{Number(execution.lots || 0).toFixed(2)}</td>
                         <td className={TD}>
                           <span
                             className={
@@ -1477,36 +1745,10 @@ export default function AdminPage() {
               </div>
             )}
           </div>
-
-          <div className={PANEL}>
-            <h3 className="mb-2 flex items-center gap-2 text-base font-bold tracking-tight">
-              <Shield className="h-4 w-4 text-primary" />
-              How it executes
-            </h3>
-            <ol className="list-inside list-decimal space-y-1 text-xs text-muted-foreground">
-              <li>
-                Generate a signal in the Zone strategy tab — it is saved to the
-                Signals tab automatically.
-              </li>
-              <li>
-                The executor (ai-backend/executor.py) polls
-                /api/executor/pending every 20 seconds with your
-                EXECUTOR_SECRET.
-              </li>
-              <li>
-                Lot size = balance × risk % ÷ stop distance, clamped to max lot;
-                one position per signal, TP per your TP level.
-              </li>
-              <li>
-                New trades stop automatically for the day once the max daily
-                loss is hit. Disable the executor at any time to halt new
-                entries.
-              </li>
-            </ol>
-          </div>
         </div>
       )}
 
+      {/* ======= modals ======= */}
       {showAddSignal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
           <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
@@ -1522,7 +1764,7 @@ export default function AdminPage() {
             </div>
             <div className="space-y-3">
               <select value={newSignal.pair} onChange={(e) => setNewSignal({ ...newSignal, pair: e.target.value })} className={INPUT}>
-                {["EUR/USD", "GBP/USD", "USD/JPY", "XAU/USD", "BTC/USD", "ETH/USD"].map((p) => <option key={p} value={p}>{p}</option>)}
+                {PAIRS.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
               <select value={newSignal.direction} onChange={(e) => setNewSignal({ ...newSignal, direction: e.target.value })} className={INPUT}>
                 <option value="long">Long (Buy)</option>

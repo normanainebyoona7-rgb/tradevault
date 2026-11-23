@@ -1,178 +1,194 @@
+// src/app/api/admin/broker/route.ts
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { dbConnect } from "@/lib/db/mongodb";
-import { isAdminEmail, ADMIN_EMAIL } from "@/lib/admin";
+import { ADMIN_EMAIL } from "@/lib/admin";
 import BrokerConnection from "@/lib/models/broker-connection";
+import Signal from "@/lib/models/signal";
 import ExecutionLog from "@/lib/models/execution-log";
-import { encryptSecret } from "@/lib/broker/crypto";
 import { isExecutorConfigured } from "@/lib/broker/executor-auth";
 
-function sanitize(conn: any) {
-  return {
-    broker: conn.broker,
-    platform: conn.platform,
-    login: conn.login,
-    server: conn.server,
-    mode: conn.mode,
-    enabled: conn.enabled,
-    riskPercent: conn.riskPercent,
-    maxLot: conn.maxLot,
-    maxDailyLossUsd: conn.maxDailyLossUsd,
-    tpLevel: conn.tpLevel,
-    symbolSuffix: conn.symbolSuffix,
-    hasPassword: !!conn.passwordEnc,
-    lastHeartbeatAt: conn.lastHeartbeatAt,
-    lastError: conn.lastError,
-    updatedAt: conn.updatedAt,
-  };
+const NO_STORE = { "Cache-Control": "no-store" };
+
+const ALLOWED_PAIRS = [
+  "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "USD/CHF", "NZD/USD",
+  "XAU/USD", "XAG/USD", "BTC/USD", "ETH/USD",
+];
+
+function isAdmin(session: any): boolean {
+  const role = String(session?.role ?? session?.user?.role ?? "").toLowerCase();
+  const email = String(session?.email ?? session?.user?.email ?? "").toLowerCase();
+  const adminEmail = String(ADMIN_EMAIL ?? "").toLowerCase();
+  if (role === "admin" || role === "owner" || role === "superadmin") return true;
+  if (adminEmail && email === adminEmail) return true;
+  return false;
 }
 
-function unauthorized() {
-  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-}
-
+/* ---------------- GET ---------------- */
 export async function GET() {
-  try {
-    const session = await getSession();
-    if (!session || !isAdminEmail(session.email)) return unauthorized();
+  const session = await getSession();
+  if (!session || !isAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-    await dbConnect();
-    const conn = await BrokerConnection.findOne({ ownerEmail: ADMIN_EMAIL });
-    const executions = await ExecutionLog.find({})
-      .sort({ createdAt: -1 })
-      .limit(10)
-      .lean();
+  await dbConnect();
 
-    return NextResponse.json({
-      connection: conn ? sanitize(conn) : null,
-      executions: executions.map((e: any) => ({
+  const conn: any = await BrokerConnection.findOne({ ownerEmail: ADMIN_EMAIL }).lean();
+
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const recent = await ExecutionLog.find({ createdAt: { $gt: since } })
+    .sort({ createdAt: -1 })
+    .limit(25)
+    .lean();
+
+  return NextResponse.json(
+    {
+      executorConfigured: isExecutorConfigured(),
+      connection: conn
+        ? { ...conn, hasPassword: !!conn.passwordEnc }
+        : null,
+      executions: recent.map((e: any) => ({
         id: String(e._id),
         pair: e.pair,
         direction: e.direction,
         lots: e.lots,
         status: e.status,
         mode: e.mode,
-        ticket: e.ticket,
         message: e.message,
         createdAt: e.createdAt,
       })),
-      executorConfigured: isExecutorConfigured(),
-      encryptionConfigured: !!(
-        process.env.BROKER_ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET
-      ),
-    });
-  } catch (error) {
-    console.error("GET broker error:", error);
-    return NextResponse.json(
-      { error: "Failed to load broker connection" },
-      { status: 500 }
-    );
-  }
+      allowedPairs: ALLOWED_PAIRS,
+    },
+    { headers: NO_STORE }
+  );
 }
 
+/* ---------------- POST ---------------- */
 export async function POST(request: Request) {
+  const session = await getSession();
+  if (!session || !isAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  let body: any;
   try {
-    const session = await getSession();
-    if (!session || !isAdminEmail(session.email)) return unauthorized();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
-    const body = await request.json();
-    const login = String(body.login ?? "").trim();
-    const server = String(body.server ?? "").trim();
-    const password = String(body.password ?? "");
-    const mode = body.mode === "live" ? "live" : "paper";
-    const enabled = !!body.enabled;
-    const riskPercent = Number(body.riskPercent ?? 1);
-    const maxLot = Number(body.maxLot ?? 0.1);
-    const maxDailyLossUsd = Number(body.maxDailyLossUsd ?? 50);
-    const tpLevel = [1, 2, 3].includes(Number(body.tpLevel))
-      ? Number(body.tpLevel)
-      : 1;
-    const symbolSuffix = String(body.symbolSuffix ?? "").trim();
+  await dbConnect();
 
-    if (!login || !server) {
-      return NextResponse.json(
-        { error: "MT5 login and server are required" },
-        { status: 400 }
-      );
+  const action = String(body.action ?? "").toLowerCase();
+
+  // --- Save/update connection ---
+  if (!action || action === "connection") {
+    const update: Record<string, any> = {};
+
+    if (body.login != null) update.login = String(body.login);
+    if (body.server != null) update.server = String(body.server);
+    if (body.mode === "paper" || body.mode === "live") update.mode = body.mode;
+    if (typeof body.enabled === "boolean") update.enabled = body.enabled;
+    if (body.symbolSuffix != null) update.symbolSuffix = String(body.symbolSuffix);
+    if (body.riskPercent != null) {
+      const v = Number(body.riskPercent);
+      if (Number.isFinite(v) && v > 0 && v <= 10) update.riskPercent = v;
     }
-    if (!Number.isFinite(riskPercent) || riskPercent <= 0 || riskPercent > 10) {
-      return NextResponse.json(
-        { error: "Risk percent must be between 0.1 and 10" },
-        { status: 400 }
-      );
+    if (body.maxLot != null) {
+      const v = Number(body.maxLot);
+      if (Number.isFinite(v) && v > 0 && v <= 50) update.maxLot = v;
     }
-    if (!Number.isFinite(maxLot) || maxLot <= 0 || maxLot > 50) {
-      return NextResponse.json(
-        { error: "Max lot must be between 0.01 and 50" },
-        { status: 400 }
-      );
+    if (body.maxDailyLossUsd != null) {
+      const v = Number(body.maxDailyLossUsd);
+      if (Number.isFinite(v) && v >= 0) update.maxDailyLossUsd = v;
     }
-    if (!Number.isFinite(maxDailyLossUsd) || maxDailyLossUsd < 0) {
-      return NextResponse.json(
-        { error: "Max daily loss must be zero or positive" },
-        { status: 400 }
-      );
+    if (body.tpLevel != null) {
+      const v = Number(body.tpLevel);
+      if ([1, 2, 3].includes(v)) update.tpLevel = v;
+    }
+    if (body.password) {
+      const { encryptSecret } = await import("@/lib/broker/crypto");
+      update.passwordEnc = encryptSecret(String(body.password));
     }
 
-    await dbConnect();
-    const existing = await BrokerConnection.findOne({ ownerEmail: ADMIN_EMAIL });
-
-    if (!existing && !password) {
-      return NextResponse.json(
-        { error: "MT5 password is required for a new connection" },
-        { status: 400 }
-      );
-    }
-
-    let passwordEnc = existing?.passwordEnc;
-    if (password) passwordEnc = encryptSecret(password);
-
-    const update = {
-      ownerEmail: ADMIN_EMAIL,
-      broker: "exness" as const,
-      platform: "mt5" as const,
-      login,
-      server,
-      passwordEnc: passwordEnc as string,
-      mode: mode as "paper" | "live",
-      enabled,
-      riskPercent,
-      maxLot,
-      maxDailyLossUsd,
-      tpLevel,
-      symbolSuffix,
-    };
-
-    const conn = await BrokerConnection.findOneAndUpdate(
+    const conn: any = await BrokerConnection.findOneAndUpdate(
       { ownerEmail: ADMIN_EMAIL },
-      update,
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
-    );
+      { $set: update, $setOnInsert: { ownerEmail: ADMIN_EMAIL } },
+      { new: true, upsert: true }
+    ).lean();
 
-    return NextResponse.json({ ok: true, connection: sanitize(conn) });
-  } catch (error) {
-    console.error("POST broker error:", error);
     return NextResponse.json(
-      { error: "Failed to save broker connection" },
-      { status: 500 }
+      { ok: true, connection: conn ? { ...conn, hasPassword: !!conn.passwordEnc } : null },
+      { headers: NO_STORE }
     );
   }
+
+  // --- Create manual signal ---
+  if (action === "signal") {
+    const pair = String(body.pair ?? "").toUpperCase();
+    const direction = String(body.direction ?? "").toLowerCase();
+    const orderType = String(body.orderType ?? "MARKET").toUpperCase();
+    const entry = Number(body.entry);
+    const stopLoss = Number(body.stopLoss);
+    const tp1 = Number(body.takeProfit1);
+    const tp2 = body.takeProfit2 ? Number(body.takeProfit2) : NaN;
+    const tp3 = body.takeProfit3 ? Number(body.takeProfit3) : NaN;
+
+    const errors: string[] = [];
+    if (!ALLOWED_PAIRS.includes(pair)) errors.push("pair not allowed");
+    if (!["long", "short"].includes(direction)) errors.push("direction invalid");
+    if (!["MARKET", "BUY_LIMIT", "SELL_LIMIT", "LIMIT"].includes(orderType))
+      errors.push("orderType invalid");
+    if (!Number.isFinite(entry) || entry <= 0) errors.push("entry invalid");
+    if (!Number.isFinite(stopLoss) || stopLoss <= 0) errors.push("stopLoss invalid");
+    if (!Number.isFinite(tp1) || tp1 <= 0) errors.push("takeProfit1 required");
+    if (errors.length) {
+      return NextResponse.json({ error: "Validation failed", errors }, { status: 400 });
+    }
+
+    const normalizedOrderType =
+      orderType === "LIMIT"
+        ? direction === "long"
+          ? "BUY_LIMIT"
+          : "SELL_LIMIT"
+        : orderType;
+
+    const doc = await Signal.create({
+      pair,
+      direction,
+      orderType: normalizedOrderType,
+      entry: String(entry),
+      stopLoss: String(stopLoss),
+      takeProfit1: String(tp1),
+      takeProfit2: Number.isFinite(tp2) ? String(tp2) : "",
+      takeProfit3: Number.isFinite(tp3) ? String(tp3) : "",
+      isActive: true,
+      isAutoGenerated: true,
+      signalLabel: "ADMIN MANUAL",
+      source: "admin-manual",
+      createdBy: String((session as any)?.email ?? "admin"),
+      notes: String(body.notes ?? "").slice(0, 500),
+    });
+
+    return NextResponse.json(
+      { ok: true, signalId: String(doc._id) },
+      { headers: NO_STORE }
+    );
+  }
+
+  return NextResponse.json(
+    { error: "Unknown action", valid: ["connection", "signal"] },
+    { status: 400 }
+  );
 }
 
+/* ---------------- DELETE ---------------- */
 export async function DELETE() {
-  try {
-    const session = await getSession();
-    if (!session || !isAdminEmail(session.email)) return unauthorized();
-
-    await dbConnect();
-    await BrokerConnection.findOneAndDelete({ ownerEmail: ADMIN_EMAIL });
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    console.error("DELETE broker error:", error);
-    return NextResponse.json(
-      { error: "Failed to disconnect broker" },
-      { status: 500 }
-    );
+  const session = await getSession();
+  if (!session || !isAdmin(session)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  await dbConnect();
+  await BrokerConnection.deleteOne({ ownerEmail: ADMIN_EMAIL });
+  return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }
