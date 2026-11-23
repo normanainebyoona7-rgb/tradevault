@@ -53,3 +53,5 @@ ai-backend/executor_state.json
 *.p12
 .env.local
 .env.production
+.vercel
+.env*
