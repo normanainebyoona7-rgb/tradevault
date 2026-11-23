@@ -17,6 +17,16 @@ export const MERCHANT_PHONE_NUMBERS = {
 
 export const FREE_TRIAL_DAYS = 5;
 
+/* Admins bypass tier gating entirely. */
+const ADMIN_EMAILS = [
+  "normanainebyoona7@gmail.com",
+];
+
+export function isAdminEmail(email?: unknown): boolean {
+  const e = String(email ?? "").toLowerCase().trim();
+  return ADMIN_EMAILS.map((a) => a.toLowerCase()).includes(e);
+}
+
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
     id: "free",
@@ -82,11 +92,6 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
 
 export type Tier = "free" | "vip" | "vvip";
 
-/**
- * The single source of truth for what each tier may see.
- * tps: which take-profit numbers are visible (1-based).
- * descriptions: whether trade-management / description text is shown.
- */
 export const TIER_ACCESS: Record<
   Tier,
   { tps: number[]; descriptions: boolean; label: string }
@@ -104,10 +109,14 @@ export function normalizeTier(raw: unknown): Tier {
 }
 
 /**
- * Strip any signal payload down to what the given tier is allowed to see.
- * Server-side enforcement: locked TPs become `null` and locked TP lines are
- * removed from the analysis text, so they never leave the server.
+ * Resolve the effective tier for a session.
+ * Admins (by email) always get "vvip" so they see everything.
  */
+export function resolveTier(session: any): Tier {
+  if (isAdminEmail(session?.email ?? session?.user?.email)) return "vvip";
+  return normalizeTier(session?.tier);
+}
+
 export function gateSignal<T extends Record<string, any>>(
   payload: T,
   tier: Tier
@@ -126,7 +135,6 @@ export function gateSignal<T extends Record<string, any>>(
 
   const clone: any = JSON.parse(JSON.stringify(payload));
 
-  // --- signal.* fields ---
   if (clone?.signal) {
     for (const n of lockedTps) {
       if (`takeProfit${n}Price` in clone.signal) {
@@ -142,14 +150,12 @@ export function gateSignal<T extends Record<string, any>>(
     }
   }
 
-  // --- smc.* fields ---
   if (clone?.smc) {
     for (const n of lockedTps) {
       if (`takeProfit${n}` in clone.smc) clone.smc[`takeProfit${n}`] = null;
     }
   }
 
-  // --- analysis text: strip locked TP lines ---
   if (typeof clone.analysis === "string" && lockedTps.length > 0) {
     const lockedTpRegex = new RegExp(
       `^\\s*TP(${lockedTps.join("|")})\\b`,

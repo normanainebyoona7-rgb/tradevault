@@ -4,6 +4,7 @@
 // Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT — no NEUTRAL, no STOP orders.
 //
 // Tier gating: free = TP1 only, vip = TP1+TP2, vvip = TP1..TP4 + descriptions.
+// Admins (by email) bypass tier gating and always get vvip access.
 // Enforcement happens server-side via gateSignal() — locked TPs never leave.
 //
 // Admin kill switch + ban: if Config.aiEnabled === false -> 423;
@@ -23,7 +24,7 @@ import {
 } from "@/lib/smc-analysis";
 import { activeKillzone } from "@/lib/market-structure";
 import type { Overlays } from "@/lib/overlays";
-import { gateSignal, normalizeTier } from "@/lib/subscription";
+import { gateSignal, resolveTier } from "@/lib/subscription";
 import { dbConnect } from "@/lib/db/mongodb";
 import { getGlobalConfig } from "@/lib/models/config";
 import AnalysisEvent from "@/lib/models/analysis-event";
@@ -65,6 +66,7 @@ async function logAnalysisEvent(args: {
   pair: string;
   timeframe: string;
   direction: string;
+  tier: string;
 }) {
   try {
     await dbConnect();
@@ -74,7 +76,7 @@ async function logAnalysisEvent(args: {
       pair: args.pair,
       timeframe: args.timeframe,
       direction: args.direction,
-      tierAtTime: normalizeTier(args.session?.tier),
+      tierAtTime: args.tier,
     });
   } catch (e) {
     console.error("AnalysisEvent log failed (non-fatal):", e);
@@ -125,7 +127,8 @@ export async function POST(request: Request) {
       console.error("Config check failed (non-fatal):", e);
     }
 
-    const userTier = normalizeTier((session as any)?.tier);
+    // Admins bypass tier gating — resolveTier returns "vvip" for admin email.
+    const userTier = resolveTier(session as any);
 
     const body = await request.json();
     const pair = body.pair || "EUR/USD";
@@ -325,7 +328,7 @@ Killzone: ${smc.killzone.name}`;
     };
 
     // Best-effort event log — never blocks the response
-    logAnalysisEvent({ session, pair, timeframe, direction });
+    logAnalysisEvent({ session, pair, timeframe, direction, tier: userTier });
 
     return NextResponse.json(gateSignal(payload, userTier));
   } catch (error: any) {
