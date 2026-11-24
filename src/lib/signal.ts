@@ -251,37 +251,61 @@ export function buildSignal(
     session: sessionInfo.name, sessionFavorable: sessionInfo.favorable,
   };
 
+  const makeNeutral = (
+    neutralNotes: string[],
+    zone: SupplyDemandZone | null = null,
+    entryCandle: SignalEntryCandle = {
+      type: "none",
+      direction: "bullish",
+      probability: 0,
+      reason: "No valid setup on the chart.",
+    },
+  ): TradingSignal => ({
+    pair,
+    timeframe,
+    timestamp,
+    direction: "neutral",
+    orderType: "market",
+    signalLabel: "NEUTRAL",
+    entry: currentPrice,
+    stopLoss: currentPrice,
+    takeProfit1: currentPrice,
+    takeProfit2: currentPrice,
+    takeProfit3: currentPrice,
+    riskPips: 0,
+    rewardPips: [0, 0, 0],
+    riskReward: ["0", "0", "0"],
+    zone: zone
+      ? {
+          type: zone.type,
+          top: zone.top,
+          bottom: zone.bottom,
+          strength: 0,
+          distanceToPrice: zone.distanceToPrice,
+        }
+      : null,
+    entryCandle,
+    confluences: neutralConfluences,
+    confidence: "NEUTRAL",
+    score: 0,
+    notes: neutralNotes,
+    priceVerification,
+  });
+
+  if (verifiedPrice && !verifiedPrice.ok) {
+    return makeNeutral([
+      verifiedPrice.reason || "Price could not be cross-validated.",
+      "Neutral — no trade until market prices agree.",
+    ]);
+  }
+
   // ---- NO ZONES → NEUTRAL ----
   if (zones.length === 0) {
-    notes.push("No supply/demand zones detected.");
-    notes.push("Neutral — no trade. No signal saved.");
-    notes.push(`Current price: ${currentPrice.toFixed(5)} | ATR(14): ${atr.toFixed(5)}`);
-    return {
-      pair, timeframe, timestamp,
-      direction: "neutral",
-      orderType: "market",
-      signalLabel: "NEUTRAL",
-      entry: currentPrice,
-      stopLoss: currentPrice,
-      takeProfit1: currentPrice,
-      takeProfit2: currentPrice,
-      takeProfit3: currentPrice,
-      riskPips: 0,
-      rewardPips: [0, 0, 0],
-      riskReward: ["0", "0", "0"],
-      zone: null,
-      entryCandle: {
-        type: "none",
-        direction: "bullish",
-        probability: 0,
-        reason: "No zone on chart — no setup.",
-      },
-      confluences: neutralConfluences,
-      confidence: "NEUTRAL",
-      score: 0,
-      notes,
-      priceVerification,
-    };
+    return makeNeutral([
+      "No supply/demand zones detected.",
+      "Neutral — no trade. No signal saved.",
+      `Current price: ${currentPrice.toFixed(5)} | ATR(14): ${atr.toFixed(5)}`,
+    ]);
   }
 
   const slDistance = atr * 2.0;
@@ -299,9 +323,14 @@ export function buildSignal(
     return false;
   });
 
-  const fallbackZone = sortedZones[0];
+  const activeZone = insideZone ?? correctSideZone;
 
-  const activeZone: SupplyDemandZone = insideZone ?? correctSideZone ?? fallbackZone;
+  if (!activeZone) {
+    return makeNeutral([
+      "No demand zone below price or supply zone above price.",
+      "Neutral — no valid setup on the correct side of market.",
+    ]);
+  }
 
   const direction: "long" | "short" = activeZone.type === "demand" ? "long" : "short";
   const signalDirection = direction === "long" ? "bullish" : "bearish";
@@ -311,43 +340,20 @@ export function buildSignal(
 
   // ---- INSIDE ZONE WITHOUT CONFIRMATION → NEUTRAL ----
   if (priceInsideZone && entryCandle.type === "none") {
-    notes.push(
-      `Price is inside ${activeZone.type} zone ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}.`
-    );
-    notes.push("No confirmation candle (LRC / Engulfing / Pin Bar).");
-    notes.push("Neutral — waiting for confirmation. No signal saved.");
-    return {
-      pair, timeframe, timestamp,
-      direction: "neutral",
-      orderType: "market",
-      signalLabel: "NEUTRAL",
-      entry: currentPrice,
-      stopLoss: currentPrice,
-      takeProfit1: currentPrice,
-      takeProfit2: currentPrice,
-      takeProfit3: currentPrice,
-      riskPips: 0,
-      rewardPips: [0, 0, 0],
-      riskReward: ["0", "0", "0"],
-      zone: {
-        type: activeZone.type,
-        top: activeZone.top,
-        bottom: activeZone.bottom,
-        strength: 0,
-        distanceToPrice: activeZone.distanceToPrice,
-      },
-      entryCandle: {
+    return makeNeutral(
+      [
+        `Price is inside ${activeZone.type} zone ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}.`,
+        "No confirmation candle (LRC / Engulfing / Pin Bar).",
+        "Neutral — waiting for confirmation. No signal saved.",
+      ],
+      activeZone,
+      {
         type: "none",
         direction: entryCandle.direction,
         probability: entryCandle.probability,
         reason: entryCandle.reason,
       },
-      confluences: neutralConfluences,
-      confidence: "NEUTRAL",
-      score: 0,
-      notes,
-      priceVerification,
-    };
+    );
   }
 
   // ===== ORDER TYPE =====

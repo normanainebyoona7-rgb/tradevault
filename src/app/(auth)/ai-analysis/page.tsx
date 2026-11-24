@@ -42,7 +42,7 @@ const ENGINE_CHECKS = [
   {
     icon: ShieldCheck,
     title: "Risk model",
-    body: "ATR-based stop, Fibonacci extensions for TP1–TP3, position size from 1% risk.",
+    body: "ATR-based stop, 1R / 1.5R / 3R targets, and position size from 1% risk.",
   },
 ];
 
@@ -66,9 +66,9 @@ export default function AIAnalysisPage() {
             AI chart analysis
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Capture the live chart and let the engine read its own drawings.
-            Every signal is built from the same zones, order blocks, gaps and
-            structure you see on screen.
+            Analyze the live chart with SMC, ICT and supply-and-demand
+            confluences. Every result uses the same candles, zones, order
+            blocks, gaps and structure you see on screen.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold">

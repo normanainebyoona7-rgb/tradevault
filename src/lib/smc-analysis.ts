@@ -1,6 +1,8 @@
 // src/lib/smc-analysis.ts
 // Pure SMC signal builder with SMA 9/21/200 direction filter + MTF (M5/M15) confluence.
 
+import { formatPrice } from "@/lib/pairs";
+
 export interface SMCCandle {
   open: number;
   high: number;
@@ -373,6 +375,7 @@ export function analyzeMTF(
 // ===== DIRECTION =====
 
 function determineDirection(
+  pair: string,
   candles: SMCCandle[],
   liquidity: SMCLiquidity[],
   obs: SMCOrderBlock[],
@@ -390,18 +393,18 @@ function determineDirection(
 
   if (sma9 > sma21) {
     longScore += 25;
-    confluences.push(`✅ SMA9 (${sma9.toFixed(2)}) > SMA21 (${sma21.toFixed(2)}) — short-term bullish`);
+    confluences.push(`✅ SMA9 (${formatPrice(pair, sma9)}) > SMA21 (${formatPrice(pair, sma21)}) — short-term bullish`);
   } else {
     shortScore += 25;
-    confluences.push(`✅ SMA9 (${sma9.toFixed(2)}) < SMA21 (${sma21.toFixed(2)}) — short-term bearish`);
+    confluences.push(`✅ SMA9 (${formatPrice(pair, sma9)}) < SMA21 (${formatPrice(pair, sma21)}) — short-term bearish`);
   }
 
   if (currentPrice > sma200) {
     longScore += 20;
-    confluences.push(`✅ Price above SMA200 (${sma200.toFixed(2)}) — bullish bias`);
+    confluences.push(`✅ Price above SMA200 (${formatPrice(pair, sma200)}) — bullish bias`);
   } else {
     shortScore += 20;
-    confluences.push(`✅ Price below SMA200 (${sma200.toFixed(2)}) — bearish bias`);
+    confluences.push(`✅ Price below SMA200 (${formatPrice(pair, sma200)}) — bearish bias`);
   }
 
   const buyAbove = liquidity
@@ -641,7 +644,7 @@ export function buildSMCSignal(
   const sma21 = sma(candles, 21);
   const sma200 = sma(candles, 200);
 
-  const decision = determineDirection(candles, liquidity, obs, fvgs, sdZones, currentPrice);
+  const decision = determineDirection(pair, candles, liquidity, obs, fvgs, sdZones, currentPrice);
 
   const levels = placeSLTP(decision.direction, currentPrice, liquidity, obs, sdZones, candles);
 
@@ -704,7 +707,7 @@ export function buildSMCSignal(
 
   const allConfluences = [
     ...decision.confluences,
-    `📊 SMA9: ${sma9.toFixed(5)} | SMA21: ${sma21.toFixed(5)} | SMA200: ${sma200.toFixed(5)}`,
+    `📊 SMA9: ${formatPrice(pair, sma9)} | SMA21: ${formatPrice(pair, sma21)} | SMA200: ${formatPrice(pair, sma200)}`,
     ...(mtf5 ? mtf5.notes : []),
     ...(mtf15 ? mtf15.notes : []),
     `MTF alignment: ${mtfAlignment}`,

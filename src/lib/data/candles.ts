@@ -217,6 +217,7 @@ async function getCandlesFromYahoo(
         Accept: "application/json",
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(8000),
     });
 
     if (!res.ok) {

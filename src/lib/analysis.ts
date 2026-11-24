@@ -17,8 +17,11 @@ export interface VerifiedPrice {
 }
 
 // ===== TOLERANCE =====
-// 0.1% — roughly $4 on gold, 10 pips on EUR/USD
-export function priceTolerancePct(): number {
+// Metals and crypto use wider tolerances because spot/futures and venue prices diverge.
+export function priceTolerancePct(pair: string): number {
+  const upper = pair.toUpperCase();
+  if (upper.includes("XAU") || upper.includes("XAG")) return 0.5;
+  if (upper.startsWith("BTC") || upper.startsWith("ETH")) return 0.25;
   return 0.1;
 }
 
@@ -50,6 +53,7 @@ async function fetchYahooPrice(pair: string): Promise<number | null> {
         Accept: "application/json",
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(8000),
     });
 
     if (!res.ok) return null;
@@ -85,7 +89,7 @@ export async function getVerifiedPrice(
   pair: string,
   chartPriceOverride?: number
 ): Promise<VerifiedPrice> {
-  const tolerance = priceTolerancePct();
+  const tolerance = priceTolerancePct(pair);
 
   // Chart price = last candle close from the requested timeframe when supplied,
   // otherwise a fresh 1m close from Dukascopy.

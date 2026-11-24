@@ -787,27 +787,96 @@ export function LiveChart({
     ctx.fillStyle = palette().bg;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(main, 0, 0);
+
+    const overlayHost = overlayRef.current;
+    if (overlayHost) {
+      const hostRect = overlayHost.getBoundingClientRect();
+      if (hostRect.width > 0 && hostRect.height > 0) {
+        const scaleX = main.width / hostRect.width;
+        const scaleY = main.height / hostRect.height;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, main.width, main.height);
+        ctx.clip();
+
+        for (const box of Array.from(overlayHost.children)) {
+          const rect = box.getBoundingClientRect();
+          const style = getComputedStyle(box);
+          const x = (rect.left - hostRect.left) * scaleX;
+          const y = (rect.top - hostRect.top) * scaleY;
+          const width = rect.width * scaleX;
+          const height = rect.height * scaleY;
+
+          ctx.fillStyle = style.backgroundColor;
+          ctx.fillRect(x, y, width, height);
+          ctx.strokeStyle = style.borderTopColor;
+          ctx.lineWidth = Math.max(1, Number.parseFloat(style.borderTopWidth) * scaleX);
+          ctx.setLineDash(style.borderTopStyle === "dashed" ? [4 * scaleX, 4 * scaleX] : []);
+          ctx.strokeRect(x, y, width, height);
+          ctx.setLineDash([]);
+
+          const label = box.querySelector("span");
+          if (label) {
+            const labelStyle = getComputedStyle(label);
+            const fontSize = Number.parseFloat(labelStyle.fontSize) || 9;
+            ctx.font = `700 ${fontSize * scaleX}px sans-serif`;
+            ctx.fillStyle = labelStyle.color;
+            ctx.fillText(
+              label.textContent || "",
+              x + 5 * scaleX,
+              y + (fontSize + 1) * scaleY
+            );
+          }
+        }
+        ctx.restore();
+      }
+    }
+
     if (rsi) ctx.drawImage(rsi, 0, main.height);
 
     return canvas;
   }, []);
 
   const handleAnalyze = async () => {
+    if (loading || error || candleCount === 0 || analyzing) return;
+
     setAnalyzing(true);
     setAnalyzeError(null);
 
     const shot = captureCanvas()?.toDataURL("image/png") ?? null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     try {
       const res = await fetch("/api/analyze-chart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pair: selectedPair, timeframe }),
+        signal: controller.signal,
+        body: JSON.stringify({
+          pair: selectedPair,
+          timeframe,
+          candles: candlesRef.current.slice(-400),
+        }),
       });
-      const data = await res.json();
+      const text = await res.text();
+      const data = text
+        ? (() => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return null;
+            }
+          })()
+        : null;
 
       if (!res.ok) {
-        setAnalyzeError(data.message || data.error || "Analysis failed");
+        setAnalyzeError(
+          data?.message || data?.error || `Analysis failed (HTTP ${res.status}).`
+        );
+        return;
+      }
+      if (!data || !["signal", "neutral"].includes(data.status)) {
+        setAnalyzeError("The analysis service returned an invalid response.");
         return;
       }
 
@@ -821,9 +890,14 @@ export function LiveChart({
         timeframe,
         shot,
       });
-    } catch {
-      setAnalyzeError("Could not reach the analysis service.");
+    } catch (e: any) {
+      setAnalyzeError(
+        e?.name === "AbortError"
+          ? "Analysis timed out. Please try again."
+          : "Could not reach the analysis service."
+      );
     } finally {
+      clearTimeout(timeout);
       setAnalyzing(false);
     }
   };
@@ -1002,7 +1076,7 @@ export function LiveChart({
       <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface/60 px-3 py-3">
         <button
           onClick={handleAnalyze}
-          disabled={analyzing}
+          disabled={analyzing || loading || !!error || candleCount === 0}
           className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:opacity-60"
         >
           {analyzing ? (
@@ -1065,7 +1139,7 @@ export function LiveChart({
             </button>
           </div>
 
-          {s && (
+          {analysis.status === "signal" && s && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {[
                 { label: "Entry", value: s.entryPrice, tone: "text-foreground" },
@@ -1092,6 +1166,41 @@ export function LiveChart({
             </div>
           )}
 
+          {analysis.status === "neutral" && s && (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                {
+                  label: "Current price",
+                  value: formatPrice(analysis.pair, s.currentPrice),
+                },
+                {
+                  label: "SMC bias",
+                  value: analysis.smc?.direction?.toUpperCase() || "NEUTRAL",
+                },
+                {
+                  label: "SMC score",
+                  value: `${analysis.smc?.score ?? 0}/100`,
+                },
+                {
+                  label: "Price check",
+                  value: s.priceVerification?.verified ? "Verified" : "Unverified",
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-lg border border-border bg-card px-3 py-2"
+                >
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {item.label}
+                  </div>
+                  <div className="text-sm font-bold tabular-nums text-foreground">
+                    {item.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {analysis.smc && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {analysis.smc.structure && (
@@ -1107,7 +1216,7 @@ export function LiveChart({
                   {(analysis.smc.premiumDiscount.position * 100).toFixed(0)}%
                 </span>
               )}
-              {analysis.smc.killzone && (
+              {analysis.smc.killzone?.active && (
                 <span className="rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold text-foreground">
                   {analysis.smc.killzone.name} killzone
                 </span>
@@ -1145,7 +1254,7 @@ export function LiveChart({
             <div className="mt-3 flex items-start gap-3">
               <img
                 src={analysis.shot}
-                alt="Chart snapshot used for analysis"
+                alt="Captured chart snapshot"
                 className="max-h-32 rounded-lg border border-border"
               />
               <a

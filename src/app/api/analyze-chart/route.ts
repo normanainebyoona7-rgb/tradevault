@@ -16,10 +16,11 @@
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { getCandles } from "@/lib/data/candles";
+import { getCandles, type Candle } from "@/lib/data/candles";
 import { computeOverlays } from "@/lib/overlays";
 import { buildSignal } from "@/lib/signal";
 import { getVerifiedPrice } from "@/lib/analysis";
+import { PAIRS, formatPrice } from "@/lib/pairs";
 import {
   buildSMCSignal,
   type SMCCandle,
@@ -27,11 +28,43 @@ import {
 } from "@/lib/smc-analysis";
 import { activeKillzone } from "@/lib/market-structure";
 import type { Overlays } from "@/lib/overlays";
-import { gateSignal, resolveTier } from "@/lib/subscription";
+import { gateSignal, resolveTier, normalizeTier, isAdminEmail } from "@/lib/subscription";
 import { dbConnect } from "@/lib/db/mongodb";
 import { getGlobalConfig } from "@/lib/models/config";
 import AnalysisEvent from "@/lib/models/analysis-event";
 import User from "@/lib/models/user";
+
+const TIMEFRAMES = new Set(["1m", "5m", "15m", "30m", "1H", "4H", "1D"]);
+
+function parseChartCandles(value: unknown): Candle[] | null {
+  if (!Array.isArray(value) || value.length < 50 || value.length > 400) {
+    return null;
+  }
+
+  const candles: Candle[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const { time, open, high, low, close, volume } = item as Record<string, unknown>;
+    if (![time, open, high, low, close].every(Number.isFinite)) return null;
+    if (Number(open) <= 0 || Number(close) <= 0 || Number(low) <= 0) return null;
+    if (Number(high) < Math.max(Number(open), Number(close))) return null;
+    if (Number(low) > Math.min(Number(open), Number(close))) return null;
+    candles.push({
+      time: Number(time),
+      open: Number(open),
+      high: Number(high),
+      low: Number(low),
+      close: Number(close),
+      volume: Number.isFinite(volume) ? Number(volume) : 0,
+      is_green: Number(close) >= Number(open),
+    });
+  }
+
+  for (let i = 1; i < candles.length; i++) {
+    if (candles[i].time <= candles[i - 1].time) return null;
+  }
+  return candles;
+}
 
 function buildSmcPayload(
   pair: string,
@@ -94,6 +127,7 @@ export async function POST(request: Request) {
     }
 
     // ---- Admin kill switch + ban enforcement ----
+    let dbUser: any = null;
     try {
       await dbConnect();
       const cfg = await getGlobalConfig();
@@ -109,35 +143,62 @@ export async function POST(request: Request) {
         );
       }
 
-      const user: any = await User.findOne({
+      dbUser = await User.findOne({
         email: String((session as any)?.email ?? "").toLowerCase(),
       })
-        .select("banned bannedReason")
+        .select("banned bannedReason tier planExpiry")
         .lean();
 
-      if (user?.banned) {
+      if (dbUser?.banned) {
         return NextResponse.json(
           {
             error: "Account banned",
             message:
-              user.bannedReason ||
+              dbUser.bannedReason ||
               "Your account has been banned by the administrator.",
           },
           { status: 403 }
         );
       }
     } catch (e) {
-      console.error("Config check failed (non-fatal):", e);
+      console.error("Analysis access check failed:", e);
+      return NextResponse.json(
+        {
+          error: "Analysis unavailable",
+          message: "Account access could not be verified. Please try again.",
+        },
+        { status: 503 }
+      );
     }
 
-    // Admins bypass tier gating — resolveTier returns "vvip" for admin email.
-    const userTier = resolveTier(session as any);
+    const planActive =
+      !dbUser?.planExpiry || new Date(dbUser.planExpiry).getTime() > Date.now();
+    const userTier = isAdminEmail((session as any)?.email)
+      ? resolveTier(session)
+      : planActive
+        ? normalizeTier(dbUser?.tier)
+        : "free";
 
-    const body = await request.json();
-    const pair = body.pair || "EUR/USD";
-    const timeframe = body.timeframe || "1H";
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "Invalid request", message: "Send a chart analysis request." },
+        { status: 400 }
+      );
+    }
 
-    const candles = await getCandles(pair, timeframe, 300);
+    const pair = String(body.pair || "EUR/USD");
+    const timeframe = String(body.timeframe || "1H");
+    if (!PAIRS.includes(pair) || !TIMEFRAMES.has(timeframe)) {
+      return NextResponse.json(
+        { error: "Unsupported market", message: "Choose a supported pair and timeframe." },
+        { status: 400 }
+      );
+    }
+
+    const candles =
+      parseChartCandles(body.candles) ??
+      (await getCandles(pair, timeframe, 300));
 
     if (candles.length === 0) {
       return NextResponse.json(
@@ -145,58 +206,14 @@ export async function POST(request: Request) {
           error: "No market data",
           message: `Could not fetch candles for ${pair} ${timeframe}.`,
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     const currentPrice = candles[candles.length - 1].close;
     const verified = await getVerifiedPrice(pair, currentPrice);
-
     const overlays = computeOverlays(pair, candles);
     const signal = buildSignal(pair, timeframe, candles, overlays, verified);
-
-    // ---- NEUTRAL: no valid trade ----
-    if (signal.direction === "neutral") {
-      logAnalysisEvent({
-        session,
-        pair,
-        timeframe,
-        direction: "neutral",
-        tier: userTier,
-      });
-      return NextResponse.json(
-        {
-          status: "neutral",
-          message:
-            signal.notes[signal.notes.length - 1] ||
-            "No valid trade right now.",
-          signal: {
-            direction: "neutral",
-            signalLabel: "NEUTRAL",
-            confidence: "NEUTRAL",
-            confidenceScore: 0,
-            notes: signal.notes,
-            zone: signal.zone,
-            entryCandle: signal.entryCandle,
-            currentPrice,
-            timeframe,
-            access: {
-              tier: userTier,
-              lockedTps: [],
-              descriptions: userTier === "vvip",
-              label:
-                userTier === "vvip"
-                  ? "VVIP"
-                  : userTier === "vip"
-                    ? "VIP"
-                    : "Free",
-            },
-          },
-        },
-        { status: 200 }
-      );
-    }
-
     const smcCandles: SMCCandle[] = candles.map((c) => ({
       open: c.open,
       high: c.high,
@@ -205,6 +222,78 @@ export async function POST(request: Request) {
       is_green: c.is_green,
     }));
     const smc = buildSmcPayload(pair, smcCandles, overlays);
+    const structureLine = overlays.structure.lastEvent
+      ? `${overlays.structure.lastEvent.type} ${overlays.structure.lastEvent.direction}`
+      : `structure ${overlays.structure.trend}`;
+    const pdLine = overlays.premiumDiscount
+      ? `${overlays.premiumDiscount.zone} (${(overlays.premiumDiscount.position * 100).toFixed(0)}% of range)`
+      : "range unknown";
+    const priceCheck = verified.ok
+      ? `Verified across sources (${verified.diffPct.toFixed(3)}% difference)`
+      : verified.reason || "Price could not be cross-validated";
+
+    // ---- NEUTRAL: no valid trade ----
+    if (signal.direction === "neutral") {
+      await logAnalysisEvent({
+        session,
+        pair,
+        timeframe,
+        direction: "neutral",
+        tier: userTier,
+      });
+
+      const analysisText = `NEUTRAL — ${pair} (${timeframe})
+
+Decision: No trade
+${signal.notes.map((note) => `• ${note}`).join("\n")}
+
+Current price: ${formatPrice(pair, currentPrice)}
+SMC/ICT bias: ${smc.direction.toUpperCase()} · ${smc.score}/100 (${smc.confidence})
+Structure: ${structureLine}
+Premium/discount: ${pdLine}
+Killzone: ${smc.killzone.active ? smc.killzone.name : "No active killzone"}
+Price check: ${priceCheck}`;
+
+      return NextResponse.json(
+        gateSignal(
+          {
+            status: "neutral",
+            message:
+              signal.notes
+                .find((note) => note.startsWith("Neutral"))
+                ?.replace(/^Neutral\s*[—-]\s*/i, "") ||
+              "No valid trade setup right now.",
+            analysis: analysisText,
+            smc,
+            signal: {
+              direction: "neutral",
+              signalLabel: "NEUTRAL",
+              confidence: "NEUTRAL",
+              confidenceScore: 0,
+              notes: signal.notes,
+              zone: signal.zone,
+              entryCandle: signal.entryCandle,
+              currentPrice,
+              entryPrice: null,
+              stopLossPrice: null,
+              takeProfit1Price: null,
+              takeProfit2Price: null,
+              takeProfit3Price: null,
+              riskPips: 0,
+              timeframe,
+              candleCount: candles.length,
+              confluenceBreakdown: signal.confluences,
+              priceVerification: signal.priceVerification,
+              dataSource: verified.ok
+                ? "cross-source verified"
+                : "live chart data (unverified)",
+            },
+            direction: "NEUTRAL",
+          },
+          userTier
+        )
+      );
+    }
 
     const isLong = signal.direction === "long";
     const quote = pair.split("/")[1] ?? "";
@@ -297,21 +386,15 @@ export async function POST(request: Request) {
     }
 
     const direction = isLong ? "LONG" : "SHORT";
-    const structureLine = overlays.structure.lastEvent
-      ? `${overlays.structure.lastEvent.type} ${overlays.structure.lastEvent.direction}`
-      : `structure ${overlays.structure.trend}`;
-    const pdLine = overlays.premiumDiscount
-      ? `${overlays.premiumDiscount.zone} (${(overlays.premiumDiscount.position * 100).toFixed(0)}% of range)`
-      : "range unknown";
 
     const analysisText = `${signal.signalLabel} — ${pair} (${timeframe})
 
-Zone: ${signal.zone!.type.toUpperCase()} ${signal.zone!.bottom.toFixed(5)} - ${signal.zone!.top.toFixed(5)}
-Entry: ${signal.entry.toFixed(5)}
-Stop loss (2x ATR): ${signal.stopLoss.toFixed(5)}
-TP1 (1.0R): ${signal.takeProfit1.toFixed(5)}
-TP2 (1.5R): ${signal.takeProfit2.toFixed(5)}
-TP3 (3.0R): ${signal.takeProfit3.toFixed(5)}
+Zone: ${signal.zone!.type.toUpperCase()} ${formatPrice(pair, signal.zone!.bottom)} - ${formatPrice(pair, signal.zone!.top)}
+Entry: ${formatPrice(pair, signal.entry)}
+Stop loss (2x ATR): ${formatPrice(pair, signal.stopLoss)}
+TP1 (1.0R): ${formatPrice(pair, signal.takeProfit1)}
+TP2 (1.5R): ${formatPrice(pair, signal.takeProfit2)}
+TP3 (3.0R): ${formatPrice(pair, signal.takeProfit3)}
 
 Confidence: ${signal.confidence} (${signal.score}/100)
 Risk: ${signal.riskPips} pips
@@ -320,7 +403,8 @@ R:R = 1:${signal.riskReward[0]} / 1:${signal.riskReward[1]} / 1:${signal.riskRew
 SMC/ICT: ${smc.direction.toUpperCase()} bias, ${smc.score}/100 (${smc.confidence})
 Structure: ${structureLine}
 Premium/discount: ${pdLine}
-Killzone: ${smc.killzone.name}`;
+Killzone: ${smc.killzone.active ? smc.killzone.name : "No active killzone"}
+Price check: ${priceCheck}`;
 
     const payload = {
       status: "signal",
@@ -353,7 +437,9 @@ Killzone: ${smc.killzone.name}`;
         signalScore: signal.score,
 
         timeframe,
-        dataSource: "dukascopy+yahoo-verified",
+        dataSource: verified.ok
+          ? "live candles + independent price verification"
+          : "live candles (unverified)",
         status: "signal",
 
         zone: signal.zone,
@@ -372,7 +458,7 @@ Killzone: ${smc.killzone.name}`;
       direction,
     };
 
-    logAnalysisEvent({ session, pair, timeframe, direction, tier: userTier });
+    await logAnalysisEvent({ session, pair, timeframe, direction, tier: userTier });
 
     return NextResponse.json(gateSignal(payload, userTier));
   } catch (error: any) {
