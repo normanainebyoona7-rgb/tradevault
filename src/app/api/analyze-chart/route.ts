@@ -1,7 +1,10 @@
 // src/app/api/analyze-chart/route.ts
 // Analyzes a live chart with cross-source price verification, ATR-based SL,
-// Fibonacci TPs, and an SMC / ICT / supply-demand breakdown.
-// Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT — no NEUTRAL, no STOP orders.
+// risk-multiple TPs, and an SMC / ICT / supply-demand breakdown.
+// Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT — NO NEUTRAL orders.
+//
+// NEUTRAL: when buildSignal returns direction "neutral", we return status
+// "neutral" with no save and no Telegram — callers must treat it as "no trade".
 //
 // Tier gating: free = TP1 only, vip = TP1+TP2, vvip = TP1..TP4 + descriptions.
 // Admins (by email) bypass tier gating and always get vvip access.
@@ -152,6 +155,48 @@ export async function POST(request: Request) {
     const overlays = computeOverlays(pair, candles);
     const signal = buildSignal(pair, timeframe, candles, overlays, verified);
 
+    // ---- NEUTRAL: no valid trade ----
+    if (signal.direction === "neutral") {
+      logAnalysisEvent({
+        session,
+        pair,
+        timeframe,
+        direction: "neutral",
+        tier: userTier,
+      });
+      return NextResponse.json(
+        {
+          status: "neutral",
+          message:
+            signal.notes[signal.notes.length - 1] ||
+            "No valid trade right now.",
+          signal: {
+            direction: "neutral",
+            signalLabel: "NEUTRAL",
+            confidence: "NEUTRAL",
+            confidenceScore: 0,
+            notes: signal.notes,
+            zone: signal.zone,
+            entryCandle: signal.entryCandle,
+            currentPrice,
+            timeframe,
+            access: {
+              tier: userTier,
+              lockedTps: [],
+              descriptions: userTier === "vvip",
+              label:
+                userTier === "vvip"
+                  ? "VVIP"
+                  : userTier === "vip"
+                    ? "VIP"
+                    : "Free",
+            },
+          },
+        },
+        { status: 200 }
+      );
+    }
+
     const smcCandles: SMCCandle[] = candles.map((c) => ({
       open: c.open,
       high: c.high,
@@ -261,12 +306,12 @@ export async function POST(request: Request) {
 
     const analysisText = `${signal.signalLabel} — ${pair} (${timeframe})
 
-Zone: ${signal.zone.type.toUpperCase()} ${signal.zone.bottom.toFixed(5)} - ${signal.zone.top.toFixed(5)}
+Zone: ${signal.zone!.type.toUpperCase()} ${signal.zone!.bottom.toFixed(5)} - ${signal.zone!.top.toFixed(5)}
 Entry: ${signal.entry.toFixed(5)}
 Stop loss (2x ATR): ${signal.stopLoss.toFixed(5)}
-TP1 (1.272 Fib): ${signal.takeProfit1.toFixed(5)}
-TP2 (1.618 Fib): ${signal.takeProfit2.toFixed(5)}
-TP3 (2.0 Fib): ${signal.takeProfit3.toFixed(5)}
+TP1 (1.0R): ${signal.takeProfit1.toFixed(5)}
+TP2 (1.5R): ${signal.takeProfit2.toFixed(5)}
+TP3 (3.0R): ${signal.takeProfit3.toFixed(5)}
 
 Confidence: ${signal.confidence} (${signal.score}/100)
 Risk: ${signal.riskPips} pips
@@ -327,7 +372,6 @@ Killzone: ${smc.killzone.name}`;
       direction,
     };
 
-    // Best-effort event log — never blocks the response
     logAnalysisEvent({ session, pair, timeframe, direction, tier: userTier });
 
     return NextResponse.json(gateSignal(payload, userTier));

@@ -4,13 +4,12 @@
 // SL: entry ± 2.0 × ATR(14)
 // TPs: TP1 = 1.0 × risk, TP2 = 1.5 × risk, TP3 = 3.0 × risk
 //      (risk = |entry - stopLoss|)
-// Orders: BUY, SELL, BUY LIMIT, SELL LIMIT — NO NEUTRAL, NO STOP ORDERS.
 //
-// Behavior:
-//   - Price inside a zone + confirmation candle → MARKET (BUY/SELL) at current price
-//   - Otherwise → LIMIT at the nearest correct-side zone edge
-//   - If no zone is on the correct side, fall back to the other zone type
-//   - Limit entries are always forced to the correct side of market (buy below, sell above)
+// NEUTRAL: when there is no valid zone, or price is inside a zone without
+// confirmation, we return direction = "neutral" and signalLabel = "NEUTRAL".
+// Callers MUST treat neutral as "no trade" — do not save, do not post.
+//
+// Orders: BUY, SELL, BUY LIMIT, SELL LIMIT only.
 
 import type { Candle } from "@/lib/data/candles";
 import type { Overlays } from "@/lib/overlays";
@@ -22,10 +21,10 @@ import {
   type SupplyDemandZone,
 } from "@/lib/zone-strategy";
 
-export type SignalDirection = "long" | "short";
+export type SignalDirection = "long" | "short" | "neutral";
 export type OrderType = "market" | "limit";
-export type SignalLabel = "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT";
-export type Confidence = "HIGH" | "MEDIUM" | "LOW";
+export type SignalLabel = "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT" | "NEUTRAL";
+export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "NEUTRAL";
 
 export interface SignalZone {
   type: "supply" | "demand";
@@ -69,7 +68,7 @@ export interface TradingSignal {
   riskPips: number;
   rewardPips: [number, number, number];
   riskReward: [string, string, string];
-  zone: SignalZone;
+  zone: SignalZone | null;
   entryCandle: SignalEntryCandle;
   confluences: SignalConfluences;
   confidence: Confidence;
@@ -195,8 +194,6 @@ function checkFVGNear(overlays: Overlays, currentPrice: number, direction: "long
 }
 
 // ===== TPs — risk multiples =====
-// TP1 = 1.0 × risk, TP2 = 1.5 × risk, TP3 = 3.0 × risk
-// risk = |entry - stopLoss|
 function computeTakeProfits(
   direction: "long" | "short",
   entry: number,
@@ -240,113 +237,56 @@ export function buildSignal(
       }
     : undefined;
 
-  const baseConfluences: SignalConfluences = {
+  const zoneCandles: ZoneCandle[] = candles.map((c) => ({
+    open: c.open, high: c.high, low: c.low, close: c.close, is_green: c.is_green,
+  }));
+
+  const zones = detectZones(zoneCandles);
+  const atr = calcATR(candles, 14);
+
+  const neutralConfluences: SignalConfluences = {
     roundNumber: roundNumberNear,
     supertrendAligned: false, rsiAligned: false, smaAligned: false,
     vwapAligned: false, orderBlockNear: false, fvgNear: false,
     session: sessionInfo.name, sessionFavorable: sessionInfo.favorable,
   };
 
-  const zoneCandles: ZoneCandle[] = candles.map((c) => ({
-    open: c.open, high: c.high, low: c.low, close: c.close, is_green: c.is_green,
-  }));
-
-  const zones = detectZones(zoneCandles);
-
+  // ---- NO ZONES → NEUTRAL ----
   if (zones.length === 0) {
-    // Last-resort fallback — still emit an order, never NEUTRAL.
-    // Use current price as a market entry in the direction of recent momentum.
-    const last = candles[candles.length - 1];
-    const prev = candles[candles.length - 2] ?? last;
-    const direction: "long" | "short" = last.close >= prev.close ? "long" : "short";
-    const signalDirection = direction === "long" ? "bullish" : "bearish";
-    const entryCandle = detectEntrySignal(zoneCandles, signalDirection);
-
-    const atr = calcATR(candles, 14);
-    const slDistance = atr * 2.0;
-    const entryLevel = currentPrice;
-    const rawSL = direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
-
-    const tp = computeTakeProfits(direction, entryLevel, rawSL);
-    const riskPips = Math.round(Math.abs(entryLevel - rawSL) / pipSize);
-    const rewardPips: [number, number, number] = [
-      Math.round(Math.abs(tp.tp1 - entryLevel) / pipSize),
-      Math.round(Math.abs(tp.tp2 - entryLevel) / pipSize),
-      Math.round(Math.abs(tp.tp3 - entryLevel) / pipSize),
-    ];
-    const riskReward: [string, string, string] = [
-      riskPips > 0 ? (rewardPips[0] / riskPips).toFixed(1) : "0",
-      riskPips > 0 ? (rewardPips[1] / riskPips).toFixed(1) : "0",
-      riskPips > 0 ? (rewardPips[2] / riskPips).toFixed(1) : "0",
-    ];
-
-    const confluences: SignalConfluences = {
-      roundNumber: roundNumberNear,
-      supertrendAligned: checkSupertrendAligned(overlays, direction),
-      rsiAligned: checkRSIAligned(overlays, direction),
-      smaAligned: checkSMAAligned(overlays, direction),
-      vwapAligned: checkVWAPAligned(overlays, currentPrice, direction),
-      orderBlockNear: checkOrderBlockNear(overlays, currentPrice, direction),
-      fvgNear: checkFVGNear(overlays, currentPrice, direction),
-      session: sessionInfo.name,
-      sessionFavorable: sessionInfo.favorable,
-    };
-
-    let score = entryCandle.probability || 40;
-    if (confluences.supertrendAligned) score += 5;
-    if (confluences.rsiAligned) score += 5;
-    if (confluences.smaAligned) score += 5;
-    if (confluences.vwapAligned) score += 5;
-    if (confluences.orderBlockNear) score += 5;
-    if (confluences.fvgNear) score += 5;
-    if (confluences.roundNumber) score += 5;
-    if (confluences.sessionFavorable) score += 10;
-    score = Math.min(score, 100);
-    const confidence: Confidence = score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : "LOW";
-
-    notes.push("No supply/demand zones detected — fallback to momentum market entry.");
-    notes.push(`Current price: ${currentPrice.toFixed(5)}`);
-    notes.push(`ATR(14): ${atr.toFixed(5)} | SL distance: ${slDistance.toFixed(5)}`);
-    notes.push(`TPs: 1.0× / 1.5× / 3.0× risk`);
-
+    notes.push("No supply/demand zones detected.");
+    notes.push("Neutral — no trade. No signal saved.");
+    notes.push(`Current price: ${currentPrice.toFixed(5)} | ATR(14): ${atr.toFixed(5)}`);
     return {
       pair, timeframe, timestamp,
-      direction,
+      direction: "neutral",
       orderType: "market",
-      signalLabel: direction === "long" ? "BUY" : "SELL",
-      entry: entryLevel,
-      stopLoss: rawSL,
-      takeProfit1: tp.tp1,
-      takeProfit2: tp.tp2,
-      takeProfit3: tp.tp3,
-      riskPips, rewardPips, riskReward,
-      zone: {
-        type: direction === "long" ? "demand" : "supply",
-        top: entryLevel + atr,
-        bottom: entryLevel - atr,
-        strength: 0,
-        distanceToPrice: 0,
-      },
+      signalLabel: "NEUTRAL",
+      entry: currentPrice,
+      stopLoss: currentPrice,
+      takeProfit1: currentPrice,
+      takeProfit2: currentPrice,
+      takeProfit3: currentPrice,
+      riskPips: 0,
+      rewardPips: [0, 0, 0],
+      riskReward: ["0", "0", "0"],
+      zone: null,
       entryCandle: {
-        type: entryCandle.type === "large_range_candle" ? "large_range" : entryCandle.type,
-        direction: entryCandle.direction,
-        probability: entryCandle.probability,
-        reason: entryCandle.reason,
+        type: "none",
+        direction: "bullish",
+        probability: 0,
+        reason: "No zone on chart — no setup.",
       },
-      confluences, confidence, score, notes,
+      confluences: neutralConfluences,
+      confidence: "NEUTRAL",
+      score: 0,
+      notes,
       priceVerification,
     };
   }
 
-  const atr = calcATR(candles, 14);
   const slDistance = atr * 2.0;
 
   // ===== ZONE SELECTION =====
-  // 1) Price inside a zone → that zone wins (market or limit depending on confirmation)
-  // 2) Otherwise pick the nearest CORRECT-SIDE zone:
-  //      demand must be BELOW price (buy limit below market)
-  //      supply must be ABOVE price (sell limit above market)
-  // 3) If no correct-side zone exists, fall back to the nearest zone regardless of side
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
 
   const insideZone = sortedZones.find(
@@ -369,23 +309,61 @@ export function buildSignal(
 
   const priceInsideZone = currentPrice >= activeZone.bottom && currentPrice <= activeZone.top;
 
+  // ---- INSIDE ZONE WITHOUT CONFIRMATION → NEUTRAL ----
+  if (priceInsideZone && entryCandle.type === "none") {
+    notes.push(
+      `Price is inside ${activeZone.type} zone ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}.`
+    );
+    notes.push("No confirmation candle (LRC / Engulfing / Pin Bar).");
+    notes.push("Neutral — waiting for confirmation. No signal saved.");
+    return {
+      pair, timeframe, timestamp,
+      direction: "neutral",
+      orderType: "market",
+      signalLabel: "NEUTRAL",
+      entry: currentPrice,
+      stopLoss: currentPrice,
+      takeProfit1: currentPrice,
+      takeProfit2: currentPrice,
+      takeProfit3: currentPrice,
+      riskPips: 0,
+      rewardPips: [0, 0, 0],
+      riskReward: ["0", "0", "0"],
+      zone: {
+        type: activeZone.type,
+        top: activeZone.top,
+        bottom: activeZone.bottom,
+        strength: 0,
+        distanceToPrice: activeZone.distanceToPrice,
+      },
+      entryCandle: {
+        type: "none",
+        direction: entryCandle.direction,
+        probability: entryCandle.probability,
+        reason: entryCandle.reason,
+      },
+      confluences: neutralConfluences,
+      confidence: "NEUTRAL",
+      score: 0,
+      notes,
+      priceVerification,
+    };
+  }
+
   // ===== ORDER TYPE =====
   let orderType: OrderType;
   let signalLabel: SignalLabel;
   let entryLevel: number;
 
   if (priceInsideZone && entryCandle.type !== "none") {
-    // Price at zone + confirmation → MARKET at current price
     orderType = "market";
     signalLabel = direction === "long" ? "BUY" : "SELL";
     entryLevel = currentPrice;
   } else {
-    // → LIMIT at the zone edge on the CORRECT side of market
     orderType = "limit";
     signalLabel = direction === "long" ? "BUY LIMIT" : "SELL LIMIT";
 
     if (direction === "long") {
-      // BUY LIMIT must be BELOW current price
       if (activeZone.top < currentPrice) {
         entryLevel = activeZone.top;
       } else if (activeZone.bottom < currentPrice) {
@@ -394,7 +372,6 @@ export function buildSignal(
         entryLevel = currentPrice - Math.max(slDistance, (activeZone.bottom - currentPrice) + slDistance);
       }
     } else {
-      // SELL LIMIT must be ABOVE current price
       if (activeZone.bottom > currentPrice) {
         entryLevel = activeZone.bottom;
       } else if (activeZone.top > currentPrice) {
@@ -404,7 +381,6 @@ export function buildSignal(
       }
     }
 
-    // Hard guard: never emit an inverted limit
     if (direction === "long" && entryLevel >= currentPrice) {
       entryLevel = currentPrice - slDistance;
     }
@@ -416,7 +392,7 @@ export function buildSignal(
   // ===== SL =====
   const rawSL = direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
 
-  // ===== TPs — risk multiples =====
+  // ===== TPs =====
   const tp = computeTakeProfits(direction, entryLevel, rawSL);
 
   const riskPips = Math.round(Math.abs(entryLevel - rawSL) / pipSize);

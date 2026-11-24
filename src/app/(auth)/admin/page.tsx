@@ -148,7 +148,9 @@ export default function AdminPage() {
   const [autoTimeframe, setAutoTimeframe] = useState("1H");
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoResult, setAutoResult] = useState<any>(null);
-  const [autoStatus, setAutoStatus] = useState<"signal" | "watching" | "no_setup" | null>(null);
+  const [autoStatus, setAutoStatus] = useState<
+    "signal" | "watching" | "no_setup" | "neutral" | null
+  >(null);
   const [autoError, setAutoError] = useState("");
   const [loadingSignals, setLoadingSignals] = useState(false);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
@@ -165,7 +167,7 @@ export default function AdminPage() {
   const [loadingActivity, setLoadingActivity] = useState(false);
   const [activityError, setActivityError] = useState("");
 
-  /* ---- Broker state (unchanged) ---- */
+  /* ---- Broker state ---- */
   const [broker, setBroker] = useState<any>(null);
   const [brokerExecutions, setBrokerExecutions] = useState<any[]>([]);
   const [executorConfigured, setExecutorConfigured] = useState(false);
@@ -250,7 +252,6 @@ export default function AdminPage() {
     }
   }, [isAdmin, isLocked]);
 
-  // Auto-refresh activity when that tab is open
   useEffect(() => {
     if (activeTab === "activity" && !isLocked) {
       loadActivity();
@@ -516,6 +517,13 @@ export default function AdminPage() {
 
       if (!response.ok) {
         setAutoError(data.message || data.error || "Analysis failed");
+        return;
+      }
+
+      // Handle NEUTRAL explicitly — no trade, no save, no Telegram.
+      if (data.status === "neutral") {
+        setAutoStatus("neutral");
+        setAutoResult(data.signal);
         return;
       }
 
@@ -840,7 +848,7 @@ export default function AdminPage() {
         })}
       </div>
 
-      {/* ======= AUTO (unchanged) ======= */}
+      {/* ======= AUTO ======= */}
       {activeTab === "auto" && (
         <div className={PANEL}>
           <div className="mb-1 flex items-center gap-2">
@@ -848,7 +856,7 @@ export default function AdminPage() {
             <h2 className="text-base font-bold tracking-tight">Supply/Demand zone strategy</h2>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">
-            Waits for price to reach a zone. Confirms with Large Range Candle (70%), Engulfing (55%), or Pin Bar (45%). SL beyond zone edge. TPs at 2.0 / 3.5 / 6.0 R:R.
+            Waits for price to reach a zone. Confirms with Large Range Candle (70%), Engulfing (55%), or Pin Bar (45%). SL beyond zone edge. TPs at 1.0R / 1.5R / 3.0R.
           </p>
 
           <div className="mb-5">
@@ -890,6 +898,28 @@ export default function AdminPage() {
             </div>
           )}
 
+          {/* NEUTRAL STATE — no valid trade */}
+          {autoStatus === "neutral" && (
+            <div className="mt-5 rounded-xl border border-border bg-muted/40 p-4 text-sm">
+              <p className="mb-2 flex items-center gap-2 text-sm font-bold text-muted-foreground">
+                <CirclePause className="h-4 w-4" />
+                No valid trade — {autoPair} ({autoTimeframe})
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {autoResult?.notes?.[autoResult.notes.length - 1] ||
+                  "Waiting for a valid setup. No signal saved, no Telegram post."}
+              </p>
+              {autoResult?.zone && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Zone being watched: {String(autoResult.zone.type).toUpperCase()}{" "}
+                  {Number(autoResult.zone.bottom).toFixed(5)} —{" "}
+                  {Number(autoResult.zone.top).toFixed(5)}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* SIGNAL STATE */}
           {autoStatus === "signal" && autoResult && autoResult.direction !== "neutral" && (
             <div className="mt-5 rounded-xl border border-primary/30 bg-accent/60 p-4 text-sm">
               <p className="mb-3 flex items-center gap-2 text-sm font-bold text-primary">
@@ -955,7 +985,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ======= SIGNALS (unchanged) ======= */}
+      {/* ======= SIGNALS ======= */}
       {activeTab === "signals" && (
         <div className="space-y-4">
           <button onClick={() => setShowAddSignal(true)} className={BTN_PRIMARY}>
@@ -1043,7 +1073,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ======= USERS (adds BAN) ======= */}
+      {/* ======= USERS ======= */}
       {activeTab === "users" && (
         <div className="space-y-4">
           <button onClick={() => setShowAddUser(true)} className={BTN_PRIMARY}>
@@ -1115,7 +1145,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ======= ANALYTICS (unchanged) ======= */}
+      {/* ======= ANALYTICS ======= */}
       {activeTab === "analytics" && (
         <div className="space-y-6">
           {loadingAnalytics && (
@@ -1196,7 +1226,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ======= ACTIVITY (new) ======= */}
+      {/* ======= ACTIVITY ======= */}
       {activeTab === "activity" && (
         <div className="space-y-4">
           <div className={PANEL}>
@@ -1359,7 +1389,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* ======= BROKER (adds manual trade form) ======= */}
+      {/* ======= BROKER ======= */}
       {activeTab === "broker" && (
         <div className="space-y-4">
           {/* ---- Manual trade ---- */}

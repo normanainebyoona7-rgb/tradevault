@@ -90,13 +90,7 @@ export async function POST(request: Request) {
       session: sessionName,
     } = body;
 
-    if (!pair || !direction || !entry || !stopLoss || !takeProfit1) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 },
-      );
-    }
-
+    // ---- NEUTRAL: return BEFORE required-fields check ----
     if (direction === "neutral") {
       console.log(`[Signal] Skipping NEUTRAL signal for ${pair} — no trade`);
       return NextResponse.json(
@@ -106,6 +100,13 @@ export async function POST(request: Request) {
           reason: "AI has no clear direction for this setup",
         },
         { status: 200 }
+      );
+    }
+
+    if (!pair || !direction || !entry || !stopLoss || !takeProfit1) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 },
       );
     }
 
