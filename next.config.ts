@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["dukascopy-node"],
-  // ... your other existing config options stay here
+  turbopack: { root: process.cwd() },
 };
 
 export default nextConfig;

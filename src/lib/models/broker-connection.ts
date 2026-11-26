@@ -12,8 +12,18 @@ export interface IBrokerConnection extends Document {
   riskPercent: number;
   maxLot: number;
   maxDailyLossUsd: number;
+  maxFloatingLossUsd: number;
+  maxOpenPositions: number;
+  maxTradesPerDay: number;
+  maxSpreadPips: number;
   tpLevel: number;
   symbolSuffix: string;
+  configVersion: number;
+  lastExecutorId: string;
+  lastLiveEnabledAt: Date | null;
+  lastLiveEnabledBy: string;
+  lastBalance: number | null;
+  lastEquity: number | null;
   lastHeartbeatAt: Date | null;
   lastError: string;
   createdAt: Date;
@@ -33,8 +43,18 @@ const BrokerConnectionSchema = new Schema<IBrokerConnection>(
     riskPercent: { type: Number, default: 1, min: 0.1, max: 10 },
     maxLot: { type: Number, default: 0.1, min: 0.01, max: 50 },
     maxDailyLossUsd: { type: Number, default: 50, min: 0 },
+    maxFloatingLossUsd: { type: Number, default: 100, min: 0 },
+    maxOpenPositions: { type: Number, default: 5, min: 1, max: 100 },
+    maxTradesPerDay: { type: Number, default: 10, min: 1, max: 100 },
+    maxSpreadPips: { type: Number, default: 2, min: 0.1, max: 100 },
     tpLevel: { type: Number, enum: [1, 2, 3], default: 1 },
     symbolSuffix: { type: String, default: "" },
+    configVersion: { type: Number, default: 1, min: 1 },
+    lastExecutorId: { type: String, default: "" },
+    lastLiveEnabledAt: { type: Date, default: null },
+    lastLiveEnabledBy: { type: String, default: "" },
+    lastBalance: { type: Number, default: null },
+    lastEquity: { type: Number, default: null },
     lastHeartbeatAt: { type: Date, default: null },
     lastError: { type: String, default: "" },
   },

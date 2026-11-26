@@ -2,15 +2,20 @@ import mongoose, { Schema, Document, models } from "mongoose";
 
 export interface IExecutionLog extends Document {
   connectionId: string;
+  executionId?: string;
+  executorId?: string;
   signalId: string;
   pair: string;
   direction: string;
+  orderType?: string;
   lots: number;
   entry: number;
   stopLoss: number;
   takeProfit: number;
   ticket: number | null;
-  status: "paper" | "placed" | "skipped" | "error";
+  dealTicket: number | null;
+  retcode: number | null;
+  status: "paper" | "placed" | "partial" | "skipped" | "error" | "unknown";
   mode: "paper" | "live";
   message: string;
   createdAt: Date;
@@ -19,17 +24,22 @@ export interface IExecutionLog extends Document {
 const ExecutionLogSchema = new Schema<IExecutionLog>(
   {
     connectionId: { type: String, required: true, index: true },
+    executionId: { type: String, unique: true, sparse: true, index: true },
+    executorId: { type: String, default: "" },
     signalId: { type: String, required: true, index: true },
     pair: { type: String, required: true },
     direction: { type: String, default: "" },
+    orderType: { type: String, default: "" },
     lots: { type: Number, default: 0 },
     entry: { type: Number, default: 0 },
     stopLoss: { type: Number, default: 0 },
     takeProfit: { type: Number, default: 0 },
     ticket: { type: Number, default: null },
+    dealTicket: { type: Number, default: null },
+    retcode: { type: Number, default: null },
     status: {
       type: String,
-      enum: ["paper", "placed", "skipped", "error"],
+      enum: ["paper", "placed", "partial", "skipped", "error", "unknown"],
       required: true,
     },
     mode: { type: String, enum: ["paper", "live"], required: true },

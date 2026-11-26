@@ -26,10 +26,14 @@ export interface ISignal extends Document {
   confidence?: string;
   score?: number;
   session?: string;
+  timeframe?: string;
   // Provenance / audit
   source?: string; // "ai-analyze" | "admin-manual" | "telegram" | ...
   createdBy?: string; // admin email for manual trades
   notes?: string;
+  dedupeKey?: string;
+  executionStatus?: string;
+  executionOrderId?: string;
 }
 
 const SignalSchema = new Schema<ISignal>(
@@ -64,10 +68,14 @@ const SignalSchema = new Schema<ISignal>(
     confidence: { type: String, default: "" },
     score: { type: Number, default: 0 },
     session: { type: String, default: "" },
+    timeframe: { type: String, default: "" },
     // Provenance / audit
     source: { type: String, default: "ai-analyze" },
     createdBy: { type: String, default: "" },
     notes: { type: String, default: "" },
+    dedupeKey: { type: String, unique: true, sparse: true },
+    executionStatus: { type: String, default: "" },
+    executionOrderId: { type: String, default: "" },
   },
   { timestamps: true }
 );

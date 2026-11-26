@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
+import { isAdminEmail } from "@/lib/admin";
 import { dbConnect } from "@/lib/db/mongodb";
 import User from "@/lib/models/user";
 
@@ -23,6 +24,7 @@ export async function GET() {
         name: session.name || (user as any)?.name || "",
         email: session.email || (user as any)?.email || "",
         tier: (user as any)?.tier || "free",
+        isAdmin: isAdminEmail(session.email || (user as any)?.email),
       },
     });
   } catch (error) {

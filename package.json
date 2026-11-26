@@ -21,6 +21,7 @@
     "@radix-ui/react-separator": "^1.1.1",
     "@radix-ui/react-tabs": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.6",
+    "@tickerall/sdk": "^0.15.0",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "candlestick-convert": "^7.0.0",

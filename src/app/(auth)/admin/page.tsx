@@ -39,7 +39,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-const ADMIN_EMAIL = "normanainebyoona7@gmail.com";
 const ADMIN_PASSWORD = "norman2026";
 const TIMEFRAMES = ["5m", "15m", "30m", "1H", "4H", "1D"];
 const PAIRS = [
@@ -171,6 +170,9 @@ export default function AdminPage() {
   const [broker, setBroker] = useState<any>(null);
   const [brokerExecutions, setBrokerExecutions] = useState<any[]>([]);
   const [executorConfigured, setExecutorConfigured] = useState(false);
+  const [encryptionConfigured, setEncryptionConfigured] = useState(false);
+  const [brokerStats, setBrokerStats] = useState({ pendingCount: 0, attentionCount: 0, paperTrades: 0 });
+  const [confirmLive, setConfirmLive] = useState(false);
   const [brokerSaving, setBrokerSaving] = useState(false);
   const [brokerError, setBrokerError] = useState("");
   const [brokerNotice, setBrokerNotice] = useState("");
@@ -183,6 +185,10 @@ export default function AdminPage() {
     riskPercent: "1",
     maxLot: "0.1",
     maxDailyLossUsd: "50",
+    maxFloatingLossUsd: "100",
+    maxOpenPositions: "5",
+    maxTradesPerDay: "10",
+    maxSpreadPips: "2",
     tpLevel: "1",
     symbolSuffix: "",
   });
@@ -232,7 +238,7 @@ export default function AdminPage() {
       try {
         const response = await fetch("/api/session");
         const data = await response.json();
-        if (data.user && data.user.email === ADMIN_EMAIL) setIsAdmin(true);
+        if (data.user?.isAdmin) setIsAdmin(true);
       } catch (error) {
         console.error("Admin check failed:", error);
       } finally {
@@ -256,6 +262,14 @@ export default function AdminPage() {
     if (activeTab === "activity" && !isLocked) {
       loadActivity();
       const t = setInterval(loadActivity, 30000);
+      return () => clearInterval(t);
+    }
+  }, [activeTab, isLocked]);
+
+  useEffect(() => {
+    if (activeTab === "broker" && !isLocked) {
+      loadBroker();
+      const t = setInterval(loadBroker, 5000);
       return () => clearInterval(t);
     }
   }, [activeTab, isLocked]);
@@ -357,6 +371,12 @@ export default function AdminPage() {
       const data = await response.json();
       if (!response.ok) return;
       setExecutorConfigured(!!data.executorConfigured);
+      setEncryptionConfigured(!!data.encryptionConfigured);
+      setBrokerStats({
+        pendingCount: Number(data.pendingCount ?? 0),
+        attentionCount: Number(data.attentionCount ?? 0),
+        paperTrades: Number(data.paperTrades ?? 0),
+      });
       setBrokerExecutions(data.executions ?? []);
       const conn = data.connection;
       setBroker(conn);
@@ -370,6 +390,10 @@ export default function AdminPage() {
           riskPercent: String(conn.riskPercent ?? 1),
           maxLot: String(conn.maxLot ?? 0.1),
           maxDailyLossUsd: String(conn.maxDailyLossUsd ?? 50),
+          maxFloatingLossUsd: String(conn.maxFloatingLossUsd ?? 100),
+          maxOpenPositions: String(conn.maxOpenPositions ?? 5),
+          maxTradesPerDay: String(conn.maxTradesPerDay ?? 10),
+          maxSpreadPips: String(conn.maxSpreadPips ?? 2),
           tpLevel: String(conn.tpLevel ?? 1),
           symbolSuffix: conn.symbolSuffix ?? "",
         });
@@ -396,8 +420,13 @@ export default function AdminPage() {
           riskPercent: Number(brokerForm.riskPercent),
           maxLot: Number(brokerForm.maxLot),
           maxDailyLossUsd: Number(brokerForm.maxDailyLossUsd),
+          maxFloatingLossUsd: Number(brokerForm.maxFloatingLossUsd),
+          maxOpenPositions: Number(brokerForm.maxOpenPositions),
+          maxTradesPerDay: Number(brokerForm.maxTradesPerDay),
+          maxSpreadPips: Number(brokerForm.maxSpreadPips),
           tpLevel: Number(brokerForm.tpLevel),
           symbolSuffix: brokerForm.symbolSuffix,
+          confirmLive,
         }),
       });
       const data = await response.json();
@@ -407,7 +436,14 @@ export default function AdminPage() {
       }
       setBroker(data.connection);
       setBrokerForm((prev) => ({ ...prev, password: "" }));
-      setBrokerNotice("Connection saved.");
+      setConfirmLive(false);
+      setBrokerNotice(
+        data.connection?.enabled
+          ? data.connection.mode === "live"
+            ? "Live executor enabled. Real orders are armed."
+            : "Paper executor enabled. No real orders will be sent."
+          : "Connection saved. Executor remains disabled."
+      );
     } catch (error: any) {
       setBrokerError(error?.message || "Failed to save broker connection");
     } finally {
@@ -435,10 +471,15 @@ export default function AdminPage() {
         riskPercent: "1",
         maxLot: "0.1",
         maxDailyLossUsd: "50",
+        maxFloatingLossUsd: "100",
+        maxOpenPositions: "5",
+        maxTradesPerDay: "10",
+        maxSpreadPips: "2",
         tpLevel: "1",
         symbolSuffix: "",
       });
-      setBrokerNotice("Broker disconnected.");
+      setConfirmLive(false);
+      setBrokerNotice("Broker disconnected. Pending trades were cancelled.");
     } catch {
       setBrokerError("Failed to disconnect broker");
     }
@@ -471,14 +512,23 @@ export default function AdminPage() {
         setManualError(msg);
         return;
       }
-      setManualNotice("Queued. Executor will place it on its next poll.");
+      setManualNotice(
+        data.duplicate
+          ? "Duplicate signal detected; the existing execution was kept."
+          : "Trade queued. The executor checks the queue every ~2 seconds."
+      );
       loadSignals();
+      loadBroker();
     } catch (error: any) {
       setManualError(error?.message || "Failed");
     } finally {
       setManualSaving(false);
     }
   };
+
+  const executorOnline =
+    !!broker?.lastHeartbeatAt &&
+    Date.now() - new Date(broker.lastHeartbeatAt).getTime() < 15000;
 
   const heartbeatAgo = broker?.lastHeartbeatAt
     ? (() => {
@@ -510,7 +560,7 @@ export default function AdminPage() {
       const response = await fetch("/api/analyze-chart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pair: autoPair, timeframe: autoTimeframe }),
+        body: JSON.stringify({ pair: autoPair, timeframe: autoTimeframe, autoExecute: true }),
       });
 
       const data = await response.json();
@@ -528,40 +578,14 @@ export default function AdminPage() {
       }
 
       setAutoStatus(data.status);
-      setAutoResult(data.signal);
-
-      if (data.status === "signal" && data.signal?.direction !== "neutral") {
-        const signalToSave = {
-          pair: autoPair,
-          direction: data.signal.direction,
-          entry: String(data.signal.entryPrice ?? ""),
-          stopLoss: String(data.signal.stopLossPrice ?? ""),
-          takeProfit1: String(data.signal.takeProfit1Price ?? ""),
-          takeProfit2: String(data.signal.takeProfit2Price ?? ""),
-          takeProfit3: String(data.signal.takeProfit3Price ?? ""),
-          isAutoGenerated: true,
-          orderType: data.signal.orderType || "MARKET",
-          orderTypeDescription: data.signal.orderTypeDescription || "",
-          signalLabel:
-            data.signal.orderType === "MARKET_BUY" ? "BUY"
-            : data.signal.orderType === "MARKET_SELL" ? "SELL"
-            : data.signal.orderType === "BUY_LIMIT" ? "BUY LIMIT"
-            : data.signal.orderType === "SELL_LIMIT" ? "SELL LIMIT"
-            : (data.signal.direction || "").toUpperCase(),
-          zone: data.signal.zone || null,
-          confidence: data.signal.confidence || "",
-          score: data.signal.confidenceScore ?? data.signal.score ?? 0,
-          session: data.signal.session || data.signal.confluenceBreakdown?.session || "",
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        };
-
-        const saveResponse = await fetch("/api/signals", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(signalToSave),
-        });
-        const saveData = await saveResponse.json();
-        if (!saveData.skipped) loadSignals();
+      setAutoResult({
+        ...data.signal,
+        executionId: data.executionId,
+        duplicate: data.duplicate,
+      });
+      if (data.executionId) {
+        loadSignals();
+        loadBroker();
       }
     } catch (error: any) {
       setAutoError(error?.message || "Analysis failed");
@@ -856,7 +880,7 @@ export default function AdminPage() {
             <h2 className="text-base font-bold tracking-tight">Supply/Demand zone strategy</h2>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">
-            Waits for price to reach a zone. Confirms with Large Range Candle (70%), Engulfing (55%), or Pin Bar (45%). SL beyond zone edge. TPs at 1.0R / 1.5R / 3.0R.
+            Analyzes the live chart, saves valid setups, and queues them for the MT5 executor immediately. Real orders are sent only when the Broker tab is explicitly armed in live mode.
           </p>
 
           <div className="mb-5">
@@ -889,7 +913,7 @@ export default function AdminPage() {
 
           <button onClick={handleZoneAnalysis} disabled={autoLoading} className={`${BTN_PRIMARY} w-full`}>
             {autoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Target className="h-4 w-4" />}
-            {autoLoading ? "Analyzing..." : "Analyze zones"}
+            {autoLoading ? "Analyzing and queueing..." : "Analyze and auto-trade"}
           </button>
 
           {autoError && (
@@ -978,7 +1002,11 @@ export default function AdminPage() {
 
               <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-700 dark:text-emerald-400">
                 <Check className="h-3.5 w-3.5" />
-                Signal saved. Telegram posting handled by /api/signals.
+                {autoResult?.executionId
+                  ? autoResult.duplicate
+                    ? "Duplicate analysis ignored. The existing execution was kept."
+                    : "Signal saved and queued for MT5. Check Broker → Recent executions for the result."
+                  : "Signal analyzed, but no execution was queued."}
               </div>
             </div>
           )}
@@ -1399,9 +1427,9 @@ export default function AdminPage() {
               <h2 className="text-base font-bold tracking-tight">Manual trade</h2>
             </div>
             <p className="mb-4 text-xs text-muted-foreground">
-              Creates a signal the executor picks up on its next poll (~20s).
-              Risk-based lot sizing and daily loss caps apply as configured
-              below.
+              Queues a validated trade for the executor. Claims are atomic and
+              every live order passes spread, margin, stop-level, exposure, and
+              loss-limit checks before submission.
             </p>
 
             {manualError && (
@@ -1526,9 +1554,14 @@ export default function AdminPage() {
                 </h2>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className={broker ? BADGE_POSITIVE : BADGE_NEUTRAL}>
-                  {broker ? "CONNECTED" : "NOT CONNECTED"}
+                <span className={BADGE_NEUTRAL}>
+                  {broker ? "CONFIGURED" : "NOT CONFIGURED"}
                 </span>
+                {broker && (
+                  <span className={executorOnline ? BADGE_POSITIVE : BADGE_NEUTRAL}>
+                    {executorOnline ? "EXECUTOR ONLINE" : "EXECUTOR OFFLINE"}
+                  </span>
+                )}
                 {broker && (
                   <span className={broker.enabled ? BADGE_POSITIVE : BADGE_NEUTRAL}>
                     {broker.enabled ? "ENABLED" : "DISABLED"}
@@ -1542,9 +1575,10 @@ export default function AdminPage() {
               </div>
             </div>
             <p className="mb-4 text-xs text-muted-foreground">
-              The executor runs on a Windows VPS with the MT5 terminal, polls
-              approved signals, and places trades with risk-based lot sizing.
-              Paper mode logs every trade without sending an order.
+              The Windows MT5 bridge claims queued signals every ~2 seconds.
+              Live mode sends real Exness orders only after fresh-tick, spread,
+              margin, stop-level, exposure, and loss-limit checks pass. Paper
+              mode records simulated fills without contacting MT5.
             </p>
 
             {!executorConfigured && (
@@ -1554,6 +1588,24 @@ export default function AdminPage() {
                 authenticate.
               </div>
             )}
+            {!encryptionConfigured && (
+              <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                BROKER_ENCRYPTION_KEY is not set. Paper mode works, but live
+                mode stays blocked until a dedicated encryption key is configured.
+              </div>
+            )}
+            <div className="mb-4 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl border border-border bg-muted/50 px-3 py-2">
+                <span className="text-muted-foreground">Queued / claimed</span>
+                <strong className="ml-2 tabular-nums">{brokerStats.pendingCount}</strong>
+              </div>
+              <div className="rounded-xl border border-border bg-muted/50 px-3 py-2">
+                <span className="text-muted-foreground">Needs attention</span>
+                <strong className={`ml-2 tabular-nums ${brokerStats.attentionCount ? "text-rose-600 dark:text-rose-400" : ""}`}>
+                  {brokerStats.attentionCount}
+                </strong>
+              </div>
+            </div>
             {broker?.lastError && (
               <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-700 dark:text-rose-400">
                 Executor error: {broker.lastError}
@@ -1662,14 +1714,63 @@ export default function AdminPage() {
                 />
               </div>
               <div>
-                <label className={LABEL}>Max daily loss (USD)</label>
+                <label className={LABEL}>Max daily realized loss (USD)</label>
                 <input
                   className={INPUT}
                   type="number"
-                  min={0}
-                  step={1}
+                  min={0.01}
+                  max={100000}
+                  step={0.01}
                   value={brokerForm.maxDailyLossUsd}
                   onChange={(e) => setBrokerForm({ ...brokerForm, maxDailyLossUsd: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Max floating loss (USD)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={0.01}
+                  max={100000}
+                  step={0.01}
+                  value={brokerForm.maxFloatingLossUsd}
+                  onChange={(e) => setBrokerForm({ ...brokerForm, maxFloatingLossUsd: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Max open positions</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={brokerForm.maxOpenPositions}
+                  onChange={(e) => setBrokerForm({ ...brokerForm, maxOpenPositions: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Max bot trades per day</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={brokerForm.maxTradesPerDay}
+                  onChange={(e) => setBrokerForm({ ...brokerForm, maxTradesPerDay: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Max spread (pips)</label>
+                <input
+                  className={INPUT}
+                  type="number"
+                  min={0.1}
+                  max={100}
+                  step={0.1}
+                  value={brokerForm.maxSpreadPips}
+                  onChange={(e) => setBrokerForm({ ...brokerForm, maxSpreadPips: e.target.value })}
                 />
               </div>
               <div className="flex items-end">
@@ -1686,14 +1787,30 @@ export default function AdminPage() {
             </div>
 
             {brokerForm.enabled && brokerForm.mode === "live" && (
-              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-700 dark:text-rose-400">
-                Live mode will place real orders on this Exness account using
-                the signals in the Signals tab. Start in paper mode first.
+              <div className="mt-4 space-y-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-3 text-xs font-semibold text-rose-700 dark:text-rose-400">
+                <p>
+                  Live mode places real orders on this Exness account. Validate
+                  paper execution and the Windows bridge first ({brokerStats.paperTrades} paper
+                  trades completed). Unknown order outcomes are never retried automatically.
+                </p>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={confirmLive}
+                    onChange={(e) => setConfirmLive(e.target.checked)}
+                    className="h-4 w-4 accent-rose-600"
+                  />
+                  I understand this can place real-money trades automatically.
+                </label>
               </div>
             )}
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button onClick={saveBroker} disabled={brokerSaving} className={BTN_PRIMARY}>
+              <button
+                onClick={saveBroker}
+                disabled={brokerSaving || (brokerForm.enabled && brokerForm.mode === "live" && !confirmLive)}
+                className={BTN_PRIMARY}
+              >
                 {brokerSaving ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
@@ -1709,7 +1826,9 @@ export default function AdminPage() {
               )}
               {broker && (
                 <span className="text-xs text-muted-foreground">
-                  Executor heartbeat: {heartbeatAgo}
+                  Heartbeat: {heartbeatAgo}
+                  {broker.lastBalance != null ? ` · Balance $${Number(broker.lastBalance).toFixed(2)}` : ""}
+                  {broker.lastEquity != null ? ` · Equity $${Number(broker.lastEquity).toFixed(2)}` : ""}
                 </span>
               )}
             </div>
@@ -1757,9 +1876,11 @@ export default function AdminPage() {
                             className={
                               execution.status === "placed"
                                 ? BADGE_POSITIVE
-                                : execution.status === "error"
+                                : execution.status === "error" || execution.status === "unknown"
                                   ? BADGE_NEGATIVE
-                                  : BADGE_NEUTRAL
+                                  : execution.status === "partial"
+                                    ? BADGE_POSITIVE
+                                    : BADGE_NEUTRAL
                             }
                           >
                             {execution.status}
