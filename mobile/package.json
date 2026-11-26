@@ -1,0 +1,23 @@
+{
+  "name": "tradevault-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "assets": "node scripts/prepare-assets.mjs && capacitor-assets generate --android",
+    "sync": "capacitor sync android",
+    "build:apk": "bash ./build-apk.sh",
+    "open:android": "capacitor open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "4.0.0",
+    "@capacitor/cli": "8.6.2",
+    "sharp": "0.35.5"
+  }
+}
