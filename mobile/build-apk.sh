@@ -12,7 +12,7 @@ else
   export JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$java_path")")")"
 fi
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
-export TRADEVAULT_APP_URL="${TRADEVAULT_APP_URL:-https://tradevault-tradevault.vercel.app}"
+export VITE_TRADEVAULT_API_ORIGIN="${VITE_TRADEVAULT_API_ORIGIN:-https://tradevault-tradevault.vercel.app}"
 
 java_output="$("$JAVA_HOME/bin/java" -version 2>&1)"
 if [[ "$java_output" != *'version "21.'* ]]; then
@@ -36,6 +36,9 @@ else
   npm ci
 fi
 
+npm run typecheck
+npm run web:build
+npm run assets
 npx capacitor sync android
 
 (cd android && bash ./gradlew --no-daemon assembleDebug)

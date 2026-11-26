@@ -1,16 +1,18 @@
 import sharp from "sharp";
-import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = new URL("../../", import.meta.url);
 const assetsDir = new URL("../assets/", import.meta.url);
-const logoSource = new URL("public/logo.png", projectRoot);
+const webDir = new URL("../www/", import.meta.url);
+const logoSource = new URL("public/brand-mark.svg", projectRoot);
 
 await mkdir(assetsDir, { recursive: true });
-await mkdir(new URL("../www/", import.meta.url), { recursive: true });
-await copyFile(logoSource, new URL("logo.png", new URL("../www/", import.meta.url)));
+await mkdir(webDir, { recursive: true });
+await copyFile(logoSource, new URL("brand-mark.svg", webDir));
+await rm(new URL("logo.png", webDir), { force: true });
 
-const icon = await sharp(await readFile(logoSource))
+const icon = await sharp(await readFile(logoSource), { density: 1152 })
   .resize(1024, 1024, {
     fit: "contain",
     background: { r: 7, g: 17, b: 31, alpha: 1 },
@@ -28,14 +30,9 @@ const splash = Buffer.from(`
         <stop offset="0%" stop-color="#14532d" />
         <stop offset="100%" stop-color="#07111f" />
       </radialGradient>
-      <radialGradient id="blue" cx="90%" cy="92%" r="62%">
-        <stop offset="0%" stop-color="#172554" />
-        <stop offset="100%" stop-color="#07111f" />
-      </radialGradient>
     </defs>
     <rect width="2732" height="2732" fill="#07111f" />
     <rect width="2732" height="2732" fill="url(#green)" />
-    <rect width="2732" height="2732" fill="url(#blue)" />
     <image href="${logoData}" x="716" y="716" width="1300" height="1300" />
   </svg>
 `);

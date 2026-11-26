@@ -34,6 +34,9 @@ public class MainActivity extends BridgeActivity {
         );
         parent.addView(swipeRefreshLayout, index, layoutParams);
 
+        swipeRefreshLayout.setOnChildScrollUpCallback((parentView, childView) ->
+            childView instanceof WebView && ((WebView) childView).getScrollY() > 0
+        );
         swipeRefreshLayout.setOnRefreshListener(() -> {
             webView.reload();
             webView.postDelayed(() -> swipeRefreshLayout.setRefreshing(false), 1500);

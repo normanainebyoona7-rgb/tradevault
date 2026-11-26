@@ -2,14 +2,8 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.tradevault.app",
-  appName: "TradeVault",
+  appName: "TradeVault AI",
   webDir: "www",
-  server: {
-    url: process.env.TRADEVAULT_APP_URL || "https://tradevault-tradevault.vercel.app",
-    cleartext: false,
-    allowNavigation: ["*.vercel.app", "vercel.com"],
-    errorPath: "offline.html",
-  },
   android: {
     backgroundColor: "#07111f",
     allowMixedContent: false,
