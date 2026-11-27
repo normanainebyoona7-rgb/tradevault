@@ -1,18 +1,11 @@
 // src/lib/signal.ts
 // Signal orchestrator — ATR-based SL, risk-multiple TPs, limit/market orders only.
 //
-// SL: entry ± 2.0 × ATR(14)
-// TPs: TP1 = 1.0 × risk, TP2 = 1.5 × risk, TP3 = 3.0 × risk
-//      (risk = |entry - stopLoss|)
-//
-// NEUTRAL: when there is no valid zone, or price is inside a zone without
-// confirmation, we return direction = "neutral" and signalLabel = "NEUTRAL".
-// Callers MUST treat neutral as "no trade" — do not save, do not post.
-//
-// Orders: BUY, SELL, BUY LIMIT, SELL LIMIT only.
+// Confirmed entries can be market orders. A fresh valid zone can also stage a
+// low-confidence limit while waiting for a closed-bar confirmation.
 
 import type { Candle } from "@/lib/data/candles";
-import type { Overlays } from "@/lib/overlays";
+import type { Overlays, VolumeProfile } from "@/lib/overlays";
 import type { VerifiedPrice } from "@/lib/analysis";
 import {
   detectZones,
@@ -25,6 +18,7 @@ export type SignalDirection = "long" | "short" | "neutral";
 export type OrderType = "market" | "limit";
 export type SignalLabel = "BUY" | "SELL" | "BUY LIMIT" | "SELL LIMIT" | "NEUTRAL";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "NEUTRAL";
+export type ActionableConfidence = Exclude<Confidence, "NEUTRAL">;
 
 export interface SignalZone {
   type: "supply" | "demand";
@@ -33,6 +27,8 @@ export interface SignalZone {
   strength: number;
   distanceToPrice: number;
   formedAt: number;
+  source: "base-departure" | "order-block" | "fvg" | "market-structure";
+  invalidation: "close-beyond-zone";
 }
 
 export interface SignalEntryCandle {
@@ -53,6 +49,7 @@ export interface SignalConfluences {
   structureAligned: boolean;
   premiumDiscountAligned: boolean;
   liquiditySweepAligned: boolean;
+  volumeProfileAligned: boolean;
   session: string;
   sessionFavorable: boolean;
 }
@@ -75,10 +72,12 @@ export interface TradingSignal {
   zone: SignalZone | null;
   entryCandle: SignalEntryCandle;
   confluences: SignalConfluences;
+  volumeProfile: VolumeProfile | null;
   confidence: Confidence;
   score: number;
   setupId: string;
   notes: string[];
+  candidateType?: "base-departure" | "order-block" | "fvg" | "market-structure";
   priceVerification?: {
     chartPrice: number;
     yahooPrice: number | null;
@@ -94,6 +93,196 @@ export interface TradingSignal {
 }
 
 // ===== HELPERS =====
+
+interface TradeableZone {
+  type: "supply" | "demand";
+  top: number;
+  bottom: number;
+  index: number;
+  formedAt: number;
+  distanceToPrice: number;
+  source: SignalZone["source"];
+}
+
+function toTradeableZones(
+  candles: Candle[],
+  baseZones: SupplyDemandZone[],
+  orderBlocks: Overlays["orderBlocks"],
+  fvgs: Overlays["fvgs"],
+  maxDistance: number
+): TradeableZone[] {
+  const currentPrice = candles[candles.length - 1].close;
+  const zones: TradeableZone[] = baseZones.map((zone) => ({
+    type: zone.type,
+    top: zone.top,
+    bottom: zone.bottom,
+    index: zone.index,
+    formedAt: zone.formedAt,
+    distanceToPrice: zone.distanceToPrice,
+    source: "base-departure",
+  }));
+
+  for (const block of orderBlocks) {
+    const type = block.type === "bullish" ? "demand" : "supply";
+    if (candles.slice(block.index + 1).some((candle) =>
+      type === "demand" ? candle.close < block.bottom : candle.close > block.top
+    )) {
+      continue;
+    }
+    if (block.index > candles.length - 5) continue;
+
+    const top = Math.max(block.top, block.bottom);
+    const bottom = Math.min(block.top, block.bottom);
+    const distanceToPrice =
+      currentPrice > top
+        ? currentPrice - top
+        : currentPrice < bottom
+          ? bottom - currentPrice
+          : 0;
+    zones.push({
+      type,
+      top,
+      bottom,
+      index: block.index,
+      formedAt: candles[block.index]?.time ?? block.index,
+      distanceToPrice,
+      source: "order-block",
+    });
+  }
+
+  for (const fvg of fvgs) {
+    const type = fvg.type === "bullish" ? "demand" : "supply";
+    const fillIndex = fvg.index - 1;
+    if (fillIndex < 1) continue;
+    if (candles.slice(fillIndex + 1).some((candle) =>
+      type === "demand" ? candle.close < fvg.bottom : candle.close > fvg.top
+    )) {
+      continue;
+    }
+    if (fillIndex > candles.length - 5) continue;
+
+    const top = Math.max(fvg.top, fvg.bottom);
+    const bottom = Math.min(fvg.top, fvg.bottom);
+    const distanceToPrice =
+      currentPrice > top
+        ? currentPrice - top
+        : currentPrice < bottom
+          ? bottom - currentPrice
+          : 0;
+    zones.push({
+      type,
+      top,
+      bottom,
+      index: fillIndex,
+      formedAt: candles[fillIndex]?.time ?? fillIndex,
+      distanceToPrice,
+      source: "fvg",
+    });
+  }
+
+  return zones
+    .filter((zone) => zone.distanceToPrice <= maxDistance)
+    .sort((a, b) => a.distanceToPrice - b.distanceToPrice);
+}
+
+function buildStructureZone(
+  candles: Candle[],
+  overlays: Overlays,
+  direction: "long" | "short",
+  atr: number,
+  pipSize: number
+): TradeableZone | null {
+  if (candles.length === 0) return null;
+
+  const currentPrice = candles[candles.length - 1].close;
+  const levels: { price: number; index: number }[] = [];
+
+  for (const liquidity of overlays.liquidityZones) {
+    const correctSide =
+      direction === "long"
+        ? liquidity.type === "sell_side" && liquidity.price < currentPrice
+        : liquidity.type === "buy_side" && liquidity.price > currentPrice;
+    if (correctSide) levels.push({ price: liquidity.price, index: liquidity.index });
+  }
+
+  const swing =
+    direction === "long" ? overlays.structure.lastSwingLow : overlays.structure.lastSwingHigh;
+  if (swing && (direction === "long" ? swing.price < currentPrice : swing.price > currentPrice)) {
+    levels.push({ price: swing.price, index: swing.index });
+  }
+
+  const start = Math.max(2, candles.length - 80);
+  for (let index = start; index < candles.length - 2; index++) {
+    const candle = candles[index];
+    if (direction === "long") {
+      const isSwingLow =
+        candle.low <= candles[index - 1].low &&
+        candle.low <= candles[index + 1].low &&
+        candle.low < candles[index - 2].low &&
+        candle.low < candles[index + 2].low;
+      if (isSwingLow && candle.low < currentPrice) {
+        levels.push({ price: candle.low, index });
+      }
+    } else {
+      const isSwingHigh =
+        candle.high >= candles[index - 1].high &&
+        candle.high >= candles[index + 1].high &&
+        candle.high > candles[index - 2].high &&
+        candle.high > candles[index + 2].high;
+      if (isSwingHigh && candle.high > currentPrice) {
+        levels.push({ price: candle.high, index });
+      }
+    }
+  }
+
+  levels.sort(
+    (a, b) =>
+      Math.abs(currentPrice - a.price) - Math.abs(currentPrice - b.price)
+  );
+
+  let level = levels[0]?.price;
+  let index = levels[0]?.index ?? candles.length - 2;
+  if (level == null) {
+    const recent = candles.slice(-30);
+    level =
+      direction === "long"
+        ? Math.min(...recent.map((candle) => candle.low))
+        : Math.max(...recent.map((candle) => candle.high));
+    if (direction === "long" && level >= currentPrice) {
+      level = currentPrice - Math.max(atr * 2, pipSize);
+    }
+    if (direction === "short" && level <= currentPrice) {
+      level = currentPrice + Math.max(atr * 2, pipSize);
+    }
+  }
+
+  const buffer = Math.max(atr * 0.35, pipSize);
+  let bottom = level - buffer;
+  let top = level + buffer;
+  const gap = Math.max(atr * 0.1, pipSize * 0.5);
+
+  if (direction === "long" && top >= currentPrice) {
+    const shift = currentPrice - gap - top;
+    bottom += shift;
+    top += shift;
+  }
+  if (direction === "short" && bottom <= currentPrice) {
+    const shift = currentPrice + gap - bottom;
+    bottom += shift;
+    top += shift;
+  }
+
+  return {
+    type: direction === "long" ? "demand" : "supply",
+    top,
+    bottom,
+    index,
+    formedAt: candles[index]?.time ?? candles[candles.length - 1].time,
+    distanceToPrice:
+      direction === "long" ? Math.max(0, currentPrice - top) : Math.max(0, bottom - currentPrice),
+    source: "market-structure",
+  };
+}
 
 function calcPipSize(pair: string): number {
   if (pair.includes("XAU")) return 0.10;
@@ -256,8 +445,6 @@ export function buildSignal(
   const zoneCandles: ZoneCandle[] = candles.map((c) => ({
     open: c.open, high: c.high, low: c.low, close: c.close, is_green: c.is_green, time: c.time,
   }));
-
-  const zones = detectZones(zoneCandles);
   const atr = calcATR(candles, 14);
 
   const neutralConfluences: SignalConfluences = {
@@ -265,12 +452,13 @@ export function buildSignal(
     supertrendAligned: false, rsiAligned: false, smaAligned: false,
     vwapAligned: false, orderBlockNear: false, fvgNear: false,
     structureAligned: false, premiumDiscountAligned: false, liquiditySweepAligned: false,
+    volumeProfileAligned: false,
     session: sessionInfo.name, sessionFavorable: sessionInfo.favorable,
   };
 
   const makeNeutral = (
     neutralNotes: string[],
-    zone: SupplyDemandZone | null = null,
+    zone: TradeableZone | null = null,
     entryCandle: SignalEntryCandle = {
       type: "none",
       direction: "bullish",
@@ -300,10 +488,14 @@ export function buildSignal(
           strength: 0,
           distanceToPrice: zone.distanceToPrice,
           formedAt: zone.formedAt,
+          source: zone.source,
+          invalidation: "close-beyond-zone",
         }
       : null,
     entryCandle,
     confluences: neutralConfluences,
+    volumeProfile: overlays.volumeProfile,
+    candidateType: zone?.source,
     confidence: "NEUTRAL",
     score: 0,
     setupId: `neutral:${pair}:${timeframe}:${timestamp}`,
@@ -318,75 +510,84 @@ export function buildSignal(
     ]);
   }
 
-  // ---- NO ZONES → NEUTRAL ----
-  if (zones.length === 0) {
-    return makeNeutral([
-      "No supply/demand zones detected.",
-      "Neutral — no trade. No signal saved.",
-      `Current price: ${currentPrice.toFixed(5)} | ATR(14): ${atr.toFixed(5)}`,
-    ]);
-  }
-
-  const slDistance = atr * 2.0;
+  const averageRange = candles.slice(-20).reduce((sum, candle) => sum + candle.high - candle.low, 0) /
+    Math.min(candles.length, 20);
+  const maxZoneDistance = Math.max(atr * 6, averageRange * 3, pipSize * 5);
+  const zones = toTradeableZones(
+    candles,
+    detectZones(zoneCandles),
+    overlays.orderBlocks,
+    overlays.fvgs,
+    maxZoneDistance
+  );
 
   // ===== ZONE SELECTION =====
   const sortedZones = [...zones].sort((a, b) => a.distanceToPrice - b.distanceToPrice);
+  const smcDirection: "long" | "short" | null =
+    smcBias && smcBias.direction !== "neutral" ? smcBias.direction : null;
+  const preferredDirection =
+    smcDirection && smcBias!.score >= 65 ? smcDirection : null;
+  const matchesPreferredDirection = (zone: TradeableZone) =>
+    preferredDirection == null ||
+    (preferredDirection === "long" ? zone.type === "demand" : zone.type === "supply");
 
   const insideZone = sortedZones.find(
-    (z) => currentPrice >= z.bottom && currentPrice <= z.top
+    (z) => matchesPreferredDirection(z) && currentPrice >= z.bottom && currentPrice <= z.top
   );
 
   const correctSideZone = sortedZones.find((z) => {
+    if (!matchesPreferredDirection(z)) return false;
     if (z.type === "demand" && z.top < currentPrice) return true;
     if (z.type === "supply" && z.bottom > currentPrice) return true;
     return false;
   });
 
-  const activeZone = insideZone ?? correctSideZone;
+  const fallbackDirection: "long" | "short" =
+    preferredDirection ??
+    smcDirection ??
+    (overlays.structure.trend === "bullish" || overlays.structure.trend === "bearish"
+      ? overlays.structure.trend === "bullish"
+        ? "long"
+        : "short"
+      : overlays.structure.lastEvent?.direction === "bullish"
+        ? "long"
+        : overlays.structure.lastEvent?.direction === "bearish"
+          ? "short"
+          : overlays.premiumDiscount?.zone === "premium"
+            ? "short"
+            : "long");
+
+  const activeZone =
+    insideZone ??
+    correctSideZone ??
+    buildStructureZone(candles, overlays, fallbackDirection, atr, pipSize);
 
   if (!activeZone) {
-    return makeNeutral([
-      "No demand zone below price or supply zone above price.",
-      "Neutral — no valid setup on the correct side of market.",
-    ]);
+    return makeNeutral(
+      ["No tradeable market structure is available on this chart."],
+      null
+    );
   }
+
+  const slDistance = atr * 2.0;
 
   const direction: "long" | "short" = activeZone.type === "demand" ? "long" : "short";
   const signalDirection = direction === "long" ? "bullish" : "bearish";
-  const entryCandle = detectEntrySignal(zoneCandles, signalDirection, activeZone, 3);
+  const entryCandle = detectEntrySignal(
+    zoneCandles,
+    signalDirection,
+    activeZone,
+    3
+  );
+  const hasConfirmation = entryCandle.type !== "none";
   const priceInsideZone = currentPrice >= activeZone.bottom && currentPrice <= activeZone.top;
-  const smcConflict =
-    smcBias != null &&
-    smcBias.direction !== "neutral" &&
-    smcBias.direction !== direction &&
-    smcBias.score >= 65;
-
-  if (entryCandle.type === "none" || smcConflict) {
-    const reason = smcConflict
-      ? `SMC/ICT bias conflicts with this ${direction} setup (${smcBias!.score}/100).`
-      : entryCandle.reason;
-    return makeNeutral(
-      [
-        `${priceInsideZone ? "Price is inside" : "Price is approaching"} ${activeZone.type} zone ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}.`,
-        reason,
-        "Neutral — waiting for a valid closed-bar confirmation. No signal saved.",
-      ],
-      activeZone,
-      {
-        type: entryCandle.type === "large_range_candle" ? "large_range" : entryCandle.type,
-        direction: entryCandle.direction,
-        probability: entryCandle.probability,
-        reason: entryCandle.reason,
-      },
-    );
-  }
 
   // ===== ORDER TYPE =====
   let orderType: OrderType;
   let signalLabel: SignalLabel;
   let entryLevel: number;
 
-  if (priceInsideZone) {
+  if (priceInsideZone && hasConfirmation) {
     orderType = "market";
     signalLabel = direction === "long" ? "BUY" : "SELL";
     entryLevel = currentPrice;
@@ -394,7 +595,12 @@ export function buildSignal(
     orderType = "limit";
     signalLabel = direction === "long" ? "BUY LIMIT" : "SELL LIMIT";
 
-    if (direction === "long") {
+    if (priceInsideZone) {
+      entryLevel =
+        direction === "long"
+          ? Math.min(activeZone.bottom, currentPrice - atr * 0.25)
+          : Math.max(activeZone.top, currentPrice + atr * 0.25);
+    } else if (direction === "long") {
       if (activeZone.top < currentPrice) {
         entryLevel = activeZone.top;
       } else if (activeZone.bottom < currentPrice) {
@@ -469,6 +675,12 @@ export function buildSignal(
     riskPips > 0 ? (rewardPips[2] / riskPips).toFixed(1) : "0",
   ];
 
+  const volumeProfile = overlays.volumeProfile;
+  const volumeProfileAligned =
+    volumeProfile != null &&
+    activeZone.top >= volumeProfile.val &&
+    activeZone.bottom <= volumeProfile.vah;
+
   const confluences: SignalConfluences = {
     roundNumber: roundNumberNear,
     supertrendAligned: checkSupertrendAligned(overlays, direction),
@@ -487,9 +699,17 @@ export function buildSignal(
       overlays.liquiditySweeps.at(-1)?.reclaimed === true &&
       overlays.liquiditySweeps.at(-1)?.side ===
         (direction === "long" ? "sell_side" : "buy_side"),
+    volumeProfileAligned,
     session: sessionInfo.name,
     sessionFavorable: sessionInfo.favorable,
   };
+
+  const smcSupportsDirection =
+    smcBias != null &&
+    smcBias.direction !== "neutral" &&
+    smcBias.direction === direction &&
+    smcBias.score >= 55;
+  const structureSupportsDirection = confluences.structureAligned;
 
   let score = entryCandle.probability;
   if (confluences.supertrendAligned) score += 5;
@@ -501,11 +721,19 @@ export function buildSignal(
   if (confluences.structureAligned) score += 5;
   if (confluences.premiumDiscountAligned) score += 5;
   if (confluences.liquiditySweepAligned) score += 5;
+  if (confluences.volumeProfileAligned) score += 5;
   if (confluences.roundNumber) score += 5;
   if (confluences.sessionFavorable) score += 10;
-  score = Math.min(score, 100);
+  if (!hasConfirmation) {
+    if (smcSupportsDirection) score = Math.max(score, smcBias!.score);
+    if (structureSupportsDirection) score = Math.max(score, 60);
+    score = Math.min(49, Math.max(30, score));
+  }
 
-  const confidence: Confidence = score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : "LOW";
+  score = Math.min(100, score);
+
+  const confidence: ActionableConfidence =
+    score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : "LOW";
   const setupId = [
     "ai",
     pair,
@@ -517,13 +745,23 @@ export function buildSignal(
     activeZone.top.toFixed(8),
   ].join(":");
 
-  notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
+  notes.push(
+    `Zone (${activeZone.source}): ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`
+  );
   notes.push(`Current price: ${currentPrice.toFixed(5)}`);
   notes.push(`ATR(14): ${atr.toFixed(5)} | SL basis: ${stopBasis}`);
   notes.push(`Entry (${signalLabel}): ${entryLevel.toFixed(5)}`);
   notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips`);
   notes.push(`TPs: 1.0× / 1.5× / 3.0× risk (R:R 1:1 / 1:1.5 / 1:3)`);
   notes.push(`Session: ${sessionInfo.name}`);
+  if (volumeProfile) {
+    notes.push(
+      `Volume profile (${volumeProfile.source}): POC ${volumeProfile.poc.toFixed(5)} | VAH ${volumeProfile.vah.toFixed(5)} | VAL ${volumeProfile.val.toFixed(5)}`
+    );
+  }
+  if (!hasConfirmation) {
+    notes.push("No closed-bar confirmation yet — low-confidence limit staged at the zone; cancel if the zone invalidates.");
+  }
   if (orderType === "limit") {
     notes.push(
       direction === "long"
@@ -548,6 +786,8 @@ export function buildSignal(
       strength: 0,
       distanceToPrice: activeZone.distanceToPrice,
       formedAt: activeZone.formedAt,
+      source: activeZone.source,
+      invalidation: "close-beyond-zone",
     },
     entryCandle: {
       type: entryCandle.type === "large_range_candle" ? "large_range" : entryCandle.type,
@@ -555,7 +795,7 @@ export function buildSignal(
       probability: entryCandle.probability,
       reason: entryCandle.reason,
     },
-    confluences, confidence, score, setupId, notes,
+    confluences, volumeProfile, confidence, score, setupId, notes,
     priceVerification,
   };
 }

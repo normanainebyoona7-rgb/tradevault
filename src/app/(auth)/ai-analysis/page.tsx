@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
+  BarChart3,
   Boxes,
   Crosshair,
   Gauge,
@@ -40,9 +41,14 @@ const ENGINE_CHECKS = [
     body: "Dealing range, equilibrium and OTE so entries stay on the correct side.",
   },
   {
+    icon: BarChart3,
+    title: "Volume profile",
+    body: "Point of control, value-area high/low and high-volume nodes from server candle volume.",
+  },
+  {
     icon: ShieldCheck,
     title: "Risk model",
-    body: "ATR-based stop, 1R / 1.5R / 3R targets, and position size from 1% risk.",
+    body: "ATR-based stop, 1R / 1.5R / 3R targets, and broker-configured position sizing.",
   },
 ];
 
@@ -66,9 +72,9 @@ export default function AIAnalysisPage() {
             AI chart analysis
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Analyze the live chart with SMC, ICT and supply-and-demand
-            confluences. Every result uses the same candles, zones, order
-            blocks, gaps and structure you see on screen.
+            Analyze the live chart with SMC, ICT, supply-and-demand and volume
+            profile confluences. Fresh zones can stage a low-confidence limit
+            while waiting for closed-bar confirmation.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-semibold">

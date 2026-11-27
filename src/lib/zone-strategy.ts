@@ -376,7 +376,7 @@ function detectPinBar(
 export function detectEntrySignal(
   candles: ZoneCandle[],
   direction: "bullish" | "bearish",
-  zone?: SupplyDemandZone,
+  zone?: Pick<SupplyDemandZone, "top" | "bottom">,
   lookback: number = 1
 ): EntrySignal {
   const start = Math.max(1, candles.length - lookback);

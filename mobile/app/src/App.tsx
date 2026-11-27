@@ -122,6 +122,7 @@ async function saveNativeSnapshot(dataUrl: string, filename: string): Promise<vo
     await Share.share({ title: "TradeVault", url: uri });
   } catch (error) {
     console.error("Could not save the TradeVault snapshot:", error);
+    throw error;
   }
 }
 

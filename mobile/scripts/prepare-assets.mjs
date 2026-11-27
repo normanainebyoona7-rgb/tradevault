@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = new URL("../../", import.meta.url);
@@ -12,7 +12,38 @@ await mkdir(webDir, { recursive: true });
 await copyFile(logoSource, new URL("brand-mark.svg", webDir));
 await rm(new URL("logo.png", webDir), { force: true });
 
-const icon = await sharp(await readFile(logoSource), { density: 1152 })
+const logoBuffer = await readFile(logoSource);
+const webIconDir = new URL("assets/icons/", webDir);
+await mkdir(webIconDir, { recursive: true });
+const iconSizes = [48, 72, 96, 128, 192, 256, 512];
+await Promise.all(
+  iconSizes.map((size) =>
+    sharp(logoBuffer, { density: 1152 })
+      .resize(size, size, {
+        fit: "contain",
+        background: { r: 7, g: 17, b: 31, alpha: 1 },
+      })
+      .webp({ quality: 90 })
+      .toFile(fileURLToPath(new URL(`icon-${size}.webp`, webIconDir)))
+  )
+);
+await writeFile(
+  fileURLToPath(new URL("manifest.json", webDir)),
+  JSON.stringify(
+    {
+      icons: iconSizes.map((size) => ({
+        src: `assets/icons/icon-${size}.webp`,
+        type: "image/webp",
+        sizes: `${size}x${size}`,
+        purpose: "any maskable",
+      })),
+    },
+    null,
+    2
+  ) + "\n"
+);
+
+const icon = await sharp(logoBuffer, { density: 1152 })
   .resize(1024, 1024, {
     fit: "contain",
     background: { r: 7, g: 17, b: 31, alpha: 1 },

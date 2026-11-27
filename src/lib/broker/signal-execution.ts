@@ -106,6 +106,43 @@ export async function enqueueSignalExecution(signal: ISignal): Promise<IExecutio
     takeProfit3: signal.takeProfit3,
   });
   const connection: any = await BrokerConnection.findOne({ ownerEmail: ADMIN_EMAIL }).select("_id").lean();
+  const refreshed = await ExecutionOrder.updateOne(
+    { signalId: signal._id, status: "pending" },
+    {
+      $set: {
+        connectionId: connection?._id ?? null,
+        pair: levels.pair,
+        direction: levels.direction,
+        orderType: levels.orderType,
+        entry: levels.entry,
+        stopLoss: levels.stopLoss,
+        takeProfit1: levels.takeProfit1,
+        takeProfit2: levels.takeProfit2,
+        takeProfit3: levels.takeProfit3,
+        expiresAt: signal.expiresAt,
+        message: "",
+        nextAttemptAt: new Date(),
+      },
+    }
+  );
+  if (refreshed.modifiedCount > 0) {
+    await Signal.updateOne(
+      { _id: signal._id },
+      {
+        $set: {
+          pair: levels.pair,
+          direction: levels.direction,
+          orderType: levels.orderType,
+          entry: String(levels.entry),
+          stopLoss: String(levels.stopLoss),
+          takeProfit1: String(levels.takeProfit1),
+          takeProfit2: levels.takeProfit2 ? String(levels.takeProfit2) : "",
+          takeProfit3: levels.takeProfit3 ? String(levels.takeProfit3) : "",
+          expiresAt: signal.expiresAt,
+        },
+      }
+    );
+  }
   const order: any = await ExecutionOrder.findOneAndUpdate(
     { signalId: signal._id },
     {

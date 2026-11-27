@@ -72,6 +72,23 @@ export interface LargeRangeMarker {
   rangePct: number;
 }
 
+export interface VolumeProfileBin {
+  price: number;
+  volume: number;
+  buyVolume: number;
+  sellVolume: number;
+}
+
+export interface VolumeProfile {
+  bins: VolumeProfileBin[];
+  poc: number;
+  vah: number;
+  val: number;
+  totalVolume: number;
+  valueAreaPercent: number;
+  source: "feed-volume" | "range-proxy";
+}
+
 export interface Overlays {
   sdZones: SupplyDemandZone[];
   orderBlocks: SMCOrderBlock[];
@@ -93,6 +110,7 @@ export interface Overlays {
 
   sessions: SessionBox[];
   largeRangeCandles: LargeRangeMarker[];
+  volumeProfile: VolumeProfile | null;
 
   structure: MarketStructure;
   premiumDiscount: PremiumDiscount | null;
@@ -115,7 +133,7 @@ function calcEMA(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
   const out: number[] = [values.slice(0, period).reduce((sum, value) => sum + value, 0) / period];
   for (let i = period; i < values.length; i++) {
-    out.push(values[i] * k + out[i - 1] * (1 - k));
+    out.push(values[i] * k + out[out.length - 1] * (1 - k));
   }
   return out;
 }
@@ -398,6 +416,85 @@ function calcLargeRangeCandles(candles: Candle[]): LargeRangeMarker[] {
   return markers;
 }
 
+// ===== VOLUME PROFILE =====
+
+function calcVolumeProfile(candles: Candle[]): VolumeProfile | null {
+  if (candles.length === 0) return null;
+
+  const low = Math.min(...candles.map((c) => c.low));
+  const high = Math.max(...candles.map((c) => c.high));
+  if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) {
+    return null;
+  }
+
+  const binCount = 36;
+  const step = (high - low) / binCount;
+  const bins: VolumeProfileBin[] = Array.from({ length: binCount }, (_, i) => ({
+    price: low + step * (i + 0.5),
+    volume: 0,
+    buyVolume: 0,
+    sellVolume: 0,
+  }));
+  const hasFeedVolume = candles.some(
+    (c) => Number.isFinite(c.volume) && c.volume > 0
+  );
+
+  for (const candle of candles) {
+    const range = candle.high - candle.low;
+    if (range <= 0) continue;
+    const weight = hasFeedVolume ? Math.max(0, candle.volume) : 1;
+
+    for (let i = 0; i < bins.length; i++) {
+      const bottom = low + i * step;
+      const top = bottom + step;
+      const overlap = Math.min(candle.high, top) - Math.max(candle.low, bottom);
+      if (overlap <= 0) continue;
+
+      const volume = weight * (overlap / range);
+      bins[i].volume += volume;
+      if (candle.is_green) bins[i].buyVolume += volume;
+      else bins[i].sellVolume += volume;
+    }
+  }
+
+  const totalVolume = bins.reduce((sum, bin) => sum + bin.volume, 0);
+  if (totalVolume <= 0) return null;
+
+  const pocIndex = bins.reduce(
+    (best, bin, index) => (bin.volume > bins[best].volume ? index : best),
+    0
+  );
+  const valueAreaPercent = 0.7;
+  const target = totalVolume * valueAreaPercent;
+  let lowIndex = pocIndex;
+  let highIndex = pocIndex;
+  let areaVolume = bins[pocIndex].volume;
+
+  while (areaVolume < target && (lowIndex > 0 || highIndex < bins.length - 1)) {
+    const takeLow =
+      lowIndex > 0 &&
+      (highIndex === bins.length - 1 ||
+        bins[lowIndex - 1].volume >= bins[highIndex + 1].volume);
+    if (takeLow) {
+      lowIndex -= 1;
+      areaVolume += bins[lowIndex].volume;
+    } else {
+      highIndex += 1;
+      areaVolume += bins[highIndex].volume;
+    }
+  }
+
+  return {
+    bins,
+    poc: bins[pocIndex].price,
+    vah: low + (highIndex + 1) * step,
+    val: low + lowIndex * step,
+    totalVolume,
+    valueAreaPercent,
+    source: hasFeedVolume ? "feed-volume" : "range-proxy",
+  };
+}
+
 // ===== MAIN FUNCTION =====
 
 export function computeOverlays(pair: string, candles: Candle[]): Overlays {
@@ -419,6 +516,7 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
       pivots: null,
       sessions: [],
       largeRangeCandles: [],
+      volumeProfile: null,
       structure: EMPTY_STRUCTURE,
       premiumDiscount: null,
       liquiditySweeps: [],
@@ -494,6 +592,7 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
 
   // ===== LARGE RANGE MARKERS =====
   const largeRangeCandles = calcLargeRangeCandles(candles);
+  const volumeProfile = calcVolumeProfile(candles);
 
   // ===== ICT STRUCTURE =====
   const structure = detectMarketStructure(candles);
@@ -517,6 +616,7 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
     pivots,
     sessions,
     largeRangeCandles,
+    volumeProfile,
     structure,
     premiumDiscount: pd,
     liquiditySweeps,

@@ -6,6 +6,7 @@
 // Used by BOTH the chart widget AND the AI signal engine.
 
 import { getHistoricalRates } from "dukascopy-node";
+import { getSwissquoteQuote } from "@/lib/data/quotes";
 
 export interface Candle {
   time: number;
@@ -23,6 +24,12 @@ export interface CandleDataset {
   candles: Candle[];
   source: CandleSource;
   fetchedAt: number;
+  basisAdjustment?: {
+    source: "swissquote";
+    rawPrice: number;
+    quotePrice: number;
+    basis: number;
+  };
 }
 
 export const TIMEFRAME_SECONDS: Record<string, number> = {
@@ -350,6 +357,33 @@ export async function getCandlesWithSource(
   }
 
   const yahoo = await getCandlesFromYahoo(pair, timeframe, count);
+  if (yahoo.length > 0 && isYahooOnly(pair)) {
+    const quote = await getSwissquoteQuote(pair);
+    const rawPrice = yahoo[yahoo.length - 1].close;
+    if (quote && Number.isFinite(rawPrice) && rawPrice > 0) {
+      const basis = quote.price - rawPrice;
+      if (Math.abs(basis / quote.price) <= 0.05) {
+        return {
+          candles: yahoo.map((candle) => ({
+            ...candle,
+            open: candle.open + basis,
+            high: candle.high + basis,
+            low: candle.low + basis,
+            close: candle.close + basis,
+            is_green: candle.close >= candle.open,
+          })),
+          source: "yahoo",
+          fetchedAt: Date.now(),
+          basisAdjustment: {
+            source: "swissquote",
+            rawPrice,
+            quotePrice: quote.price,
+            basis,
+          },
+        };
+      }
+    }
+  }
   return { candles: yahoo, source: "yahoo", fetchedAt: Date.now() };
 }
 

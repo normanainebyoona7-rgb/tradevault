@@ -11,6 +11,7 @@ export interface ChartPriceSample {
   source: CandleSource;
   timeframe: string;
   time: number;
+  rawPrice?: number;
 }
 
 export interface VerifiedPrice {
@@ -84,7 +85,11 @@ function result(args: {
     chartPrice: args.sample.price,
     yahooPrice:
       args.yahooPrice ??
-      (args.sample.source === "yahoo" ? args.sample.price : args.comparisonSource === "yahoo" ? args.comparisonPrice : null),
+      (args.sample.source === "yahoo"
+        ? args.sample.rawPrice ?? args.sample.price
+        : args.comparisonSource === "yahoo"
+          ? args.comparisonPrice
+          : null),
     dukascopyPrice:
       args.dukascopyPrice ??
       (args.sample.source === "dukascopy" ? args.sample.price : null),
@@ -156,7 +161,7 @@ export async function getVerifiedPrice(
       comparisonSource: null,
       comparisonTime: null,
       tolerance,
-      yahooPrice: sample.source === "yahoo" ? sample.price : null,
+      yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : null,
       dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
       reason: "No independent price source is available — cannot cross-validate",
     });
@@ -173,7 +178,7 @@ export async function getVerifiedPrice(
         comparisonSource,
         comparisonTime,
         tolerance,
-        yahooPrice: sample.source === "yahoo" ? sample.price : null,
+        yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : null,
         dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
         swissquotePrice: swissquote?.price ?? comparisonPrice,
         reason: `Independent quote is stale (${Math.round(quoteAge / 60000)} minutes old)`,
@@ -187,7 +192,7 @@ export async function getVerifiedPrice(
         comparisonSource,
         comparisonTime,
         tolerance,
-        yahooPrice: sample.source === "yahoo" ? sample.price : null,
+        yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : null,
         dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
         swissquotePrice: swissquote?.price ?? comparisonPrice,
         reason: `Chart candle is too old for a live spot comparison (${Math.round(candleAge / 60000)} minutes old)`,
@@ -204,7 +209,7 @@ export async function getVerifiedPrice(
       comparisonSource,
       comparisonTime,
       tolerance,
-      yahooPrice: sample.source === "yahoo" ? sample.price : yahooCandle?.close ?? null,
+      yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : yahooCandle?.close ?? null,
       dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
       swissquotePrice: swissquote?.price ?? null,
       reason: `Price mismatch: chart ${sample.price.toFixed(5)} vs ${comparisonSource} ${comparisonPrice.toFixed(5)} (${diffPct.toFixed(2)}% > ${tolerance}%)`,
@@ -218,7 +223,7 @@ export async function getVerifiedPrice(
     comparisonSource,
     comparisonTime,
     tolerance,
-    yahooPrice: sample.source === "yahoo" ? sample.price : yahooCandle?.close ?? null,
+    yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : yahooCandle?.close ?? null,
     dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
     swissquotePrice: swissquote?.price ?? null,
   });

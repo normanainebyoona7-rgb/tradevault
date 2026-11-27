@@ -47,7 +47,9 @@ interface LayerFlags {
   fvg: boolean;
   liq: boolean;
   ma: boolean;
+  vp: boolean;
   levels: boolean;
+  setup: boolean;
 }
 
 const DEFAULT_LAYERS: LayerFlags = {
@@ -56,7 +58,9 @@ const DEFAULT_LAYERS: LayerFlags = {
   fvg: true,
   liq: true,
   ma: true,
+  vp: true,
   levels: true,
+  setup: true,
 };
 
 const LAYER_LABELS: { key: keyof LayerFlags; label: string }[] = [
@@ -65,7 +69,9 @@ const LAYER_LABELS: { key: keyof LayerFlags; label: string }[] = [
   { key: "fvg", label: "FVG" },
   { key: "liq", label: "Liquidity" },
   { key: "ma", label: "MAs" },
+  { key: "vp", label: "Volume" },
   { key: "levels", label: "Levels" },
+  { key: "setup", label: "AI setup" },
 ];
 
 function isDark(): boolean {
@@ -96,6 +102,10 @@ interface AnalysisResult {
   pair: string;
   timeframe: string;
   shot: string | null;
+  executionId?: string;
+  executionStatus?: string;
+  executionQueued?: boolean;
+  duplicate?: boolean;
 }
 
 export function LiveChart({
@@ -166,6 +176,7 @@ export function LiveChart({
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const activeSetupRef = useRef<Extract<AnalysisResult["signal"], { zone: { top: number; bottom: number } }> | null>(null);
 
   const feedFresh =
     online &&
@@ -204,7 +215,7 @@ export function LiveChart({
     const series = candleSeriesRef.current;
     const candles = candlesRef.current;
     const ov = overlaysRef.current;
-    if (!chart || !series || !ov || candles.length === 0) return;
+    if (!chart || !series || candles.length === 0) return;
 
     const flags = layersRef.current;
     const timeScale = chart.timeScale();
@@ -215,12 +226,13 @@ export function LiveChart({
       index: number,
       top: number,
       bottom: number,
-      opts: { fill: string; border: string; label: string; labelColor: string; dashed?: boolean; endTime?: number }
+      opts: { fill: string; border: string; label: string; labelColor: string; dashed?: boolean; endTime?: number; startTime?: number }
     ) => {
       const candle = candles[Math.min(Math.max(index, 0), candles.length - 1)];
       if (!candle) return;
 
-      const x = timeScale.timeToCoordinate(candle.time as UTCTimestamp);
+      const startTime = opts.startTime ?? candle.time;
+      const x = timeScale.timeToCoordinate(startTime as UTCTimestamp);
       if (x === null) return;
 
       const yTop = series.priceToCoordinate(top);
@@ -268,7 +280,7 @@ export function LiveChart({
     const demand = { fill: "rgba(16,185,129,0.10)", border: "rgba(16,185,129,0.75)", labelColor: "#059669" };
     const supply = { fill: "rgba(244,63,94,0.10)", border: "rgba(244,63,94,0.75)", labelColor: "#e11d48" };
 
-    if (flags.sd) {
+    if (flags.sd && ov) {
       for (const zone of ov.sdZones) {
         const style = zone.type === "demand" ? demand : supply;
         addBox(zone.index, zone.top, zone.bottom, {
@@ -278,7 +290,7 @@ export function LiveChart({
       }
     }
 
-    if (flags.ob) {
+    if (flags.ob && ov) {
       for (const ob of ov.orderBlocks) {
         const style =
           ob.type === "bullish"
@@ -291,7 +303,7 @@ export function LiveChart({
       }
     }
 
-    if (flags.fvg) {
+    if (flags.fvg && ov) {
       for (const fvg of ov.fvgs) {
         const style =
           fvg.type === "bullish"
@@ -305,7 +317,52 @@ export function LiveChart({
       }
     }
 
-    if (flags.levels) {
+    if (flags.setup) {
+      const setup = activeSetupRef.current;
+      if (setup?.zone && Number.isFinite(setup.entryPrice)) {
+        const isLong = setup.direction === "long";
+        const setupIndex = candles.findIndex((candle) => candle.time >= Number(setup.zone.formedAt));
+        addBox(
+          setupIndex < 0 ? Math.max(0, candles.length - 8) : setupIndex,
+          setup.zone.top,
+          setup.zone.bottom,
+          {
+            fill: "rgba(16,185,129,0.16)",
+            border: "rgba(5,150,105,0.95)",
+            labelColor: "#059669",
+            label: isLong ? "AI BUY ZONE" : "AI SELL ZONE",
+            startTime: Number(setup.zone.formedAt),
+          }
+        );
+        for (const [level, label, color] of [
+          [setup.entryPrice, "AI ENTRY", "#059669"],
+          [setup.stopLossPrice, "AI SL", "#e11d48"],
+          [setup.takeProfit1Price, "AI TP1", "#2563eb"],
+        ] as const) {
+          if (!Number.isFinite(level)) continue;
+          const y = series.priceToCoordinate(level);
+          if (y === null) continue;
+          const line = document.createElement("span");
+          line.textContent = `${label} ${formatPrice(setup.pair, level)}`;
+          line.style.position = "absolute";
+          line.style.right = "8px";
+          line.style.top = `${y}px`;
+          line.style.transform = "translateY(-50%)";
+          line.style.padding = "2px 5px";
+          line.style.borderRadius = "4px";
+          line.style.background = theme.dark ? "#0b1512e6" : "#ffffffe6";
+          line.style.border = `1px solid ${color}`;
+          line.style.color = color;
+          line.style.fontSize = "9px";
+          line.style.fontWeight = "800";
+          line.style.whiteSpace = "nowrap";
+          line.style.pointerEvents = "none";
+          host.appendChild(line);
+        }
+      }
+    }
+
+    if (flags.levels && ov) {
       const bucket = TF_SECONDS[timeframe] ?? 3600;
       for (const session of ov.sessions.slice(-6)) {
         const index = candles.findIndex((candle) => candle.time >= session.startTime);
@@ -317,6 +374,61 @@ export function LiveChart({
           labelColor: theme.text,
           endTime: session.endTime + bucket,
         });
+      }
+    }
+
+    if (flags.vp && ov?.volumeProfile) {
+      const profile = ov.volumeProfile;
+      const maxVolume = Math.max(...profile.bins.map((bin) => bin.volume));
+      const profileWidth = Math.min(112, Math.max(64, right * 0.16));
+      const step = profile.bins.length > 1
+        ? profile.bins[1].price - profile.bins[0].price
+        : 0;
+
+      const title = document.createElement("span");
+      title.textContent = profile.source === "range-proxy" ? "VP · estimated" : "VP · feed volume";
+      title.style.position = "absolute";
+      title.style.left = "8px";
+      title.style.top = "6px";
+      title.style.fontSize = "9px";
+      title.style.fontWeight = "800";
+      title.style.letterSpacing = "0.06em";
+      title.style.color = theme.text;
+      title.style.textShadow = theme.dark ? "0 1px 2px #000" : "0 1px 2px #fff";
+      host.appendChild(title);
+
+      for (const bin of profile.bins) {
+        const yTop = series.priceToCoordinate(bin.price + step / 2);
+        const yBottom = series.priceToCoordinate(bin.price - step / 2);
+        if (yTop === null || yBottom === null) continue;
+
+        const isPoc = Math.abs(bin.price - profile.poc) < step / 2;
+        const inValueArea = bin.price >= profile.val && bin.price <= profile.vah;
+        const bar = document.createElement("div");
+        bar.style.position = "absolute";
+        bar.style.left = "8px";
+        bar.style.top = `${Math.min(yTop, yBottom)}px`;
+        bar.style.width = `${Math.max(2, (bin.volume / maxVolume) * profileWidth)}px`;
+        bar.style.height = `${Math.max(1, Math.abs(yBottom - yTop) + 1)}px`;
+        bar.style.background = isPoc
+          ? "rgba(245,158,11,0.55)"
+          : inValueArea
+            ? "rgba(14,165,233,0.28)"
+            : "rgba(100,116,139,0.18)";
+        bar.style.pointerEvents = "none";
+        host.appendChild(bar);
+
+        if (isPoc) {
+          const label = document.createElement("span");
+          label.textContent = "POC";
+          label.style.position = "absolute";
+          label.style.left = `${Math.max(2, (bin.volume / maxVolume) * profileWidth) + 4}px`;
+          label.style.top = "0";
+          label.style.fontSize = "8px";
+          label.style.fontWeight = "800";
+          label.style.color = "#d97706";
+          bar.appendChild(label);
+        }
       }
     }
   }, [timeframe]);
@@ -422,6 +534,12 @@ export function LiveChart({
             LineStyle.Dotted
           );
         }
+      }
+
+      if (flags.vp && ov.volumeProfile) {
+        addPriceLine(ov.volumeProfile.poc, "#f59e0b", "POC", LineStyle.Dashed);
+        addPriceLine(ov.volumeProfile.vah, "#0ea5e9", "VAH", LineStyle.Dotted);
+        addPriceLine(ov.volumeProfile.val, "#0ea5e9", "VAL", LineStyle.Dotted);
       }
 
       if (flags.levels) {
@@ -660,6 +778,7 @@ export function LiveChart({
         setError(null);
         setAnalysis(null);
         setAnalyzeError(null);
+        activeSetupRef.current = null;
         candlesRef.current = [];
         overlaysRef.current = null;
         series.setData([]);
@@ -704,6 +823,7 @@ export function LiveChart({
         );
 
         renderOverlays(candles, ov);
+        lastOverlayAtRef.current = Date.now();
 
         if (fit) {
           chartRef.current?.timeScale().fitContent();
@@ -746,19 +866,32 @@ export function LiveChart({
     (price: number, source: string) => {
       const series = candleSeriesRef.current;
       const candles = candlesRef.current;
-      if (!series || candles.length === 0) return;
+      if (!series || candles.length === 0 || !Number.isFinite(price) || price <= 0) {
+        return false;
+      }
 
       const last = candles[candles.length - 1];
       if (last.close > 0 && Math.abs(price - last.close) / last.close > 0.02) {
-        return;
+        setTickStatus("stale");
+        return false;
       }
 
       const bucket = TF_SECONDS[timeframe] ?? 3600;
       const now = Math.floor(Date.now() / 1000);
       const barTime = Math.floor(now / bucket) * bucket;
+      const lastBucket = Math.floor(last.time / bucket) * bucket;
+      if (lastBucket > barTime) {
+        setTickStatus("stale");
+        return false;
+      }
+      if (now - last.time >= bucket * 3) {
+        setTickStatus("stale");
+        return false;
+      }
 
+      const startedNewBar = barTime > lastBucket;
       let bar: Candle;
-      if (barTime > last.time && now - last.time < bucket * 3) {
+      if (startedNewBar) {
         bar = {
           time: barTime,
           open: last.close,
@@ -786,41 +919,82 @@ export function LiveChart({
           low: bar.low,
           close: bar.close,
         });
-      } catch {}
+      } catch {
+        setTickStatus("stale");
+        return false;
+      }
 
-      const ov = computeOverlays(selectedPair, candles);
-      overlaysRef.current = ov;
-      rsiSeriesRef.current?.setData(
-        ov.rsi.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
-      );
-      renderOverlays(candles, ov);
+      const nowMs = Date.now();
+      if (startedNewBar || nowMs - lastOverlayAtRef.current >= 1000) {
+        const ov = computeOverlays(selectedPair, candles);
+        overlaysRef.current = ov;
+        lastOverlayAtRef.current = nowMs;
+        rsiSeriesRef.current?.setData(
+          ov.rsi.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+        );
+        renderOverlays(candles, ov);
+      }
 
       setLastPrice(price);
-      setPrevClose(
-        candles.length > 1 ? candles[candles.length - 2].close : last.open
-      );
+      setPrevClose(candles.length > 1 ? candles[candles.length - 2].close : bar.open);
       setTickSource(source);
-      setLastUpdate(new Date());
+      setTickStatus("live");
+      setLastTickAt(new Date(nowMs));
+      lastTickAtRef.current = nowMs;
+      setLastUpdate(new Date(nowMs));
       setCandleCount(candles.length);
+      return true;
     },
     [selectedPair, timeframe, renderOverlays]
   );
 
   useEffect(() => {
     let stopped = false;
+    let inFlight = false;
 
     const poll = async () => {
-      if (document.hidden) return;
+      if (stopped || inFlight || document.hidden) return;
+      if (!online || !navigator.onLine) {
+        setTickStatus("offline");
+        return;
+      }
+
+      inFlight = true;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 7000);
       try {
         const res = await fetch(
           `/api/tick?pair=${encodeURIComponent(selectedPair)}`,
-          { cache: "no-store" }
+          { cache: "no-store", signal: controller.signal }
         );
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
-        if (stopped || !json?.price) return;
-        applyTick(Number(json.price), json.source ?? "—");
-      } catch {}
+        if (stopped || json?.pair !== selectedPair) return;
+
+        const price = Number(json.price);
+        const fetchedAge = Date.now() - Number(json.fetchedAt);
+        const sourceAge = json.time != null
+          ? Date.now() - Number(json.time) * 1000
+          : 0;
+        const maxSourceAge = json.source === "yahoo" ? 120_000 : 15_000;
+        if (
+          !Number.isFinite(price) ||
+          price <= 0 ||
+          !Number.isFinite(fetchedAge) ||
+          fetchedAge > 12_000 ||
+          sourceAge > maxSourceAge
+        ) {
+          setTickStatus("stale");
+          return;
+        }
+
+        applyTick(price, json.source ?? "—");
+      } catch {
+        if (!stopped) setTickStatus("stale");
+      } finally {
+        clearTimeout(timeout);
+        inFlight = false;
+      }
     };
 
     poll();
@@ -830,15 +1004,15 @@ export function LiveChart({
       stopped = true;
       clearInterval(interval);
     };
-  }, [selectedPair, applyTick]);
+  }, [selectedPair, applyTick, online]);
 
   // ===== LAYER TOGGLES =====
 
   useEffect(() => {
     const ov = overlaysRef.current;
-    if (!ov) return;
-    renderOverlays(candlesRef.current, ov);
-  }, [layers, showOverlays, renderOverlays]);
+    if (ov) renderOverlays(candlesRef.current, ov);
+    else drawBoxes();
+  }, [layers, showOverlays, renderOverlays, drawBoxes]);
 
   // ===== SCREENSHOT + ANALYSIS =====
 
@@ -879,26 +1053,40 @@ export function LiveChart({
           const y = (rect.top - hostRect.top) * scaleY;
           const width = rect.width * scaleX;
           const height = rect.height * scaleY;
+          ctx.textBaseline = "alphabetic";
 
-          ctx.fillStyle = style.backgroundColor;
-          ctx.fillRect(x, y, width, height);
-          ctx.strokeStyle = style.borderTopColor;
-          ctx.lineWidth = Math.max(1, Number.parseFloat(style.borderTopWidth) * scaleX);
-          ctx.setLineDash(style.borderTopStyle === "dashed" ? [4 * scaleX, 4 * scaleX] : []);
-          ctx.strokeRect(x, y, width, height);
-          ctx.setLineDash([]);
+          if (box.tagName === "DIV") {
+            ctx.fillStyle = style.backgroundColor;
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeStyle = style.borderTopColor;
+            ctx.lineWidth = Math.max(1, Number.parseFloat(style.borderTopWidth) * scaleX);
+            ctx.setLineDash(style.borderTopStyle === "dashed" ? [4 * scaleX, 4 * scaleX] : []);
+            ctx.strokeRect(x, y, width, height);
+            ctx.setLineDash([]);
 
-          const label = box.querySelector("span");
-          if (label) {
-            const labelStyle = getComputedStyle(label);
-            const fontSize = Number.parseFloat(labelStyle.fontSize) || 9;
-            ctx.font = `700 ${fontSize * scaleX}px sans-serif`;
-            ctx.fillStyle = labelStyle.color;
-            ctx.fillText(
-              label.textContent || "",
-              x + 5 * scaleX,
-              y + (fontSize + 1) * scaleY
-            );
+            const label = box.querySelector("span");
+            if (label) {
+              const labelStyle = getComputedStyle(label);
+              const fontSize = Number.parseFloat(labelStyle.fontSize) || 9;
+              ctx.font = `700 ${fontSize * scaleX}px sans-serif`;
+              ctx.fillStyle = labelStyle.color;
+              ctx.fillText(
+                label.textContent || "",
+                x + 5 * scaleX,
+                y + (fontSize + 1) * scaleY
+              );
+            }
+          } else if (box.tagName === "SPAN") {
+            ctx.fillStyle = style.backgroundColor;
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeStyle = style.borderTopColor;
+            ctx.lineWidth = Math.max(1, Number.parseFloat(style.borderTopWidth) * scaleX);
+            ctx.strokeRect(x, y, width, height);
+            const fontSize = Number.parseFloat(style.fontSize) || 9;
+            ctx.font = `800 ${fontSize * scaleX}px sans-serif`;
+            ctx.fillStyle = style.color;
+            ctx.textBaseline = "middle";
+            ctx.fillText(box.textContent || "", x + 5 * scaleX, y + height / 2);
           }
         }
         ctx.restore();
@@ -911,25 +1099,49 @@ export function LiveChart({
   }, []);
 
   const handleAnalyze = async () => {
-    if (loading || error || candleCount === 0 || analyzing) return;
+    if (!feedFresh || loading || error || candleCount === 0 || analyzing) return;
+
+    analysisControllerRef.current?.abort();
+    const controller = new AbortController();
+    const sequence = ++analysisSequenceRef.current;
+    analysisControllerRef.current = controller;
+    const pair = selectedPair;
+    const tf = timeframe;
+    const timeout = setTimeout(() => controller.abort(), 45000);
 
     setAnalyzing(true);
     setAnalyzeError(null);
 
     const shot = captureCanvas()?.toDataURL("image/png") ?? null;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000);
+    const showResult = (data: any) => {
+      if (sequence !== analysisSequenceRef.current) return;
+      activeSetupRef.current =
+        data.signal?.zone && Number.isFinite(data.signal.entryPrice)
+          ? { ...data.signal, pair }
+          : null;
+      drawBoxes();
+      setAnalysis({
+        status: data.status,
+        message: data.message,
+        analysis: data.analysis,
+        signal: data.signal,
+        smc: data.smc,
+        pair,
+        timeframe: tf,
+        shot,
+        executionId: data.executionId,
+        executionStatus: data.executionStatus,
+        executionQueued: data.executionQueued,
+        duplicate: data.duplicate,
+      });
+    };
 
     try {
       const res = await fetch("/api/analyze-chart", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
-        body: JSON.stringify({
-          pair: selectedPair,
-          timeframe,
-          candles: candlesRef.current.slice(-400),
-        }),
+        body: JSON.stringify({ pair, timeframe: tf, autoExecute: true }),
       });
       const text = await res.text();
       const data = text
@@ -942,28 +1154,30 @@ export function LiveChart({
           })()
         : null;
 
+      if (sequence !== analysisSequenceRef.current) return;
+
       if (!res.ok) {
-        setAnalyzeError(
-          data?.message || data?.error || `Analysis failed (HTTP ${res.status}).`
-        );
+        const completed = data?.analysis;
+        if (completed && completed.status === "signal") {
+          showResult(completed);
+          setAnalyzeError(
+            data?.message || "Analysis completed, but broker queueing failed."
+          );
+        } else {
+          setAnalyzeError(
+            data?.message || data?.error || `Analysis failed (HTTP ${res.status}).`
+          );
+        }
         return;
       }
-      if (!data || !["signal", "neutral"].includes(data.status)) {
+      if (!data || data.status !== "signal") {
         setAnalyzeError("The analysis service returned an invalid response.");
         return;
       }
 
-      setAnalysis({
-        status: data.status,
-        message: data.message,
-        analysis: data.analysis,
-        signal: data.signal,
-        smc: data.smc,
-        pair: selectedPair,
-        timeframe,
-        shot,
-      });
+      showResult(data);
     } catch (e: any) {
+      if (sequence !== analysisSequenceRef.current) return;
       setAnalyzeError(
         e?.name === "AbortError"
           ? "Analysis timed out. Please try again."
@@ -971,23 +1185,45 @@ export function LiveChart({
       );
     } finally {
       clearTimeout(timeout);
-      setAnalyzing(false);
+      if (sequence === analysisSequenceRef.current) {
+        analysisControllerRef.current = null;
+        setAnalyzing(false);
+      }
     }
   };
 
-  const handleScreenshot = () => {
+  const handleScreenshot = async () => {
     const canvas = captureCanvas();
     if (!canvas) return;
-    const link = document.createElement("a");
-    link.download = `${selectedPair.replace("/", "")}-${timeframe}-${Date.now()}.png`;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
+    const filename = `${selectedPair.replace("/", "")}-${timeframe}-${Date.now()}.png`;
+    setActionError(null);
+
+    try {
+      if (onSaveSnapshot) {
+        await onSaveSnapshot(canvas.toDataURL("image/png"), filename);
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.download = filename;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch {
+      setActionError("Could not save the screenshot. Please try again.");
+    }
   };
 
   const change =
     lastPrice != null && prevClose != null ? lastPrice - prevClose : null;
   const changePct =
     change != null && prevClose ? (change / prevClose) * 100 : null;
+  const feedLabel = !online || !networkOnline
+    ? "Offline"
+    : feedFresh
+      ? "Live"
+      : tickStatus === "connecting"
+        ? "Connecting"
+        : "Stale";
 
   const toggleLayer = (key: keyof LayerFlags) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1055,11 +1291,15 @@ export function LiveChart({
           <div className="flex items-center gap-1.5">
             <span
               className={`h-2 w-2 rounded-full ${
-                error ? "bg-destructive" : "animate-pulse bg-emerald-500"
+                error
+                  ? "bg-destructive"
+                  : feedFresh
+                    ? "bg-emerald-500"
+                    : "bg-warning"
               }`}
             />
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {error ? "Offline" : `Live · ${tickSource}`}
+              {error ? "Offline" : `${feedLabel}${feedFresh ? ` · ${tickSource}` : ""}`}
             </span>
           </div>
           <div className="text-right">
@@ -1149,7 +1389,8 @@ export function LiveChart({
       <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface/60 px-3 py-3">
         <button
           onClick={handleAnalyze}
-          disabled={analyzing || loading || !!error || candleCount === 0}
+          disabled={!feedFresh || analyzing || loading || !!error || candleCount === 0}
+          title={!feedFresh ? "Reconnect and wait for a fresh live tick before analyzing." : undefined}
           className="inline-flex items-center gap-2 rounded-lg bg-brand-gradient px-4 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-95 disabled:opacity-60"
         >
           {analyzing ? (
@@ -1173,6 +1414,18 @@ export function LiveChart({
           </span>
         )}
       </div>
+
+      {!feedFresh && !loading && !error && (
+        <div className="border-t border-warning/20 bg-warning/10 px-4 py-2 text-xs font-semibold text-warning">
+          Live feed is {feedLabel.toLowerCase()}. Analysis stays paused until a fresh tick arrives.
+        </div>
+      )}
+
+      {actionError && (
+        <div role="alert" className="border-t border-destructive/30 bg-destructive/5 px-4 py-2 text-sm font-medium text-destructive">
+          {actionError}
+        </div>
+      )}
 
       {/* ANALYSIS RESULT */}
       {analyzeError && (
@@ -1201,10 +1454,14 @@ export function LiveChart({
                     : "bg-muted text-muted-foreground"
               }`}
             >
-              {s?.signalLabel || "NEUTRAL"}
+              {s?.signalLabel || "SIGNAL"}
             </div>
             <button
-              onClick={() => setAnalysis(null)}
+              onClick={() => {
+                activeSetupRef.current = null;
+                setAnalysis(null);
+                drawBoxes();
+              }}
               className="rounded-md p-1 text-muted-foreground hover:bg-muted"
               aria-label="Close analysis"
             >
@@ -1239,38 +1496,19 @@ export function LiveChart({
             </div>
           )}
 
-          {analysis.status === "neutral" && s && (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                {
-                  label: "Current price",
-                  value: formatPrice(analysis.pair, s.currentPrice),
-                },
-                {
-                  label: "SMC bias",
-                  value: analysis.smc?.direction?.toUpperCase() || "NEUTRAL",
-                },
-                {
-                  label: "SMC score",
-                  value: `${analysis.smc?.score ?? 0}/100`,
-                },
-                {
-                  label: "Price check",
-                  value: s.priceVerification?.verified ? "Verified" : "Unverified",
-                },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-lg border border-border bg-card px-3 py-2"
-                >
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {item.label}
-                  </div>
-                  <div className="text-sm font-bold tabular-nums text-foreground">
-                    {item.value}
-                  </div>
-                </div>
-              ))}
+          {analysis.executionId && (
+            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs font-semibold ${
+              analysis.executionQueued
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                : "border-border bg-card text-muted-foreground"
+            }`}>
+              {analysis.executionQueued
+                ? s?.orderType?.startsWith("MARKET")
+                  ? "Immediate market entry queued for the connected executor."
+                  : "Pending limit queued for the connected executor."
+                : analysis.duplicate
+                  ? `Existing setup already ${analysis.executionStatus || "queued"}; no duplicate order sent.`
+                  : `Executor status: ${analysis.executionStatus || "pending"}.`}
             </div>
           )}
 
@@ -1299,6 +1537,22 @@ export function LiveChart({
                   SMC {analysis.smc.score}/100 · {analysis.smc.confidence}
                 </span>
               )}
+            </div>
+          )}
+
+          {analysis.smc?.volumeProfile && (
+            <div className="mt-3 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+              <span className="font-bold text-foreground">Volume profile</span>{" "}
+              ({analysis.smc.volumeProfile.source === "range-proxy" ? "estimated" : "feed volume"})
+              {" · "}POC {formatPrice(analysis.pair, analysis.smc.volumeProfile.poc)}
+              {" · "}VAH {formatPrice(analysis.pair, analysis.smc.volumeProfile.vah)}
+              {" · "}VAL {formatPrice(analysis.pair, analysis.smc.volumeProfile.val)}
+            </div>
+          )}
+
+          {s?.entrySignal?.type === "none" && s?.orderType?.includes("LIMIT") && (
+            <div className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
+              Low-confidence limit staged at the zone. No closed-bar confirmation yet.
             </div>
           )}
 

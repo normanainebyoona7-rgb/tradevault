@@ -34,6 +34,7 @@ export async function GET(request: Request) {
 
   const verified = await getVerifiedPrice(pair, {
     price: latest.close,
+    rawPrice: dataset.basisAdjustment?.rawPrice,
     source: dataset.source,
     timeframe,
     time: latest.time,

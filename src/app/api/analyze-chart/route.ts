@@ -1,12 +1,10 @@
 // src/app/api/analyze-chart/route.ts
 // Analyzes a live chart with cross-source price verification, ATR-based SL,
 // risk-multiple TPs, and an SMC / ICT / supply-demand breakdown.
-// Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT — NO NEUTRAL orders.
+// Orders emitted: BUY, SELL, BUY LIMIT, SELL LIMIT.
+// Verified charts always stage an actionable setup; stale or unverified prices fail closed.
 //
-// NEUTRAL: when buildSignal returns direction "neutral", we return status
-// "neutral" with no save and no Telegram — callers must treat it as "no trade".
-//
-// Tier gating: free = TP1 only, vip = TP1+TP2, vvip = TP1..TP4 + descriptions.
+// Tier gating: free = TP1 only, vip = TP1+TP2, vvip = TP1..TP3 + descriptions.
 // Admins (by email) bypass tier gating and always get vvip access.
 // Enforcement happens server-side via gateSignal() — locked TPs never leave.
 //
@@ -81,6 +79,7 @@ function buildSmcPayload(
     structure: overlays.structure,
     premiumDiscount: overlays.premiumDiscount,
     liquiditySweeps: overlays.liquiditySweeps,
+    volumeProfile: overlays.volumeProfile,
     killzone: activeKillzone(),
   };
 }
@@ -233,10 +232,22 @@ export async function POST(request: Request) {
     const currentPrice = latest.close;
     const verified = await getVerifiedPrice(pair, {
       price: currentPrice,
+      rawPrice: dataset.basisAdjustment?.rawPrice,
       source: dataset.source,
       timeframe,
       time: latest.time,
     });
+    if (!verified.ok) {
+      return NextResponse.json(
+        {
+          error: "Price verification failed",
+          message:
+            verified.reason ||
+            "Market prices could not be cross-validated. Analysis is paused until they agree.",
+        },
+        { status: 409 }
+      );
+    }
     const overlays = computeOverlays(pair, candles);
     const smc = buildSmcPayload(
       pair,
@@ -258,67 +269,22 @@ export async function POST(request: Request) {
     const priceCheck = verified.ok
       ? `Verified: ${verified.primarySource} vs ${verified.comparisonSource} (${verified.diffPct.toFixed(3)}% difference)`
       : verified.reason || "Price could not be cross-validated";
+    const sourceLabel = dataset.basisAdjustment
+      ? "server Yahoo futures candles basis-aligned to Swissquote spot + independent price verification"
+      : `server ${dataset.source} candles`;
+    const volumeLine = overlays.volumeProfile
+      ? `Volume profile (${overlays.volumeProfile.source}): POC ${formatPrice(pair, overlays.volumeProfile.poc)} | VAH ${formatPrice(pair, overlays.volumeProfile.vah)} | VAL ${formatPrice(pair, overlays.volumeProfile.val)}`
+      : "Volume profile: unavailable";
 
-    // ---- NEUTRAL: no valid trade ----
     if (signal.direction === "neutral") {
-      await logAnalysisEvent({
-        session,
-        pair,
-        timeframe,
-        direction: "neutral",
-        tier: userTier,
-      });
-
-      const analysisText = `NEUTRAL — ${pair} (${timeframe})
-
-Decision: No trade
-${signal.notes.map((note) => `• ${note}`).join("\n")}
-
-Current price: ${formatPrice(pair, currentPrice)}
-SMC/ICT bias: ${smc.direction.toUpperCase()} · ${smc.score}/100 (${smc.confidence})
-Structure: ${structureLine}
-Premium/discount: ${pdLine}
-Killzone: ${smc.killzone.active ? smc.killzone.name : "No active killzone"}
-Price check: ${priceCheck}`;
-
       return NextResponse.json(
-        gateSignal(
-          {
-            status: "neutral",
-            message:
-              signal.notes
-                .find((note) => note.startsWith("Neutral"))
-                ?.replace(/^Neutral\s*[—-]\s*/i, "") ||
-              "No valid trade setup right now.",
-            analysis: analysisText,
-            smc,
-            signal: {
-              direction: "neutral",
-              signalLabel: "NEUTRAL",
-              confidence: "NEUTRAL",
-              confidenceScore: 0,
-              notes: signal.notes,
-              zone: signal.zone,
-              entryCandle: signal.entryCandle,
-              currentPrice,
-              entryPrice: null,
-              stopLossPrice: null,
-              takeProfit1Price: null,
-              takeProfit2Price: null,
-              takeProfit3Price: null,
-              riskPips: 0,
-              timeframe,
-              candleCount: candles.length,
-              confluenceBreakdown: signal.confluences,
-              priceVerification: signal.priceVerification,
-              dataSource: verified.ok
-                ? `server ${dataset.source} candles + independent price verification`
-                : `server ${dataset.source} candles (unverified)`,
-            },
-            direction: "NEUTRAL",
-          },
-          userTier
-        )
+        {
+          error: "No tradeable setup",
+          message:
+            signal.notes.find((note) => !note.startsWith("Neutral")) ||
+            "The chart does not contain enough market structure to stage a safe limit order.",
+        },
+        { status: 409 }
       );
     }
 
@@ -388,6 +354,7 @@ Price check: ${priceCheck}`;
     const analysisText = `${signal.signalLabel} — ${pair} (${timeframe})
 
 Zone: ${signal.zone!.type.toUpperCase()} ${formatPrice(pair, signal.zone!.bottom)} - ${formatPrice(pair, signal.zone!.top)}
+Zone source: ${signal.zone!.source}
 Entry: ${formatPrice(pair, signal.entry)}
 Stop loss (structure / ATR): ${formatPrice(pair, signal.stopLoss)}
 TP1 (1.0R): ${formatPrice(pair, signal.takeProfit1)}
@@ -402,6 +369,7 @@ SMC/ICT: ${smc.direction.toUpperCase()} bias, ${smc.score}/100 (${smc.confidence
 Structure: ${structureLine}
 Premium/discount: ${pdLine}
 Killzone: ${smc.killzone.active ? smc.killzone.name : "No active killzone"}
+${volumeLine}
 Price check: ${priceCheck}`;
 
     const payload = {
@@ -438,8 +406,8 @@ Price check: ${priceCheck}`;
 
         timeframe,
         dataSource: verified.ok
-          ? `server ${dataset.source} candles + independent price verification`
-          : `server ${dataset.source} candles (unverified)`,
+          ? `${sourceLabel} (verified)`
+          : `${sourceLabel} (unverified)`,
         status: "signal",
 
         zone: signal.zone,
@@ -447,6 +415,7 @@ Price check: ${priceCheck}`;
         confluences: signal.notes,
         candleCount: candles.length,
         confluenceBreakdown: signal.confluences,
+        volumeProfile: signal.volumeProfile,
 
         fibonacci,
         positionSizing: {
@@ -464,6 +433,7 @@ Price check: ${priceCheck}`;
     await logAnalysisEvent({ session, pair, timeframe, direction, tier: userTier });
 
     let executionId: string | undefined;
+    let executionStatus: string | undefined;
     let duplicate = false;
     if (body.autoExecute === true && isAdminEmail((session as any)?.email)) {
       try {
@@ -499,6 +469,7 @@ Price check: ${priceCheck}`;
           },
         });
         executionId = String(queued.order._id);
+        executionStatus = queued.order.status;
         duplicate = queued.duplicate;
 
         if (!duplicate && process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHANNEL_ID) {
@@ -540,6 +511,8 @@ Price check: ${priceCheck}`;
     return NextResponse.json({
       ...gateSignal(payload, userTier),
       executionId,
+      executionStatus,
+      executionQueued: executionStatus != null && ["pending", "claimed", "submitting"].includes(executionStatus),
       autoExecuted: !!executionId,
       duplicate,
     });

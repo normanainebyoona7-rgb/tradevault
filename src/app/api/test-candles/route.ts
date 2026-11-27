@@ -37,6 +37,7 @@ export async function GET(request: Request) {
     candles: dataset.candles,
     overlays,
     source: dataset.source,
+    basisAdjustment: dataset.basisAdjustment,
     fetchedAt: dataset.fetchedAt,
   });
 }
