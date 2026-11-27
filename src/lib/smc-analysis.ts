@@ -71,7 +71,7 @@ export interface SMCSignal {
   supplyDemandZones: SMCSupplyDemand[];
   sma9: number;
   sma21: number;
-  sma200: number;
+  sma200: number | null;
   candleCount: number;
   mtf5: MTFCheck | null;
   mtf15: MTFCheck | null;
@@ -96,11 +96,8 @@ function avgCandleRange(candles: SMCCandle[]): number {
   return total / sample.length;
 }
 
-export function sma(candles: SMCCandle[], period: number): number {
-  if (candles.length < period) {
-    const closes = candles.map(c => c.close);
-    return closes.reduce((s, v) => s + v, 0) / closes.length;
-  }
+export function sma(candles: SMCCandle[], period: number): number | null {
+  if (candles.length === 0 || candles.length < period) return null;
   const slice = candles.slice(-period);
   const sum = slice.reduce((s, c) => s + c.close, 0);
   return sum / period;
@@ -382,7 +379,7 @@ function determineDirection(
   fvgs: SMCFVG[],
   sdZones: SMCSupplyDemand[],
   currentPrice: number,
-): { direction: "long" | "short"; score: number; confluences: string[] } {
+): { direction: "long" | "short" | "neutral"; score: number; confluences: string[] } {
   const confluences: string[] = [];
   let longScore = 0;
   let shortScore = 0;
@@ -390,6 +387,10 @@ function determineDirection(
   const sma9 = sma(candles, 9);
   const sma21 = sma(candles, 21);
   const sma200 = sma(candles, 200);
+
+  if (sma9 == null || sma21 == null) {
+    return { direction: "neutral", score: 0, confluences: ["Not enough candles for SMA direction"] };
+  }
 
   if (sma9 > sma21) {
     longScore += 25;
@@ -399,12 +400,14 @@ function determineDirection(
     confluences.push(`✅ SMA9 (${formatPrice(pair, sma9)}) < SMA21 (${formatPrice(pair, sma21)}) — short-term bearish`);
   }
 
-  if (currentPrice > sma200) {
+  if (sma200 != null && currentPrice > sma200) {
     longScore += 20;
     confluences.push(`✅ Price above SMA200 (${formatPrice(pair, sma200)}) — bullish bias`);
-  } else {
+  } else if (sma200 != null) {
     shortScore += 20;
     confluences.push(`✅ Price below SMA200 (${formatPrice(pair, sma200)}) — bearish bias`);
+  } else {
+    confluences.push("SMA200 unavailable — fewer than 200 closed candles");
   }
 
   const buyAbove = liquidity
@@ -474,8 +477,17 @@ function determineDirection(
     confluences.push(`✅ Recent candles bearish (${recent.length - greenCount}/${recent.length})`);
   }
 
-  const direction = longScore >= shortScore ? "long" : "short";
-  const score = Math.min(Math.max(longScore, shortScore), 100);
+  const longTotal = Math.min(longScore, 100);
+  const shortTotal = Math.min(shortScore, 100);
+  const winningScore = Math.max(longTotal, shortTotal);
+  const margin = Math.abs(longTotal - shortTotal);
+  const direction =
+    winningScore < 50 || margin < 10
+      ? "neutral"
+      : longTotal > shortTotal
+        ? "long"
+        : "short";
+  const score = direction === "neutral" ? Math.min(winningScore, 49) : winningScore;
 
   return { direction, score, confluences };
 }
@@ -646,7 +658,16 @@ export function buildSMCSignal(
 
   const decision = determineDirection(pair, candles, liquidity, obs, fvgs, sdZones, currentPrice);
 
-  const levels = placeSLTP(decision.direction, currentPrice, liquidity, obs, sdZones, candles);
+  const levels =
+    decision.direction === "neutral"
+      ? {
+          stopLoss: currentPrice,
+          tp1: currentPrice,
+          tp2: currentPrice,
+          tp3: currentPrice,
+          notes: ["No executable SMC levels while bias is neutral"],
+        }
+      : placeSLTP(decision.direction, currentPrice, liquidity, obs, sdZones, candles);
 
   const riskPips = Math.round(Math.abs(currentPrice - levels.stopLoss) / pipSize);
   const rewardPips1 = Math.round(Math.abs(levels.tp1 - currentPrice) / pipSize);
@@ -664,7 +685,9 @@ export function buildSMCSignal(
   let mtfScoreAdjustment = 0;
   let mtfAlignment = "none";
 
-  if (mtf5 && mtf15) {
+  if (decision.direction === "neutral") {
+    mtfAlignment = "neutral";
+  } else if (mtf5 && mtf15) {
     const mtf5Bullish = mtf5.liquiditySweep === "bullish" || mtf5.reversal === "bullish";
     const mtf5Bearish = mtf5.liquiditySweep === "bearish" || mtf5.reversal === "bearish";
     const mtf15Bullish = mtf15.liquiditySweep === "bullish" || mtf15.reversal === "bullish";
@@ -714,7 +737,14 @@ export function buildSMCSignal(
     ...levels.notes.map(n => `🎯 ${n}`),
   ];
 
-  const confidence = finalScore >= 70 ? "HIGH" : finalScore >= 50 ? "MEDIUM" : "LOW";
+  const confidence =
+    decision.direction === "neutral"
+      ? "NEUTRAL"
+      : finalScore >= 70
+        ? "HIGH"
+        : finalScore >= 50
+          ? "MEDIUM"
+          : "LOW";
 
   return {
     direction: decision.direction,
@@ -738,8 +768,8 @@ export function buildSMCSignal(
     orderBlocks: obs,
     fvgs,
     supplyDemandZones: sdZones,
-    sma9,
-    sma21,
+    sma9: sma9 ?? currentPrice,
+    sma21: sma21 ?? currentPrice,
     sma200,
     candleCount: candles.length,
     mtf5,

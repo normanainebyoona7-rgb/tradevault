@@ -93,11 +93,11 @@ export function detectMarketStructure(candles: Candle[]): MarketStructure {
   let pendingLow: StructureSwing | null = null;
 
   for (let i = 0; i < candles.length; i++) {
-    while (hi < highs.length && highs[hi].index < i) {
+    while (hi < highs.length && highs[hi].index + 2 <= i) {
       if (!pendingHigh || highs[hi].index > pendingHigh.index) pendingHigh = highs[hi];
       hi++;
     }
-    while (lo < lows.length && lows[lo].index < i) {
+    while (lo < lows.length && lows[lo].index + 2 <= i) {
       if (!pendingLow || lows[lo].index > pendingLow.index) pendingLow = lows[lo];
       lo++;
     }

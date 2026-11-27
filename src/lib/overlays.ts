@@ -110,19 +110,13 @@ const EMPTY_STRUCTURE: MarketStructure = {
 // ===== INDICATOR MATH =====
 
 function calcEMA(values: number[], period: number): number[] {
+  if (values.length < period) return [];
+
   const k = 2 / (period + 1);
-  const out: number[] = [];
-
-  for (let i = 0; i < values.length; i++) {
-    if (i === 0) {
-      out.push(values[0]);
-    } else if (i < period) {
-      out.push(values[i]);
-    } else {
-      out.push(values[i] * k + out[i - 1] * (1 - k));
-    }
+  const out: number[] = [values.slice(0, period).reduce((sum, value) => sum + value, 0) / period];
+  for (let i = period; i < values.length; i++) {
+    out.push(values[i] * k + out[i - 1] * (1 - k));
   }
-
   return out;
 }
 
@@ -250,15 +244,15 @@ function calcVWAP(candles: Candle[]): IndicatorLine[] {
       lastDay = day;
     }
 
-    const typical = (c.high + c.low + c.close) / 3;
-    const vol = c.volume > 0 ? c.volume : 1;
-    cumPV += typical * vol;
-    cumVol += vol;
+    if (c.volume > 0) {
+      const typical = (c.high + c.low + c.close) / 3;
+      cumPV += typical * c.volume;
+      cumVol += c.volume;
+    }
 
-    out.push({
-      time: c.time,
-      value: cumVol > 0 ? cumPV / cumVol : c.close,
-    });
+    if (cumVol > 0) {
+      out.push({ time: c.time, value: cumPV / cumVol });
+    }
   }
 
   return out;
@@ -303,10 +297,12 @@ function calcPivots(candles: Candle[]): PivotLevels | null {
   if (candles.length < 20) return null;
 
   const now = candles[candles.length - 1].time;
-  const twoDaysAgo = now - 86400 * 2;
+  const currentDay = Math.floor(now / 86400);
+  const previousDayStart = (currentDay - 1) * 86400;
+  const currentDayStart = currentDay * 86400;
 
   const prevDayCandles = candles.filter(
-    (c) => c.time >= twoDaysAgo && c.time < now - 86400
+    (c) => c.time >= previousDayStart && c.time < currentDayStart
   );
 
   if (prevDayCandles.length === 0) return null;
@@ -375,14 +371,16 @@ function calcSessions(candles: Candle[]): SessionBox[] {
 
 function calcLargeRangeCandles(candles: Candle[]): LargeRangeMarker[] {
   const markers: LargeRangeMarker[] = [];
-  if (candles.length < 20) return markers;
+  if (candles.length < 21) return markers;
 
-  const avgRange =
-    candles.slice(-20).reduce((s, c) => s + (c.high - c.low), 0) / 20;
+  let rollingRange = candles
+    .slice(0, 20)
+    .reduce((sum, candle) => sum + candle.high - candle.low, 0);
 
   for (let i = 20; i < candles.length; i++) {
     const c = candles[i];
     const range = c.high - c.low;
+    const avgRange = rollingRange / 20;
     const rangePct = (range / c.close) * 100;
 
     if (rangePct >= 0.12 && range > avgRange * 1.5) {
@@ -393,6 +391,8 @@ function calcLargeRangeCandles(candles: Candle[]): LargeRangeMarker[] {
         rangePct,
       });
     }
+
+    rollingRange += range - (candles[i - 20].high - candles[i - 20].low);
   }
 
   return markers;
@@ -451,26 +451,23 @@ export function computeOverlays(pair: string, candles: Candle[]): Overlays {
   const sma200Arr: IndicatorLine[] = [];
 
   let sum = 0;
+  let sum21 = 0;
+  let sum200 = 0;
   for (let i = 0; i < closes.length; i++) {
     sum += closes[i];
+    sum21 += closes[i];
+    sum200 += closes[i];
     if (i >= 9) sum -= closes[i - 9];
+    if (i >= 21) sum21 -= closes[i - 21];
+    if (i >= 200) sum200 -= closes[i - 200];
     if (i >= 8) sma9Arr.push({ time: candles[i].time, value: sum / 9 });
-
-    if (i >= 21) {
-      let s21 = 0;
-      for (let j = i - 20; j <= i; j++) s21 += closes[j];
-      sma21Arr.push({ time: candles[i].time, value: s21 / 21 });
-    }
-    if (i >= 199) {
-      let s200 = 0;
-      for (let j = i - 199; j <= i; j++) s200 += closes[j];
-      sma200Arr.push({ time: candles[i].time, value: s200 / 200 });
-    }
+    if (i >= 20) sma21Arr.push({ time: candles[i].time, value: sum21 / 21 });
+    if (i >= 199) sma200Arr.push({ time: candles[i].time, value: sum200 / 200 });
   }
 
   // ===== EMA 50 =====
   const ema50Values = calcEMA(closes, 50);
-  const ema50: IndicatorLine[] = candles.map((c, i) => ({
+  const ema50: IndicatorLine[] = candles.slice(49).map((c, i) => ({
     time: c.time,
     value: ema50Values[i],
   }));

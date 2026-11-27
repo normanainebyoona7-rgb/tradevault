@@ -6,6 +6,8 @@
 
 import { NextResponse } from "next/server";
 import { toYahooSymbol } from "@/lib/data/candles";
+import { getSwissquoteQuote } from "@/lib/data/quotes";
+import { PAIRS } from "@/lib/pairs";
 
 export interface TickResponse {
   pair: string;
@@ -23,46 +25,7 @@ export interface TickResponse {
 
 const cache = new Map<string, { at: number; payload: TickResponse }>();
 const TTL_MS = 1500;
-
-async function fetchSwissquote(
-  pair: string
-): Promise<{ price: number; bid: number; ask: number } | null> {
-  const upper = pair.toUpperCase();
-  if (upper.startsWith("BTC") || upper.startsWith("ETH")) return null;
-
-  const [base, quote] = upper.split("/");
-  if (!base || !quote) return null;
-
-  const url =
-    "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/" +
-    `${encodeURIComponent(base)}/${encodeURIComponent(quote)}`;
-
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) return null;
-
-    const json: any = await res.json();
-    const row = Array.isArray(json) ? json[0] : null;
-    const profile =
-      row?.spreadProfilePrices?.find(
-        (p: any) => p?.spreadProfile === "Standard"
-      ) ?? row?.spreadProfilePrices?.[0];
-
-    const bid = Number(profile?.bid);
-    const ask = Number(profile?.ask);
-    if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0) {
-      return null;
-    }
-
-    return { price: (bid + ask) / 2, bid, ask };
-  } catch {
-    return null;
-  }
-}
+const MAX_CACHE_ENTRIES = 100;
 
 async function fetchYahooTick(pair: string): Promise<Partial<TickResponse> | null> {
   const symbol = toYahooSymbol(pair);
@@ -91,6 +54,12 @@ async function fetchYahooTick(pair: string): Promise<Partial<TickResponse> | nul
     const quote = result.indicators?.quote?.[0] ?? {};
     const lastIndex = timestamps.length - 1;
     const lastClose = lastIndex >= 0 ? quote.close?.[lastIndex] : null;
+    if (
+      lastIndex < 0 ||
+      Date.now() - Number(timestamps[lastIndex]) * 1000 > 120_000
+    ) {
+      return null;
+    }
 
     const price = Number(meta.regularMarketPrice ?? lastClose);
     if (!Number.isFinite(price) || price <= 0) return null;
@@ -111,9 +80,25 @@ async function fetchYahooTick(pair: string): Promise<Partial<TickResponse> | nul
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const pair = searchParams.get("pair") || "EUR/USD";
+  if (!PAIRS.includes(pair)) {
+    return NextResponse.json(
+      { error: "Unsupported market", message: "Choose a supported pair." },
+      { status: 400 }
+    );
+  }
+
+  const now = Date.now();
+  for (const [key, value] of cache) {
+    if (now - value.at >= TTL_MS) cache.delete(key);
+  }
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest == null) break;
+    cache.delete(oldest);
+  }
 
   const cached = cache.get(pair);
-  if (cached && Date.now() - cached.at < TTL_MS) {
+  if (cached && now - cached.at < TTL_MS) {
     return NextResponse.json(cached.payload);
   }
 
@@ -131,12 +116,12 @@ export async function GET(request: Request) {
     fetchedAt: Date.now(),
   };
 
-  const sq = await fetchSwissquote(pair);
+  const sq = await getSwissquoteQuote(pair);
   if (sq) {
     payload.price = sq.price;
     payload.bid = sq.bid;
     payload.ask = sq.ask;
-    payload.time = Math.floor(Date.now() / 1000);
+    payload.time = sq.time;
     payload.close = sq.price;
     payload.source = "swissquote";
   } else {

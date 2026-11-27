@@ -10,6 +10,7 @@ export interface ZoneCandle {
   low: number;
   close: number;
   is_green: boolean;
+  time?: number;
 }
 
 export interface SupplyDemandZone {
@@ -189,7 +190,7 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
         top: zoneTop,
         bottom: zoneBottom,
         index: i,
-        formedAt: zoneBottom,
+        formedAt: base.time ?? i,
         swingHigh,
         swingLow: zoneBottom,
         distanceToPrice,
@@ -219,7 +220,7 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
         top: zoneTop,
         bottom: zoneBottom,
         index: i,
-        formedAt: zoneTop,
+        formedAt: base.time ?? i,
         swingHigh: zoneTop,
         swingLow,
         distanceToPrice,
@@ -232,15 +233,14 @@ export function detectZones(candles: ZoneCandle[]): SupplyDemandZone[] {
   const relevantZones = zones.filter((z) => {
     if (z.index > candles.length - 5) return false;
 
+    const afterFormation = candles.slice(z.index + 2);
     if (z.type === "demand") {
+      if (afterFormation.some((candle) => candle.close < z.bottom)) return false;
       return z.bottom > currentPrice - avg * 8;
     }
 
-    if (z.type === "supply") {
-      return z.top < currentPrice + avg * 8;
-    }
-
-    return true;
+    if (afterFormation.some((candle) => candle.close > z.top)) return false;
+    return z.top < currentPrice + avg * 8;
   });
 
   relevantZones.sort((a, b) => a.distanceToPrice - b.distanceToPrice);
@@ -376,22 +376,37 @@ function detectPinBar(
 export function detectEntrySignal(
   candles: ZoneCandle[],
   direction: "bullish" | "bearish",
+  zone?: SupplyDemandZone,
+  lookback: number = 1
 ): EntrySignal {
-  const lrc = detectLargeRangeCandle(candles, direction);
-  if (lrc) return lrc;
+  const start = Math.max(1, candles.length - lookback);
+  const tolerance = avgRange(candles) * 0.25;
 
-  const engulfing = detectEngulfing(candles, direction);
-  if (engulfing) return engulfing;
+  for (let end = candles.length; end >= start; end--) {
+    const prefix = candles.slice(0, end);
+    const signal =
+      detectLargeRangeCandle(prefix, direction) ??
+      detectEngulfing(prefix, direction) ??
+      detectPinBar(prefix, direction);
+    if (!signal) continue;
 
-  const pinBar = detectPinBar(candles, direction);
-  if (pinBar) return pinBar;
+    const candle = candles[end - 1];
+    const touchesZone =
+      !zone ||
+      (direction === "bullish"
+        ? candle.low <= zone.top + tolerance && candle.close >= zone.bottom - tolerance
+        : candle.high >= zone.bottom - tolerance && candle.close <= zone.top + tolerance);
+    if (touchesZone) return signal;
+  }
 
   return {
     type: "none",
     direction,
     probability: 0,
     candleRange: 0,
-    reason: "No valid entry signal at zone",
+    reason: zone
+      ? `No closed confirmation at the zone in the last ${lookback} candles`
+      : "No valid entry signal at zone",
   };
 }
 

@@ -1,23 +1,35 @@
-// src/lib/analysis.ts
-// Cross-validates price from TWO sources: Dukascopy (chart candles) and Yahoo.
-// Returns a verified price only if both agree within tolerance.
-// If they disagree, the signal engine refuses to fire.
+import {
+  TIMEFRAME_SECONDS,
+  getCandlesFromYahoo,
+  type Candle,
+  type CandleSource,
+} from "@/lib/data/candles";
+import { getSwissquoteQuote, type LiveQuote } from "@/lib/data/quotes";
 
-import { getCandles } from "@/lib/data/candles";
+export interface ChartPriceSample {
+  price: number;
+  source: CandleSource;
+  timeframe: string;
+  time: number;
+}
 
 export interface VerifiedPrice {
   ok: boolean;
-  price: number;           // verified price (chart) if ok, else latest chart price
-  chartPrice: number;      // last candle close from candles.ts
+  price: number;
+  chartPrice: number;
   yahooPrice: number | null;
   dukascopyPrice: number | null;
-  diffPct: number;         // percent difference between sources
-  tolerance: number;       // tolerance used (as percent)
+  swissquotePrice: number | null;
+  primarySource: CandleSource;
+  comparisonSource: "yahoo" | "swissquote" | null;
+  chartTime: number;
+  comparisonTime: number | null;
+  diffPct: number;
+  tolerance: number;
+  fetchedAt: number;
   reason?: string;
 }
 
-// ===== TOLERANCE =====
-// Metals and crypto use wider tolerances because spot/futures and venue prices diverge.
 export function priceTolerancePct(pair: string): number {
   const upper = pair.toUpperCase();
   if (upper.includes("XAU") || upper.includes("XAG")) return 0.5;
@@ -25,134 +37,189 @@ export function priceTolerancePct(pair: string): number {
   return 0.1;
 }
 
-// ===== YAHOO SYMBOL MAP =====
-
-function toYahooSymbol(pair: string): string {
-  const upper = pair.toUpperCase();
-  if (upper.includes("XAU")) return "GC=F";
-  if (upper.includes("XAG")) return "SI=F";
-  if (upper.startsWith("BTC")) return "BTC-USD";
-  if (upper.startsWith("ETH")) return "ETH-USD";
-  const [base, quote] = upper.split("/");
-  if (base && quote) return `${base}${quote}=X`;
-  return "EURUSD=X";
-}
-
-async function fetchYahooPrice(pair: string): Promise<number | null> {
-  const symbol = toYahooSymbol(pair);
-  const url =
-    `https://query1.finance.yahoo.com/v8/finance/chart/` +
-    `${encodeURIComponent(symbol)}?interval=1m&range=1d`;
-
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-        Accept: "application/json",
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!res.ok) return null;
-
-    const json: any = await res.json();
-    const result = json?.chart?.result?.[0];
-
-    // Prefer meta.regularMarketPrice (most recent)
-    const meta = result?.meta;
-    if (meta?.regularMarketPrice) {
-      return Number(meta.regularMarketPrice);
+function closestCandle(candles: Candle[], time: number): Candle | null {
+  let closest: Candle | null = null;
+  let distance = Infinity;
+  for (const candle of candles) {
+    const nextDistance = Math.abs(candle.time - time);
+    if (nextDistance < distance) {
+      closest = candle;
+      distance = nextDistance;
     }
-
-    // Fallback: last non-null close in the quote array
-    const closes: (number | null)[] | undefined =
-      result?.indicators?.quote?.[0]?.close;
-
-    if (closes) {
-      for (let i = closes.length - 1; i >= 0; i--) {
-        if (closes[i] != null) return Number(closes[i]);
-      }
-    }
-
-    return null;
-  } catch {
-    return null;
   }
+  return closest;
 }
 
-// ===== MAIN =====
+function maxQuoteAgeMs(timeframe: string): number {
+  const interval = (TIMEFRAME_SECONDS[timeframe] ?? 3600) * 1000;
+  if (timeframe === "1m") return interval * 5;
+  if (timeframe === "5m") return interval * 3;
+  if (timeframe === "15m") return interval * 2;
+  if (timeframe === "30m") return interval * 3;
+  if (timeframe === "1H") return interval * 3;
+  if (timeframe === "4H") return interval * 3;
+  return interval * 3;
+}
+
+function result(args: {
+  sample: ChartPriceSample;
+  ok: boolean;
+  comparisonPrice: number | null;
+  comparisonSource: VerifiedPrice["comparisonSource"];
+  comparisonTime: number | null;
+  tolerance: number;
+  yahooPrice?: number | null;
+  dukascopyPrice?: number | null;
+  swissquotePrice?: number | null;
+  reason?: string;
+}): VerifiedPrice {
+  const diffPct =
+    args.comparisonPrice == null
+      ? 100
+      : (Math.abs(args.sample.price - args.comparisonPrice) / args.sample.price) * 100;
+
+  return {
+    ok: args.ok,
+    price: args.sample.price,
+    chartPrice: args.sample.price,
+    yahooPrice:
+      args.yahooPrice ??
+      (args.sample.source === "yahoo" ? args.sample.price : args.comparisonSource === "yahoo" ? args.comparisonPrice : null),
+    dukascopyPrice:
+      args.dukascopyPrice ??
+      (args.sample.source === "dukascopy" ? args.sample.price : null),
+    swissquotePrice: args.swissquotePrice ?? null,
+    primarySource: args.sample.source,
+    comparisonSource: args.comparisonSource,
+    chartTime: args.sample.time,
+    comparisonTime: args.comparisonTime,
+    diffPct,
+    tolerance: args.tolerance,
+    fetchedAt: Date.now(),
+    reason: args.reason,
+  };
+}
 
 export async function getVerifiedPrice(
   pair: string,
-  chartPriceOverride?: number
+  sample: ChartPriceSample
 ): Promise<VerifiedPrice> {
   const tolerance = priceTolerancePct(pair);
+  const invalid =
+    !Number.isFinite(sample.price) ||
+    sample.price <= 0 ||
+    !Number.isFinite(sample.time) ||
+    !TIMEFRAME_SECONDS[sample.timeframe] ||
+    (sample.source !== "dukascopy" && sample.source !== "yahoo");
 
-  // Chart price = last candle close from the requested timeframe when supplied,
-  // otherwise a fresh 1m close from Dukascopy.
-  let chartPrice = chartPriceOverride ?? 0;
-  if (chartPrice === 0) {
-    const chartCandles = await getCandles(pair, "1m", 1);
-    chartPrice =
-      chartCandles.length > 0 ? chartCandles[chartCandles.length - 1].close : 0;
-  }
-
-  // Yahoo price = independent second source
-  const yahooPrice = await fetchYahooPrice(pair);
-
-  // Chart data missing
-  if (chartPrice === 0) {
-    return {
+  if (invalid) {
+    return result({
+      sample,
       ok: false,
-      price: 0,
-      chartPrice: 0,
-      yahooPrice,
-      dukascopyPrice: null,
-      diffPct: 100,
+      comparisonPrice: null,
+      comparisonSource: null,
+      comparisonTime: null,
       tolerance,
-      reason: "Chart price unavailable (no candles from Dukascopy)",
-    };
+      reason: "Invalid server candle sample — cannot verify price",
+    });
   }
 
-  // Yahoo unavailable — cannot verify, but return chart price flagged as not-verified
-  if (yahooPrice === null) {
-    return {
+  let yahooCandle: Candle | null = null;
+  if (sample.source === "dukascopy") {
+    const yahooCandles = await getCandlesFromYahoo(pair, sample.timeframe, 500);
+    yahooCandle = closestCandle(yahooCandles, sample.time);
+    const interval = TIMEFRAME_SECONDS[sample.timeframe];
+    if (!yahooCandle || Math.abs(yahooCandle.time - sample.time) > interval / 2) {
+      yahooCandle = null;
+    }
+  }
+
+  let comparisonPrice: number | null = yahooCandle?.close ?? null;
+  let comparisonSource: VerifiedPrice["comparisonSource"] = yahooCandle ? "yahoo" : null;
+  let comparisonTime: number | null = yahooCandle?.time ?? null;
+  let swissquote: LiveQuote | null = null;
+
+  if (comparisonPrice == null) {
+    swissquote = await getSwissquoteQuote(pair);
+    if (swissquote) {
+      comparisonPrice = swissquote.price;
+      comparisonSource = "swissquote";
+      comparisonTime = swissquote.time;
+    }
+  }
+
+  if (comparisonPrice == null) {
+    return result({
+      sample,
       ok: false,
-      price: chartPrice,
-      chartPrice,
-      yahooPrice: null,
-      dukascopyPrice: chartPrice,
-      diffPct: 0,
+      comparisonPrice: null,
+      comparisonSource: null,
+      comparisonTime: null,
       tolerance,
-      reason: "Yahoo price unavailable — cannot cross-validate",
-    };
+      yahooPrice: sample.source === "yahoo" ? sample.price : null,
+      dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
+      reason: "No independent price source is available — cannot cross-validate",
+    });
   }
 
-  const diffPct = (Math.abs(chartPrice - yahooPrice) / chartPrice) * 100;
-
-  if (diffPct <= tolerance) {
-    return {
-      ok: true,
-      price: chartPrice,
-      chartPrice,
-      yahooPrice,
-      dukascopyPrice: chartPrice,
-      diffPct,
-      tolerance,
-    };
+  if (comparisonSource === "swissquote" && comparisonTime != null) {
+    const quoteAge = Date.now() - comparisonTime * 1000;
+    const candleAge = Date.now() - (sample.time + TIMEFRAME_SECONDS[sample.timeframe]) * 1000;
+    if (quoteAge > maxQuoteAgeMs(sample.timeframe)) {
+      return result({
+        sample,
+        ok: false,
+        comparisonPrice,
+        comparisonSource,
+        comparisonTime,
+        tolerance,
+        yahooPrice: sample.source === "yahoo" ? sample.price : null,
+        dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
+        swissquotePrice: swissquote?.price ?? comparisonPrice,
+        reason: `Independent quote is stale (${Math.round(quoteAge / 60000)} minutes old)`,
+      });
+    }
+    if (candleAge > maxQuoteAgeMs(sample.timeframe)) {
+      return result({
+        sample,
+        ok: false,
+        comparisonPrice,
+        comparisonSource,
+        comparisonTime,
+        tolerance,
+        yahooPrice: sample.source === "yahoo" ? sample.price : null,
+        dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
+        swissquotePrice: swissquote?.price ?? comparisonPrice,
+        reason: `Chart candle is too old for a live spot comparison (${Math.round(candleAge / 60000)} minutes old)`,
+      });
+    }
   }
 
-  return {
-    ok: false,
-    price: chartPrice,
-    chartPrice,
-    yahooPrice,
-    dukascopyPrice: chartPrice,
-    diffPct,
+  const diffPct = (Math.abs(sample.price - comparisonPrice) / sample.price) * 100;
+  if (diffPct > tolerance) {
+    return result({
+      sample,
+      ok: false,
+      comparisonPrice,
+      comparisonSource,
+      comparisonTime,
+      tolerance,
+      yahooPrice: sample.source === "yahoo" ? sample.price : yahooCandle?.close ?? null,
+      dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
+      swissquotePrice: swissquote?.price ?? null,
+      reason: `Price mismatch: chart ${sample.price.toFixed(5)} vs ${comparisonSource} ${comparisonPrice.toFixed(5)} (${diffPct.toFixed(2)}% > ${tolerance}%)`,
+    });
+  }
+
+  return result({
+    sample,
+    ok: true,
+    comparisonPrice,
+    comparisonSource,
+    comparisonTime,
     tolerance,
-    reason: `Price mismatch: chart ${chartPrice.toFixed(5)} vs Yahoo ${yahooPrice.toFixed(5)} (${diffPct.toFixed(2)}% > ${tolerance}%)`,
-  };
+    yahooPrice: sample.source === "yahoo" ? sample.price : yahooCandle?.close ?? null,
+    dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
+    swissquotePrice: swissquote?.price ?? null,
+  });
 }

@@ -1,5 +1,7 @@
 // src/lib/subscription.ts
 
+import { isAdminEmail as isConfiguredAdminEmail } from "@/lib/admin";
+
 export interface SubscriptionPlan {
   id: string;
   name: string;
@@ -18,13 +20,8 @@ export const MERCHANT_PHONE_NUMBERS = {
 export const FREE_TRIAL_DAYS = 5;
 
 /* Admins bypass tier gating entirely. */
-const ADMIN_EMAILS = [
-  "normanainebyoona7@gmail.com",
-];
-
 export function isAdminEmail(email?: unknown): boolean {
-  const e = String(email ?? "").toLowerCase().trim();
-  return ADMIN_EMAILS.map((a) => a.toLowerCase()).includes(e);
+  return isConfiguredAdminEmail(email == null ? null : String(email));
 }
 
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
@@ -77,7 +74,7 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     durationDays: 30,
     features: [
       "Everything in VIP",
-      "Full AI analysis (TP1, TP2, TP3, TP4)",
+      "Full AI analysis (TP1, TP2, TP3)",
       "Trade management & descriptions",
       "All risk management",
       "Priority support",
@@ -98,7 +95,7 @@ export const TIER_ACCESS: Record<
 > = {
   free: { tps: [1], descriptions: false, label: "Free" },
   vip: { tps: [1, 2], descriptions: false, label: "VIP" },
-  vvip: { tps: [1, 2, 3, 4], descriptions: true, label: "VVIP" },
+  vvip: { tps: [1, 2, 3], descriptions: true, label: "VVIP" },
 };
 
 export function normalizeTier(raw: unknown): Tier {

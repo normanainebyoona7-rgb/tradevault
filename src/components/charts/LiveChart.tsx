@@ -20,6 +20,7 @@ import {
   ScanSearch,
   TrendingDown,
   TrendingUp,
+  WifiOff,
   X,
 } from "lucide-react";
 import { PAIR_GROUPS, formatPrice } from "@/lib/pairs";
@@ -103,6 +104,8 @@ export function LiveChart({
   initialPair,
   initialTimeframe,
   onDataLoaded,
+  online = true,
+  onSaveSnapshot,
 }: {
   onPairChange?: (pair: string) => void;
   onTimeframeChange?: (tf: string) => void;
@@ -113,10 +116,16 @@ export function LiveChart({
     timeframe: string;
     candleCount: number;
   }) => void;
+  online?: boolean;
+  onSaveSnapshot?: (dataUrl: string, filename: string) => Promise<void>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rsiContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const analysisControllerRef = useRef<AbortController | null>(null);
+  const analysisSequenceRef = useRef(0);
+  const lastOverlayAtRef = useRef(0);
+  const lastTickAtRef = useRef<number | null>(null);
 
   const chartRef = useRef<IChartApi | null>(null);
   const rsiChartRef = useRef<IChartApi | null>(null);
@@ -147,15 +156,42 @@ export function LiveChart({
   const [lastPrice, setLastPrice] = useState<number | null>(null);
   const [prevClose, setPrevClose] = useState<number | null>(null);
   const [tickSource, setTickSource] = useState<string>("connecting");
+  const [tickStatus, setTickStatus] = useState<"connecting" | "live" | "stale" | "offline">("connecting");
+  const [lastTickAt, setLastTickAt] = useState<Date | null>(null);
+  const [networkOnline, setNetworkOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine
+  );
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const feedFresh =
+    online &&
+    networkOnline &&
+    tickStatus === "live" &&
+    lastTickAt != null &&
+    Date.now() - lastTickAt.getTime() < 20_000;
 
   showOverlaysRef.current = showOverlays;
   layersRef.current = layers;
 
   // ===== BOX LAYER =====
+
+  useEffect(() => {
+    const handleOnline = () => setNetworkOnline(true);
+    const handleOffline = () => {
+      setNetworkOnline(false);
+      setTickStatus("offline");
+    };
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
 
   const drawBoxes = useCallback(() => {
     const host = overlayRef.current;
@@ -179,7 +215,7 @@ export function LiveChart({
       index: number,
       top: number,
       bottom: number,
-      opts: { fill: string; border: string; label: string; labelColor: string; dashed?: boolean }
+      opts: { fill: string; border: string; label: string; labelColor: string; dashed?: boolean; endTime?: number }
     ) => {
       const candle = candles[Math.min(Math.max(index, 0), candles.length - 1)];
       if (!candle) return;
@@ -192,7 +228,10 @@ export function LiveChart({
       if (yTop === null || yBottom === null) return;
 
       const left = Math.max(0, x);
-      const width = right - left;
+      const endX = opts.endTime == null
+        ? right
+        : timeScale.timeToCoordinate(opts.endTime as UTCTimestamp);
+      const width = (endX ?? right) - left;
       if (width <= 2) return;
 
       const height = Math.max(2, Math.abs(yBottom - yTop));
@@ -265,7 +304,22 @@ export function LiveChart({
         });
       }
     }
-  }, []);
+
+    if (flags.levels) {
+      const bucket = TF_SECONDS[timeframe] ?? 3600;
+      for (const session of ov.sessions.slice(-6)) {
+        const index = candles.findIndex((candle) => candle.time >= session.startTime);
+        if (index < 0) continue;
+        addBox(index, session.high, session.low, {
+          fill: "rgba(100,116,139,0.05)",
+          border: "rgba(100,116,139,0.35)",
+          label: session.name.toUpperCase(),
+          labelColor: theme.text,
+          endTime: session.endTime + bucket,
+        });
+      }
+    }
+  }, [timeframe]);
 
   const clearPriceLines = useCallback(() => {
     for (const entry of priceLinesRef.current) {
@@ -323,9 +377,12 @@ export function LiveChart({
       };
 
       if (flags.ma) {
+        addLine("sma9", ov.sma9, "#f59e0b", 1);
+        addLine("sma21", ov.sma21, "#3b82f6", 1);
         addLine("ema50", ov.ema50, "#10b981", 2);
         addLine("sma200", ov.sma200, "#6366f1", 2);
         addLine("vwap", ov.vwap, "#06b6d4", 1, LineStyle.Dashed);
+        addLine("supertrend", ov.supertrend, "#ec4899", 1, LineStyle.Dotted);
       }
 
       const addPriceLine = (
@@ -368,6 +425,13 @@ export function LiveChart({
       }
 
       if (flags.levels) {
+        const price = candles[candles.length - 1]?.close ?? 0;
+        const nearestRounds = [...ov.roundNumbers]
+          .sort((a, b) => Math.abs(a.level - price) - Math.abs(b.level - price))
+          .slice(0, 4);
+        for (const level of nearestRounds) {
+          addPriceLine(level.level, "#94a3b8", "RN", LineStyle.Dotted);
+        }
         if (ov.pivots) {
           const p = ov.pivots;
           addPriceLine(p.pp, "#94a3b8", "PP", LineStyle.Dotted);
@@ -378,6 +442,8 @@ export function LiveChart({
         }
         if (ov.premiumDiscount) {
           addPriceLine(ov.premiumDiscount.equilibrium, "#8b5cf6", "EQ", LineStyle.Dashed);
+          addPriceLine(ov.premiumDiscount.oteHigh, "#0ea5e9", "OTE 62", LineStyle.Dotted);
+          addPriceLine(ov.premiumDiscount.oteLow, "#0ea5e9", "OTE 79", LineStyle.Dotted);
         }
       }
 
@@ -583,6 +649,13 @@ export function LiveChart({
       if (!series || !rsiSeries) return;
 
       if (fit) {
+        analysisControllerRef.current?.abort();
+        analysisControllerRef.current = null;
+        analysisSequenceRef.current += 1;
+        setAnalyzing(false);
+        setTickStatus("connecting");
+        setLastTickAt(null);
+        lastTickAtRef.current = null;
         setLoading(true);
         setError(null);
         setAnalysis(null);

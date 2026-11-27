@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowRight,
@@ -96,6 +97,32 @@ function Brand() {
 
 function messageFrom(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+async function saveNativeSnapshot(dataUrl: string, filename: string): Promise<void> {
+  try {
+    const match = /^data:image\/png;base64,(.+)$/.exec(dataUrl);
+    if (!match) throw new Error("Invalid PNG snapshot data URL.");
+
+    const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+      import("@capacitor/filesystem"),
+      import("@capacitor/share"),
+    ]);
+    const safeBaseName = filename
+      .replace(/\.png$/i, "")
+      .replace(/[^a-zA-Z0-9_-]/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) || `tradevault-${Date.now()}`;
+    const { uri } = await Filesystem.writeFile({
+      path: `${safeBaseName}.png`,
+      data: match[1],
+      directory: Directory.Cache,
+    });
+
+    await Share.share({ title: "TradeVault", url: uri });
+  } catch (error) {
+    console.error("Could not save the TradeVault snapshot:", error);
+  }
 }
 
 export default function App() {
@@ -396,7 +423,11 @@ export default function App() {
           </div>
         </section>
 
-        <LiveChart initialPair="XAU/USD" />
+        <LiveChart
+          initialPair="XAU/USD"
+          online={online}
+          onSaveSnapshot={Capacitor.isNativePlatform() ? saveNativeSnapshot : undefined}
+        />
 
         <section className="rounded-2xl border border-border bg-card p-4 shadow-card sm:p-5">
           <div className="mb-4 flex items-center gap-2 px-1">

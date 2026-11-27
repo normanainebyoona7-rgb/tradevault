@@ -17,6 +17,56 @@ export interface Candle {
   is_green: boolean;
 }
 
+export type CandleSource = "dukascopy" | "yahoo";
+
+export interface CandleDataset {
+  candles: Candle[];
+  source: CandleSource;
+  fetchedAt: number;
+}
+
+export const TIMEFRAME_SECONDS: Record<string, number> = {
+  "1m": 60,
+  "5m": 300,
+  "15m": 900,
+  "30m": 1800,
+  "1H": 3600,
+  "4H": 14400,
+  "1D": 86400,
+};
+
+export function getClosedCandles(
+  candles: Candle[],
+  timeframe: string,
+  now: number = Date.now()
+): Candle[] {
+  const seconds = TIMEFRAME_SECONDS[timeframe];
+  if (!seconds) return [];
+
+  const seen = new Set<number>();
+  return candles.filter((candle) => {
+    if (
+      !Number.isFinite(candle.time) ||
+      !Number.isFinite(candle.open) ||
+      !Number.isFinite(candle.high) ||
+      !Number.isFinite(candle.low) ||
+      !Number.isFinite(candle.close) ||
+      candle.time % seconds !== 0 ||
+      candle.open <= 0 ||
+      candle.close <= 0 ||
+      candle.low <= 0 ||
+      candle.high < Math.max(candle.open, candle.close) ||
+      candle.low > Math.min(candle.open, candle.close) ||
+      (candle.time + seconds) * 1000 > now ||
+      seen.has(candle.time)
+    ) {
+      return false;
+    }
+    seen.add(candle.time);
+    return true;
+  });
+}
+
 // ===== SYMBOL MAPPING =====
 
 // Dukascopy's free feed covers forex + crypto but NOT spot metals.
@@ -104,28 +154,26 @@ function timeframeToYahooConfig(timeframe: string): YahooTfConfig {
 function resampleCandles(candles: Candle[], factor: number): Candle[] {
   if (factor <= 1) return candles;
 
-  const result: Candle[] = [];
-  for (let i = 0; i < candles.length; i += factor) {
-    const group = candles.slice(i, i + factor);
-    if (group.length === 0) continue;
-
-    const open = group[0].open;
-    const close = group[group.length - 1].close;
-    const high = Math.max(...group.map((c) => c.high));
-    const low = Math.min(...group.map((c) => c.low));
-    const volume = group.reduce((s, c) => s + c.volume, 0);
-
-    result.push({
-      time: group[0].time,
-      open,
-      high,
-      low,
-      close,
-      volume,
-      is_green: close > open,
-    });
+  const bucketSeconds = 3600 * factor;
+  const groups = new Map<number, Candle[]>();
+  for (const candle of candles) {
+    const bucket = Math.floor(candle.time / bucketSeconds) * bucketSeconds;
+    const group = groups.get(bucket);
+    if (group) group.push(candle);
+    else groups.set(bucket, [candle]);
   }
-  return result;
+
+  return [...groups.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([time, group]) => ({
+      time,
+      open: group[0].open,
+      close: group[group.length - 1].close,
+      high: Math.max(...group.map((c) => c.high)),
+      low: Math.min(...group.map((c) => c.low)),
+      volume: group.reduce((sum, c) => sum + c.volume, 0),
+      is_green: group[group.length - 1].close >= group[0].open,
+    }));
 }
 
 // ===== DUKASCOPY FETCH =====
@@ -197,7 +245,7 @@ async function getCandlesFromDukascopy(
 
 // ===== YAHOO FETCH =====
 
-async function getCandlesFromYahoo(
+export async function getCandlesFromYahoo(
   pair: string,
   timeframe: string,
   count: number
@@ -284,27 +332,34 @@ async function getCandlesFromYahoo(
 
 // ===== MAIN FETCH =====
 
+export async function getCandlesWithSource(
+  pair: string,
+  timeframe: string,
+  count: number = 300
+): Promise<CandleDataset> {
+  if (!TIMEFRAME_SECONDS[timeframe]) {
+    throw new Error("Unsupported timeframe");
+  }
+
+  if (!isYahooOnly(pair)) {
+    const duka = await getCandlesFromDukascopy(pair, timeframe, count);
+    if (duka.length > 0) {
+      return { candles: duka, source: "dukascopy", fetchedAt: Date.now() };
+    }
+    console.log(`[candles] ${pair} Dukascopy empty → Yahoo fallback`);
+  }
+
+  const yahoo = await getCandlesFromYahoo(pair, timeframe, count);
+  return { candles: yahoo, source: "yahoo", fetchedAt: Date.now() };
+}
+
 export async function getCandles(
   pair: string,
   timeframe: string,
   count: number = 300
 ): Promise<Candle[]> {
-  // Metals → Yahoo (Dukascopy free tier doesn't cover them)
-  if (isYahooOnly(pair)) {
-    console.log(`[candles] ${pair} → Yahoo (metal)`);
-    return getCandlesFromYahoo(pair, timeframe, count);
-  }
-
-  // Try Dukascopy first
-  const duka = await getCandlesFromDukascopy(pair, timeframe, count);
-  if (duka.length > 0) {
-    return duka;
-  }
-
-  // Fall back to Yahoo
-  console.log(`[candles] ${pair} Dukascopy empty → Yahoo fallback`);
-  const yahoo = await getCandlesFromYahoo(pair, timeframe, count);
-  return yahoo;
+  const dataset = await getCandlesWithSource(pair, timeframe, count);
+  return dataset.candles;
 }
 
 // ===== HELPER: latest price only =====

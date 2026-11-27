@@ -16,7 +16,11 @@
 
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
-import { getCandles, type Candle } from "@/lib/data/candles";
+import {
+  TIMEFRAME_SECONDS,
+  getCandlesWithSource,
+  getClosedCandles,
+} from "@/lib/data/candles";
 import { computeOverlays } from "@/lib/overlays";
 import { buildSignal } from "@/lib/signal";
 import { getVerifiedPrice } from "@/lib/analysis";
@@ -38,43 +42,25 @@ import { sendTelegramSignal } from "@/lib/telegram";
 
 const TIMEFRAMES = new Set(["1m", "5m", "15m", "30m", "1H", "4H", "1D"]);
 
-function parseChartCandles(value: unknown): Candle[] | null {
-  if (!Array.isArray(value) || value.length < 50 || value.length > 400) {
-    return null;
-  }
-
-  const candles: Candle[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") return null;
-    const { time, open, high, low, close, volume } = item as Record<string, unknown>;
-    if (![time, open, high, low, close].every(Number.isFinite)) return null;
-    if (Number(open) <= 0 || Number(close) <= 0 || Number(low) <= 0) return null;
-    if (Number(high) < Math.max(Number(open), Number(close))) return null;
-    if (Number(low) > Math.min(Number(open), Number(close))) return null;
-    candles.push({
-      time: Number(time),
-      open: Number(open),
-      high: Number(high),
-      low: Number(low),
-      close: Number(close),
-      volume: Number.isFinite(volume) ? Number(volume) : 0,
-      is_green: Number(close) >= Number(open),
-    });
-  }
-
-  for (let i = 1; i < candles.length; i++) {
-    if (candles[i].time <= candles[i - 1].time) return null;
-  }
-  return candles;
+function toSmcCandles(candles: ReturnType<typeof getClosedCandles>): SMCCandle[] {
+  return candles.map((candle) => ({
+    open: candle.open,
+    high: candle.high,
+    low: candle.low,
+    close: candle.close,
+    is_green: candle.is_green,
+  }));
 }
 
 function buildSmcPayload(
   pair: string,
   candles: SMCCandle[],
-  overlays: Overlays
+  overlays: Overlays,
+  mtf5: SMCCandle[] | null = null,
+  mtf15: SMCCandle[] | null = null
 ) {
   const smcSignal: SMCSignal | null =
-    candles.length >= 50 ? buildSMCSignal(pair, candles) : null;
+    candles.length >= 50 ? buildSMCSignal(pair, candles, mtf5, mtf15) : null;
 
   return {
     direction: smcSignal?.direction ?? "neutral",
@@ -198,32 +184,71 @@ export async function POST(request: Request) {
       );
     }
 
-    const candles =
-      parseChartCandles(body.candles) ??
-      (await getCandles(pair, timeframe, 300));
+    const primaryPromise = getCandlesWithSource(pair, timeframe, 340);
+    const mtf5Promise =
+      timeframe === "5m"
+        ? primaryPromise
+        : getCandlesWithSource(pair, "5m", 140);
+    const mtf15Promise =
+      timeframe === "15m"
+        ? primaryPromise
+        : getCandlesWithSource(pair, "15m", 140);
 
-    if (candles.length === 0) {
+    const [dataset, mtf5Dataset, mtf15Dataset] = await Promise.all([
+      primaryPromise,
+      mtf5Promise,
+      mtf15Promise,
+    ]);
+    const candles = getClosedCandles(dataset.candles, timeframe).slice(-300);
+    const mtf5Candles = getClosedCandles(mtf5Dataset.candles, "5m").slice(-120);
+    const mtf15Candles = getClosedCandles(mtf15Dataset.candles, "15m").slice(-120);
+
+    if (candles.length < 50) {
       return NextResponse.json(
         {
-          error: "No market data",
-          message: `Could not fetch candles for ${pair} ${timeframe}.`,
+          error: "Insufficient market data",
+          message: `Not enough closed candles for ${pair} ${timeframe}.`,
         },
-        { status: 400 }
+        { status: 409 }
       );
     }
 
-    const currentPrice = candles[candles.length - 1].close;
-    const verified = await getVerifiedPrice(pair, currentPrice);
+    const latest = candles[candles.length - 1];
+    const candleAgeMs =
+      Date.now() - (latest.time + TIMEFRAME_SECONDS[timeframe]) * 1000;
+    const staleAfterMs =
+      timeframe === "1D"
+        ? 3 * 86400_000
+        : Math.max(TIMEFRAME_SECONDS[timeframe] * 3000, 15 * 60_000);
+    if (candleAgeMs > staleAfterMs) {
+      return NextResponse.json(
+        {
+          error: "Market data is stale",
+          message: `The latest closed ${timeframe} candle is ${Math.round(candleAgeMs / 60000)} minutes old. Analysis is paused until fresh market data is available.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    const currentPrice = latest.close;
+    const verified = await getVerifiedPrice(pair, {
+      price: currentPrice,
+      source: dataset.source,
+      timeframe,
+      time: latest.time,
+    });
     const overlays = computeOverlays(pair, candles);
-    const signal = buildSignal(pair, timeframe, candles, overlays, verified);
-    const smcCandles: SMCCandle[] = candles.map((c) => ({
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-      is_green: c.is_green,
-    }));
-    const smc = buildSmcPayload(pair, smcCandles, overlays);
+    const smc = buildSmcPayload(
+      pair,
+      toSmcCandles(candles),
+      overlays,
+      toSmcCandles(mtf5Candles),
+      toSmcCandles(mtf15Candles)
+    );
+    const signal = buildSignal(pair, timeframe, candles, overlays, verified, {
+      direction: smc.direction,
+      score: smc.score,
+    });
     const structureLine = overlays.structure.lastEvent
       ? `${overlays.structure.lastEvent.type} ${overlays.structure.lastEvent.direction}`
       : `structure ${overlays.structure.trend}`;
@@ -231,7 +256,7 @@ export async function POST(request: Request) {
       ? `${overlays.premiumDiscount.zone} (${(overlays.premiumDiscount.position * 100).toFixed(0)}% of range)`
       : "range unknown";
     const priceCheck = verified.ok
-      ? `Verified across sources (${verified.diffPct.toFixed(3)}% difference)`
+      ? `Verified: ${verified.primarySource} vs ${verified.comparisonSource} (${verified.diffPct.toFixed(3)}% difference)`
       : verified.reason || "Price could not be cross-validated";
 
     // ---- NEUTRAL: no valid trade ----
@@ -287,8 +312,8 @@ Price check: ${priceCheck}`;
               confluenceBreakdown: signal.confluences,
               priceVerification: signal.priceVerification,
               dataSource: verified.ok
-                ? "cross-source verified"
-                : "live chart data (unverified)",
+                ? `server ${dataset.source} candles + independent price verification`
+                : `server ${dataset.source} candles (unverified)`,
             },
             direction: "NEUTRAL",
           },
@@ -298,44 +323,13 @@ Price check: ${priceCheck}`;
     }
 
     const isLong = signal.direction === "long";
-    const quote = pair.split("/")[1] ?? "";
-    const pipValuePerLot = pair.includes("XAU")
-      ? 10
-      : pair.includes("XAG")
-        ? 50
-        : pair.includes("BTC")
-          ? 1
-          : pair.includes("ETH")
-            ? 1
-            : quote === "JPY"
-              ? 9.5
-              : 10;
-
-    const accountSize = 10000;
-    const riskPercent = 1.0;
-    const riskDollars = (accountSize * riskPercent) / 100;
-    const lots =
-      signal.riskPips > 0
-        ? Number((riskDollars / (signal.riskPips * pipValuePerLot)).toFixed(3))
-        : 0;
-
-    const positionSizing = {
-      accountSize,
-      riskPercent,
-      riskDollars: Number(riskDollars.toFixed(2)),
-      stopDistancePips: signal.riskPips,
-      pipValuePerLot,
-      lots,
-    };
-
-    const swingStart =
-      signal.zone?.type === "demand"
-        ? signal.zone.bottom
-        : signal.zone?.top ?? currentPrice;
-    const swingEnd =
-      signal.zone?.type === "demand"
-        ? signal.zone.top
-        : signal.zone?.bottom ?? currentPrice;
+    const zoneHeight = Math.abs(signal.zone!.top - signal.zone!.bottom);
+    const swingStart = isLong
+      ? overlays.structure.lastSwingLow?.price ?? signal.zone!.bottom
+      : overlays.structure.lastSwingHigh?.price ?? signal.zone!.top;
+    const swingEnd = isLong
+      ? overlays.structure.lastSwingHigh?.price ?? signal.zone!.top
+      : overlays.structure.lastSwingLow?.price ?? signal.zone!.bottom;
     const swingRange = Math.abs(swingEnd - swingStart);
     const fibDirection = isLong ? 1 : -1;
 
@@ -361,13 +355,15 @@ Price check: ${priceCheck}`;
 
     const tradeManagement: string[] = [];
     if (isLong) {
+      const breakEvenTrigger = signal.zone!.top + zoneHeight * 0.5;
       tradeManagement.push(
-        `Move SL to BE once price closes above ${signal.entry.toFixed(5)}`
+        `Move SL to break-even at ${formatPrice(pair, signal.entry)} after a closed candle above ${formatPrice(pair, breakEvenTrigger)}`
       );
       tradeManagement.push("Trail SL under new bullish large range candles");
     } else {
+      const breakEvenTrigger = signal.zone!.bottom - zoneHeight * 0.5;
       tradeManagement.push(
-        `Move SL to BE once price closes below ${signal.entry.toFixed(5)}`
+        `Move SL to break-even at ${formatPrice(pair, signal.entry)} after a closed candle below ${formatPrice(pair, breakEvenTrigger)}`
       );
       tradeManagement.push("Trail SL above new bearish large range candles");
     }
@@ -393,7 +389,7 @@ Price check: ${priceCheck}`;
 
 Zone: ${signal.zone!.type.toUpperCase()} ${formatPrice(pair, signal.zone!.bottom)} - ${formatPrice(pair, signal.zone!.top)}
 Entry: ${formatPrice(pair, signal.entry)}
-Stop loss (2x ATR): ${formatPrice(pair, signal.stopLoss)}
+Stop loss (structure / ATR): ${formatPrice(pair, signal.stopLoss)}
 TP1 (1.0R): ${formatPrice(pair, signal.takeProfit1)}
 TP2 (1.5R): ${formatPrice(pair, signal.takeProfit2)}
 TP3 (3.0R): ${formatPrice(pair, signal.takeProfit3)}
@@ -437,11 +433,13 @@ Price check: ${priceCheck}`;
         confidence: signal.confidence,
         confidenceScore: signal.score,
         signalScore: signal.score,
+        setupId: signal.setupId,
+        candleTime: latest.time,
 
         timeframe,
         dataSource: verified.ok
-          ? "live candles + independent price verification"
-          : "live candles (unverified)",
+          ? `server ${dataset.source} candles + independent price verification`
+          : `server ${dataset.source} candles (unverified)`,
         status: "signal",
 
         zone: signal.zone,
@@ -451,7 +449,10 @@ Price check: ${priceCheck}`;
         confluenceBreakdown: signal.confluences,
 
         fibonacci,
-        positionSizing,
+        positionSizing: {
+          lots: null,
+          note: "Lot size is calculated from the connected broker account and configured risk at execution.",
+        },
         session: signal.confluences.session,
         sessionWeight,
         tradeManagement,
@@ -466,17 +467,7 @@ Price check: ${priceCheck}`;
     let duplicate = false;
     if (body.autoExecute === true && isAdminEmail((session as any)?.email)) {
       try {
-        const lastCandleTime = candles[candles.length - 1].time;
-        const dedupeKey = [
-          "ai",
-          pair,
-          timeframe,
-          lastCandleTime,
-          signal.direction,
-          signal.entry,
-          signal.stopLoss,
-          signal.takeProfit1,
-        ].join(":");
+        const dedupeKey = signal.setupId.slice(0, 180);
         const expiresAt = new Date(
           Date.now() + (signal.orderType === "market" ? 5 : 30) * 60 * 1000
         );
@@ -555,7 +546,10 @@ Price check: ${priceCheck}`;
   } catch (error: any) {
     console.error("Analyze-chart error:", error);
     return NextResponse.json(
-      { error: "Analysis failed", message: error?.message || String(error) },
+      {
+        error: "Analysis failed",
+        message: "The analysis service could not complete this request. Please try again.",
+      },
       { status: 500 },
     );
   }

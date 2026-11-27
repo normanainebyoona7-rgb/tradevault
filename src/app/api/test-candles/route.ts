@@ -1,34 +1,42 @@
-// src/app/api/test-candles/route.ts
 import { NextResponse } from "next/server";
-import { getCandles } from "@/lib/data/candles";
+import { getSession } from "@/lib/auth/session";
+import { TIMEFRAME_SECONDS, getCandlesWithSource } from "@/lib/data/candles";
 import { computeOverlays } from "@/lib/overlays";
+import { PAIRS } from "@/lib/pairs";
+
+const TIMEFRAMES = new Set(Object.keys(TIMEFRAME_SECONDS));
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const pair = searchParams.get("pair") || "EUR/USD";
-  const tf = searchParams.get("tf") || "15m";
-  const includeOverlays = searchParams.get("overlays") === "1";
-
-  const candles = await getCandles(pair, tf, 300);
-
-  if (!includeOverlays) {
-    return NextResponse.json({
-      pair,
-      timeframe: tf,
-      count: candles.length,
-      candles,
-    });
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Compute overlays only if we have candles
+  const { searchParams } = new URL(request.url);
+  const pair = searchParams.get("pair") || "EUR/USD";
+  const timeframe = searchParams.get("tf") || "15m";
+  const includeOverlays = searchParams.get("overlays") === "1";
+
+  if (!PAIRS.includes(pair) || !TIMEFRAMES.has(timeframe)) {
+    return NextResponse.json(
+      { error: "Unsupported market", message: "Choose a supported pair and timeframe." },
+      { status: 400 }
+    );
+  }
+
+  const dataset = await getCandlesWithSource(pair, timeframe, 300);
   const overlays =
-    candles.length > 0 ? computeOverlays(pair, candles) : null;
+    includeOverlays && dataset.candles.length > 0
+      ? computeOverlays(pair, dataset.candles)
+      : null;
 
   return NextResponse.json({
     pair,
-    timeframe: tf,
-    count: candles.length,
-    candles,
+    timeframe,
+    count: dataset.candles.length,
+    candles: dataset.candles,
     overlays,
+    source: dataset.source,
+    fetchedAt: dataset.fetchedAt,
   });
 }

@@ -32,6 +32,7 @@ export interface SignalZone {
   bottom: number;
   strength: number;
   distanceToPrice: number;
+  formedAt: number;
 }
 
 export interface SignalEntryCandle {
@@ -49,6 +50,9 @@ export interface SignalConfluences {
   vwapAligned: boolean;
   orderBlockNear: boolean;
   fvgNear: boolean;
+  structureAligned: boolean;
+  premiumDiscountAligned: boolean;
+  liquiditySweepAligned: boolean;
   session: string;
   sessionFavorable: boolean;
 }
@@ -73,10 +77,16 @@ export interface TradingSignal {
   confluences: SignalConfluences;
   confidence: Confidence;
   score: number;
+  setupId: string;
   notes: string[];
   priceVerification?: {
     chartPrice: number;
     yahooPrice: number | null;
+    dukascopyPrice: number | null;
+    swissquotePrice: number | null;
+    primarySource: string;
+    comparisonSource: string | null;
+    comparisonTime: number | null;
     diffPct: number;
     tolerance: number;
     verified: boolean;
@@ -216,7 +226,8 @@ export function buildSignal(
   timeframe: string,
   candles: Candle[],
   overlays: Overlays,
-  verifiedPrice?: VerifiedPrice
+  verifiedPrice?: VerifiedPrice,
+  smcBias?: { direction: "long" | "short" | "neutral"; score: number }
 ): TradingSignal {
   const pipSize = calcPipSize(pair);
   const currentPrice = candles[candles.length - 1].close;
@@ -231,6 +242,11 @@ export function buildSignal(
     ? {
         chartPrice: verifiedPrice.chartPrice,
         yahooPrice: verifiedPrice.yahooPrice,
+        dukascopyPrice: verifiedPrice.dukascopyPrice,
+        swissquotePrice: verifiedPrice.swissquotePrice,
+        primarySource: verifiedPrice.primarySource,
+        comparisonSource: verifiedPrice.comparisonSource,
+        comparisonTime: verifiedPrice.comparisonTime,
         diffPct: verifiedPrice.diffPct,
         tolerance: verifiedPrice.tolerance,
         verified: verifiedPrice.ok,
@@ -238,7 +254,7 @@ export function buildSignal(
     : undefined;
 
   const zoneCandles: ZoneCandle[] = candles.map((c) => ({
-    open: c.open, high: c.high, low: c.low, close: c.close, is_green: c.is_green,
+    open: c.open, high: c.high, low: c.low, close: c.close, is_green: c.is_green, time: c.time,
   }));
 
   const zones = detectZones(zoneCandles);
@@ -248,6 +264,7 @@ export function buildSignal(
     roundNumber: roundNumberNear,
     supertrendAligned: false, rsiAligned: false, smaAligned: false,
     vwapAligned: false, orderBlockNear: false, fvgNear: false,
+    structureAligned: false, premiumDiscountAligned: false, liquiditySweepAligned: false,
     session: sessionInfo.name, sessionFavorable: sessionInfo.favorable,
   };
 
@@ -282,12 +299,14 @@ export function buildSignal(
           bottom: zone.bottom,
           strength: 0,
           distanceToPrice: zone.distanceToPrice,
+          formedAt: zone.formedAt,
         }
       : null,
     entryCandle,
     confluences: neutralConfluences,
     confidence: "NEUTRAL",
     score: 0,
+    setupId: `neutral:${pair}:${timeframe}:${timestamp}`,
     notes: neutralNotes,
     priceVerification,
   });
@@ -334,21 +353,27 @@ export function buildSignal(
 
   const direction: "long" | "short" = activeZone.type === "demand" ? "long" : "short";
   const signalDirection = direction === "long" ? "bullish" : "bearish";
-  const entryCandle = detectEntrySignal(zoneCandles, signalDirection);
-
+  const entryCandle = detectEntrySignal(zoneCandles, signalDirection, activeZone, 3);
   const priceInsideZone = currentPrice >= activeZone.bottom && currentPrice <= activeZone.top;
+  const smcConflict =
+    smcBias != null &&
+    smcBias.direction !== "neutral" &&
+    smcBias.direction !== direction &&
+    smcBias.score >= 65;
 
-  // ---- INSIDE ZONE WITHOUT CONFIRMATION → NEUTRAL ----
-  if (priceInsideZone && entryCandle.type === "none") {
+  if (entryCandle.type === "none" || smcConflict) {
+    const reason = smcConflict
+      ? `SMC/ICT bias conflicts with this ${direction} setup (${smcBias!.score}/100).`
+      : entryCandle.reason;
     return makeNeutral(
       [
-        `Price is inside ${activeZone.type} zone ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}.`,
-        "No confirmation candle (LRC / Engulfing / Pin Bar).",
-        "Neutral — waiting for confirmation. No signal saved.",
+        `${priceInsideZone ? "Price is inside" : "Price is approaching"} ${activeZone.type} zone ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}.`,
+        reason,
+        "Neutral — waiting for a valid closed-bar confirmation. No signal saved.",
       ],
       activeZone,
       {
-        type: "none",
+        type: entryCandle.type === "large_range_candle" ? "large_range" : entryCandle.type,
         direction: entryCandle.direction,
         probability: entryCandle.probability,
         reason: entryCandle.reason,
@@ -361,7 +386,7 @@ export function buildSignal(
   let signalLabel: SignalLabel;
   let entryLevel: number;
 
-  if (priceInsideZone && entryCandle.type !== "none") {
+  if (priceInsideZone) {
     orderType = "market";
     signalLabel = direction === "long" ? "BUY" : "SELL";
     entryLevel = currentPrice;
@@ -396,7 +421,38 @@ export function buildSignal(
   }
 
   // ===== SL =====
-  const rawSL = direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
+  const atrStop =
+    direction === "long" ? entryLevel - slDistance : entryLevel + slDistance;
+  const swing =
+    direction === "long"
+      ? overlays.structure.lastSwingLow
+      : overlays.structure.lastSwingHigh;
+  const lastCandle = candles[candles.length - 1];
+  const structuralLevel =
+    direction === "long"
+      ? Math.min(
+          activeZone.bottom,
+          swing?.price ?? activeZone.bottom,
+          lastCandle.low
+        )
+      : Math.max(
+          activeZone.top,
+          swing?.price ?? activeZone.top,
+          lastCandle.high
+        );
+  const structuralStop =
+    direction === "long"
+      ? structuralLevel - atr * 0.25
+      : structuralLevel + atr * 0.25;
+  const structuralDistance = Math.abs(entryLevel - structuralStop);
+  const rawSL =
+    structuralDistance > 0 && structuralDistance <= slDistance * 1.5
+      ? direction === "long"
+        ? Math.min(structuralStop, entryLevel - atr * 0.75)
+        : Math.max(structuralStop, entryLevel + atr * 0.75)
+      : atrStop;
+  const stopBasis =
+    Math.abs(rawSL - atrStop) < 1e-10 ? "2.0 × ATR" : "structure + ATR buffer";
 
   // ===== TPs =====
   const tp = computeTakeProfits(direction, entryLevel, rawSL);
@@ -421,26 +477,49 @@ export function buildSignal(
     vwapAligned: checkVWAPAligned(overlays, currentPrice, direction),
     orderBlockNear: checkOrderBlockNear(overlays, currentPrice, direction),
     fvgNear: checkFVGNear(overlays, currentPrice, direction),
+    structureAligned:
+      overlays.structure.trend === (direction === "long" ? "bullish" : "bearish"),
+    premiumDiscountAligned:
+      direction === "long"
+        ? overlays.premiumDiscount?.zone === "discount"
+        : overlays.premiumDiscount?.zone === "premium",
+    liquiditySweepAligned:
+      overlays.liquiditySweeps.at(-1)?.reclaimed === true &&
+      overlays.liquiditySweeps.at(-1)?.side ===
+        (direction === "long" ? "sell_side" : "buy_side"),
     session: sessionInfo.name,
     sessionFavorable: sessionInfo.favorable,
   };
 
-  let score = entryCandle.probability || 50;
+  let score = entryCandle.probability;
   if (confluences.supertrendAligned) score += 5;
   if (confluences.rsiAligned) score += 5;
   if (confluences.smaAligned) score += 5;
   if (confluences.vwapAligned) score += 5;
   if (confluences.orderBlockNear) score += 5;
   if (confluences.fvgNear) score += 5;
+  if (confluences.structureAligned) score += 5;
+  if (confluences.premiumDiscountAligned) score += 5;
+  if (confluences.liquiditySweepAligned) score += 5;
   if (confluences.roundNumber) score += 5;
   if (confluences.sessionFavorable) score += 10;
   score = Math.min(score, 100);
 
   const confidence: Confidence = score >= 75 ? "HIGH" : score >= 55 ? "MEDIUM" : "LOW";
+  const setupId = [
+    "ai",
+    pair,
+    timeframe,
+    direction,
+    activeZone.type,
+    activeZone.formedAt,
+    activeZone.bottom.toFixed(8),
+    activeZone.top.toFixed(8),
+  ].join(":");
 
   notes.push(`Zone: ${activeZone.type} ${activeZone.bottom.toFixed(5)} - ${activeZone.top.toFixed(5)}`);
   notes.push(`Current price: ${currentPrice.toFixed(5)}`);
-  notes.push(`ATR(14): ${atr.toFixed(5)} | SL distance: ${slDistance.toFixed(5)} (2.0 × ATR)`);
+  notes.push(`ATR(14): ${atr.toFixed(5)} | SL basis: ${stopBasis}`);
   notes.push(`Entry (${signalLabel}): ${entryLevel.toFixed(5)}`);
   notes.push(`SL: ${rawSL.toFixed(5)} — risk ${riskPips} pips`);
   notes.push(`TPs: 1.0× / 1.5× / 3.0× risk (R:R 1:1 / 1:1.5 / 1:3)`);
@@ -468,6 +547,7 @@ export function buildSignal(
       bottom: activeZone.bottom,
       strength: 0,
       distanceToPrice: activeZone.distanceToPrice,
+      formedAt: activeZone.formedAt,
     },
     entryCandle: {
       type: entryCandle.type === "large_range_candle" ? "large_range" : entryCandle.type,
@@ -475,7 +555,7 @@ export function buildSignal(
       probability: entryCandle.probability,
       reason: entryCandle.reason,
     },
-    confluences, confidence, score, notes,
+    confluences, confidence, score, setupId, notes,
     priceVerification,
   };
 }
