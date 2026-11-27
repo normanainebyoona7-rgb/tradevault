@@ -28,7 +28,8 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
-, "test-env.js"  ],
-  "exclude": ["node_modules"]
+    "**/*.mts",
+    "test-env.js"
+  ],
+  "exclude": ["node_modules", "mobile", "ai-backend"]
 }
