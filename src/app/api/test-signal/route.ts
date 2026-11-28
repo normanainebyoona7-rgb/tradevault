@@ -32,13 +32,33 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "No closed candles" }, { status: 409 });
   }
 
+  const marketCandle = dataset.candles.at(-1);
+  if (
+    !marketCandle ||
+    marketCandle.time < latest.time ||
+    !Number.isFinite(marketCandle.close) ||
+    marketCandle.close <= 0
+  ) {
+    return NextResponse.json(
+      { error: "Live price unavailable", message: "No usable latest server candle." },
+      { status: 409 }
+    );
+  }
+
+  const marketPrice = marketCandle.close;
   const verified = await getVerifiedPrice(pair, {
-    price: latest.close,
+    price: marketPrice,
     rawPrice: dataset.basisAdjustment?.rawPrice,
     source: dataset.source,
     timeframe,
-    time: latest.time,
+    time: marketCandle.time,
   });
   const overlays = computeOverlays(pair, candles);
-  return NextResponse.json(buildSignal(pair, timeframe, candles, overlays, verified));
+  const signalPrice =
+    verified.comparisonSource !== "yahoo" && verified.comparisonPrice != null
+      ? verified.comparisonPrice
+      : marketPrice;
+  return NextResponse.json(
+    buildSignal(pair, timeframe, candles, overlays, verified, undefined, signalPrice)
+  );
 }

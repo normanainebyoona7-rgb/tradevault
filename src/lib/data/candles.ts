@@ -302,6 +302,7 @@ export async function getCandlesFromYahoo(
     }
 
     const candles: Candle[] = [];
+    const bucketSeconds = TIMEFRAME_SECONDS[timeframe] ?? 604800;
     for (let i = 0; i < timestamps.length; i++) {
       const o = opens[i];
       const h = highs[i];
@@ -312,7 +313,7 @@ export async function getCandlesFromYahoo(
       const open = Number(o);
       const close = Number(c);
       candles.push({
-        time: Number(timestamps[i]),
+        time: Math.floor(Number(timestamps[i]) / bucketSeconds) * bucketSeconds,
         open,
         high: Number(h),
         low: Number(l),

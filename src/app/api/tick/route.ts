@@ -1,12 +1,13 @@
 // src/app/api/tick/route.ts
 // Lightweight real-time tick for the live chart.
-//   1. Swissquote public BBO feed  — true FX/metal bid/ask (no key), polled every few seconds
-//   2. Yahoo Finance 1m chart     — fallback, covers crypto and any instrument Swissquote lacks
+//   1. Swissquote public BBO feed  — true FX/metal bid/ask (no key)
+//   2. Kraken / Binance           — independent crypto quotes
+//   3. Yahoo Finance 1m chart     — final fallback
 // Returns price: null on failure. Never invents a price.
 
 import { NextResponse } from "next/server";
 import { toYahooSymbol } from "@/lib/data/candles";
-import { getSwissquoteQuote } from "@/lib/data/quotes";
+import { getLiveQuote, type QuoteSource } from "@/lib/data/quotes";
 import { PAIRS } from "@/lib/pairs";
 
 export interface TickResponse {
@@ -19,7 +20,7 @@ export interface TickResponse {
   close: number | null;
   bid: number | null;
   ask: number | null;
-  source: "swissquote" | "yahoo" | "none";
+  source: QuoteSource | "none";
   fetchedAt: number;
 }
 
@@ -116,14 +117,14 @@ export async function GET(request: Request) {
     fetchedAt: Date.now(),
   };
 
-  const sq = await getSwissquoteQuote(pair);
-  if (sq) {
-    payload.price = sq.price;
-    payload.bid = sq.bid;
-    payload.ask = sq.ask;
-    payload.time = sq.time;
-    payload.close = sq.price;
-    payload.source = "swissquote";
+  const quote = await getLiveQuote(pair);
+  if (quote) {
+    payload.price = quote.price;
+    payload.bid = quote.bid;
+    payload.ask = quote.ask;
+    payload.time = quote.time;
+    payload.close = quote.price;
+    payload.source = quote.source;
   } else {
     const yahoo = await fetchYahooTick(pair);
     if (yahoo?.price) {

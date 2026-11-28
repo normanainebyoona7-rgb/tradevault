@@ -80,6 +80,7 @@ export interface TradingSignal {
   candidateType?: "base-departure" | "order-block" | "fvg" | "market-structure";
   priceVerification?: {
     chartPrice: number;
+    comparisonPrice: number | null;
     yahooPrice: number | null;
     dukascopyPrice: number | null;
     swissquotePrice: number | null;
@@ -109,16 +110,21 @@ function toTradeableZones(
   baseZones: SupplyDemandZone[],
   orderBlocks: Overlays["orderBlocks"],
   fvgs: Overlays["fvgs"],
-  maxDistance: number
+  maxDistance: number,
+  currentPrice: number
 ): TradeableZone[] {
-  const currentPrice = candles[candles.length - 1].close;
   const zones: TradeableZone[] = baseZones.map((zone) => ({
     type: zone.type,
     top: zone.top,
     bottom: zone.bottom,
     index: zone.index,
     formedAt: zone.formedAt,
-    distanceToPrice: zone.distanceToPrice,
+    distanceToPrice:
+      currentPrice > zone.top
+        ? currentPrice - zone.top
+        : currentPrice < zone.bottom
+          ? zone.bottom - currentPrice
+          : 0,
     source: "base-departure",
   }));
 
@@ -190,11 +196,11 @@ function buildStructureZone(
   overlays: Overlays,
   direction: "long" | "short",
   atr: number,
-  pipSize: number
+  pipSize: number,
+  currentPrice: number
 ): TradeableZone | null {
   if (candles.length === 0) return null;
 
-  const currentPrice = candles[candles.length - 1].close;
   const levels: { price: number; index: number }[] = [];
 
   for (const liquidity of overlays.liquidityZones) {
@@ -416,10 +422,16 @@ export function buildSignal(
   candles: Candle[],
   overlays: Overlays,
   verifiedPrice?: VerifiedPrice,
-  smcBias?: { direction: "long" | "short" | "neutral"; score: number }
+  smcBias?: { direction: "long" | "short" | "neutral"; score: number },
+  currentPriceOverride?: number
 ): TradingSignal {
   const pipSize = calcPipSize(pair);
-  const currentPrice = candles[candles.length - 1].close;
+  const currentPrice =
+    currentPriceOverride != null &&
+    Number.isFinite(currentPriceOverride) &&
+    currentPriceOverride > 0
+      ? currentPriceOverride
+      : candles[candles.length - 1].close;
   const timestamp = candles[candles.length - 1].time;
 
   const notes: string[] = [];
@@ -430,6 +442,7 @@ export function buildSignal(
   const priceVerification = verifiedPrice
     ? {
         chartPrice: verifiedPrice.chartPrice,
+        comparisonPrice: verifiedPrice.comparisonPrice,
         yahooPrice: verifiedPrice.yahooPrice,
         dukascopyPrice: verifiedPrice.dukascopyPrice,
         swissquotePrice: verifiedPrice.swissquotePrice,
@@ -518,7 +531,8 @@ export function buildSignal(
     detectZones(zoneCandles),
     overlays.orderBlocks,
     overlays.fvgs,
-    maxZoneDistance
+    maxZoneDistance,
+    currentPrice
   );
 
   // ===== ZONE SELECTION =====
@@ -560,7 +574,7 @@ export function buildSignal(
   const activeZone =
     insideZone ??
     correctSideZone ??
-    buildStructureZone(candles, overlays, fallbackDirection, atr, pipSize);
+    buildStructureZone(candles, overlays, fallbackDirection, atr, pipSize, currentPrice);
 
   if (!activeZone) {
     return makeNeutral(

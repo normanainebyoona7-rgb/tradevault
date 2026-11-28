@@ -4,7 +4,12 @@ import {
   type Candle,
   type CandleSource,
 } from "@/lib/data/candles";
-import { getSwissquoteQuote, type LiveQuote } from "@/lib/data/quotes";
+import {
+  getBinanceQuote,
+  getKrakenQuote,
+  getSwissquoteQuote,
+  type LiveQuote,
+} from "@/lib/data/quotes";
 
 export interface ChartPriceSample {
   price: number;
@@ -14,15 +19,18 @@ export interface ChartPriceSample {
   rawPrice?: number;
 }
 
+export type ComparisonSource = "yahoo" | "swissquote" | "kraken" | "binance";
+
 export interface VerifiedPrice {
   ok: boolean;
   price: number;
   chartPrice: number;
+  comparisonPrice: number | null;
   yahooPrice: number | null;
   dukascopyPrice: number | null;
   swissquotePrice: number | null;
   primarySource: CandleSource;
-  comparisonSource: "yahoo" | "swissquote" | null;
+  comparisonSource: ComparisonSource | null;
   chartTime: number;
   comparisonTime: number | null;
   diffPct: number;
@@ -36,6 +44,30 @@ export function priceTolerancePct(pair: string): number {
   if (upper.includes("XAU") || upper.includes("XAG")) return 0.5;
   if (upper.startsWith("BTC") || upper.startsWith("ETH")) return 0.25;
   return 0.1;
+}
+
+export function liveQuoteTolerancePct(pair: string, timeframe: string): number {
+  const upper = pair.toUpperCase();
+  const timeframeDrift: Record<string, number> = {
+    "1m": 0.2,
+    "5m": 0.25,
+    "15m": 0.3,
+    "30m": 0.4,
+    "1H": 0.6,
+    "4H": 1.25,
+    "1D": 2.5,
+  };
+  const instrumentDrift =
+    upper.includes("XAU") || upper.includes("XAG")
+      ? 2.5
+      : upper.startsWith("BTC") || upper.startsWith("ETH")
+        ? 1
+        : 0;
+  return Math.max(
+    priceTolerancePct(pair),
+    timeframeDrift[timeframe] ?? 0.6,
+    instrumentDrift
+  );
 }
 
 function closestCandle(candles: Candle[], time: number): Candle | null {
@@ -83,6 +115,7 @@ function result(args: {
     ok: args.ok,
     price: args.sample.price,
     chartPrice: args.sample.price,
+    comparisonPrice: args.comparisonPrice,
     yahooPrice:
       args.yahooPrice ??
       (args.sample.source === "yahoo"
@@ -129,102 +162,117 @@ export async function getVerifiedPrice(
     });
   }
 
+  const interval = TIMEFRAME_SECONDS[sample.timeframe];
+  const failures: string[] = [];
   let yahooCandle: Candle | null = null;
+
   if (sample.source === "dukascopy") {
     const yahooCandles = await getCandlesFromYahoo(pair, sample.timeframe, 500);
     yahooCandle = closestCandle(yahooCandles, sample.time);
-    const interval = TIMEFRAME_SECONDS[sample.timeframe];
     if (!yahooCandle || Math.abs(yahooCandle.time - sample.time) > interval / 2) {
       yahooCandle = null;
     }
   }
 
-  let comparisonPrice: number | null = yahooCandle?.close ?? null;
-  let comparisonSource: VerifiedPrice["comparisonSource"] = yahooCandle ? "yahoo" : null;
-  let comparisonTime: number | null = yahooCandle?.time ?? null;
-  let swissquote: LiveQuote | null = null;
+  const finish = (args: {
+    ok: boolean;
+    comparisonPrice: number | null;
+    comparisonSource: ComparisonSource | null;
+    comparisonTime: number | null;
+    swissquotePrice?: number | null;
+    tolerance?: number;
+    reason?: string;
+  }): VerifiedPrice =>
+    result({
+      sample,
+      ...args,
+      tolerance: args.tolerance ?? tolerance,
+      yahooPrice:
+        sample.source === "yahoo"
+          ? sample.rawPrice ?? sample.price
+          : yahooCandle?.close ?? null,
+      dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
+    });
 
-  if (comparisonPrice == null) {
-    swissquote = await getSwissquoteQuote(pair);
-    if (swissquote) {
-      comparisonPrice = swissquote.price;
-      comparisonSource = "swissquote";
-      comparisonTime = swissquote.time;
+  if (yahooCandle) {
+    const candleAge = Date.now() - (yahooCandle.time + interval) * 1000;
+    const diffPct =
+      (Math.abs(sample.price - yahooCandle.close) / sample.price) * 100;
+
+    if (candleAge > maxQuoteAgeMs(sample.timeframe)) {
+      failures.push(
+        `Independent Yahoo candle is stale (${Math.round(candleAge / 60000)} minutes old)`
+      );
+    } else if (diffPct > tolerance) {
+      failures.push(
+        `Price mismatch: chart ${sample.price.toFixed(5)} vs yahoo ${yahooCandle.close.toFixed(5)} (${diffPct.toFixed(2)}% > ${tolerance}%)`
+      );
+    } else {
+      return finish({
+        ok: true,
+        comparisonPrice: yahooCandle.close,
+        comparisonSource: "yahoo",
+        comparisonTime: yahooCandle.time,
+      });
     }
   }
 
-  if (comparisonPrice == null) {
-    return result({
-      sample,
-      ok: false,
-      comparisonPrice: null,
-      comparisonSource: null,
-      comparisonTime: null,
-      tolerance,
-      yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : null,
-      dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
-      reason: "No independent price source is available — cannot cross-validate",
-    });
-  }
+  const upper = pair.toUpperCase();
+  const providers =
+    upper.startsWith("BTC") || upper.startsWith("ETH")
+      ? [getKrakenQuote, getBinanceQuote]
+      : [getSwissquoteQuote];
+  let quoteAttempts = 0;
 
-  if (comparisonSource === "swissquote" && comparisonTime != null) {
-    const quoteAge = Date.now() - comparisonTime * 1000;
-    const candleAge = Date.now() - (sample.time + TIMEFRAME_SECONDS[sample.timeframe]) * 1000;
-    if (quoteAge > maxQuoteAgeMs(sample.timeframe)) {
-      return result({
-        sample,
-        ok: false,
-        comparisonPrice,
-        comparisonSource,
-        comparisonTime,
-        tolerance,
-        yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : null,
-        dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
-        swissquotePrice: swissquote?.price ?? comparisonPrice,
-        reason: `Independent quote is stale (${Math.round(quoteAge / 60000)} minutes old)`,
-      });
+  for (const provider of providers) {
+    const quote: LiveQuote | null = await provider(pair);
+    if (!quote) continue;
+    quoteAttempts += 1;
+
+    const quoteAge = Date.now() - quote.time * 1000;
+    const candleAge = Date.now() - (sample.time + interval) * 1000;
+    const quoteTolerance = liveQuoteTolerancePct(pair, sample.timeframe);
+    const diffPct =
+      (Math.abs(sample.price - quote.price) / sample.price) * 100;
+
+    if (quoteAge > 30_000) {
+      failures.push(
+        `Independent ${quote.source} quote is stale (${Math.round(quoteAge / 60000)} minutes old)`
+      );
+      continue;
     }
     if (candleAge > maxQuoteAgeMs(sample.timeframe)) {
-      return result({
-        sample,
-        ok: false,
-        comparisonPrice,
-        comparisonSource,
-        comparisonTime,
-        tolerance,
-        yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : null,
-        dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
-        swissquotePrice: swissquote?.price ?? comparisonPrice,
-        reason: `Chart candle is too old for a live spot comparison (${Math.round(candleAge / 60000)} minutes old)`,
-      });
+      failures.push(
+        `Chart candle is too old for a live spot comparison (${Math.round(candleAge / 60000)} minutes old)`
+      );
+      continue;
     }
-  }
+    if (diffPct > quoteTolerance) {
+      failures.push(
+        `Price mismatch: chart ${sample.price.toFixed(5)} vs ${quote.source} ${quote.price.toFixed(5)} (${diffPct.toFixed(2)}% > ${quoteTolerance}%)`
+      );
+      continue;
+    }
 
-  const diffPct = (Math.abs(sample.price - comparisonPrice) / sample.price) * 100;
-  if (diffPct > tolerance) {
-    return result({
-      sample,
-      ok: false,
-      comparisonPrice,
-      comparisonSource,
-      comparisonTime,
-      tolerance,
-      yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : yahooCandle?.close ?? null,
-      dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
-      swissquotePrice: swissquote?.price ?? null,
-      reason: `Price mismatch: chart ${sample.price.toFixed(5)} vs ${comparisonSource} ${comparisonPrice.toFixed(5)} (${diffPct.toFixed(2)}% > ${tolerance}%)`,
+    return finish({
+      ok: true,
+      comparisonPrice: quote.price,
+      comparisonSource: quote.source,
+      comparisonTime: quote.time,
+      swissquotePrice: quote.source === "swissquote" ? quote.price : null,
+      tolerance: quoteTolerance,
     });
   }
 
-  return result({
-    sample,
-    ok: true,
-    comparisonPrice,
-    comparisonSource,
-    comparisonTime,
-    tolerance,
-    yahooPrice: sample.source === "yahoo" ? sample.rawPrice ?? sample.price : yahooCandle?.close ?? null,
-    dukascopyPrice: sample.source === "dukascopy" ? sample.price : null,
-    swissquotePrice: swissquote?.price ?? null,
+  return finish({
+    ok: false,
+    comparisonPrice: null,
+    comparisonSource: null,
+    comparisonTime: null,
+    reason:
+      failures[0] ??
+      (quoteAttempts === 0
+        ? "No independent price source is available — cannot cross-validate"
+        : "Independent price sources did not return a usable quote"),
   });
 }

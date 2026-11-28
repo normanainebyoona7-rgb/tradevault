@@ -229,13 +229,29 @@ export async function POST(request: Request) {
       );
     }
 
-    const currentPrice = latest.close;
+    const marketCandle = dataset.candles.at(-1);
+    if (
+      !marketCandle ||
+      marketCandle.time < latest.time ||
+      !Number.isFinite(marketCandle.close) ||
+      marketCandle.close <= 0
+    ) {
+      return NextResponse.json(
+        {
+          error: "Live price unavailable",
+          message: "The latest server candle does not contain a usable market price.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const marketPrice = marketCandle.close;
     const verified = await getVerifiedPrice(pair, {
-      price: currentPrice,
+      price: marketPrice,
       rawPrice: dataset.basisAdjustment?.rawPrice,
       source: dataset.source,
       timeframe,
-      time: latest.time,
+      time: marketCandle.time,
     });
     if (!verified.ok) {
       return NextResponse.json(
@@ -248,6 +264,10 @@ export async function POST(request: Request) {
         { status: 409 }
       );
     }
+    const currentPrice =
+      verified.comparisonSource !== "yahoo" && verified.comparisonPrice != null
+        ? verified.comparisonPrice
+        : marketPrice;
     const overlays = computeOverlays(pair, candles);
     const smc = buildSmcPayload(
       pair,
@@ -256,10 +276,15 @@ export async function POST(request: Request) {
       toSmcCandles(mtf5Candles),
       toSmcCandles(mtf15Candles)
     );
-    const signal = buildSignal(pair, timeframe, candles, overlays, verified, {
-      direction: smc.direction,
-      score: smc.score,
-    });
+    const signal = buildSignal(
+      pair,
+      timeframe,
+      candles,
+      overlays,
+      verified,
+      { direction: smc.direction, score: smc.score },
+      currentPrice
+    );
     const structureLine = overlays.structure.lastEvent
       ? `${overlays.structure.lastEvent.type} ${overlays.structure.lastEvent.direction}`
       : `structure ${overlays.structure.trend}`;
